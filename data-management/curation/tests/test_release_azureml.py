@@ -272,7 +272,7 @@ def test_given_tampered_object_when_register_then_verification_failed_without_cl
 ) -> None:
     # Arrange
     manifest_sha256 = _build_package(tmp_path)
-    (tmp_path / MEDIA_PATH).write_bytes(b"synthetic-mediX")
+    (tmp_path / MEDIA_PATH).write_bytes(b"synthetic-audio")
     factory = mocker.MagicMock()
 
     # Act

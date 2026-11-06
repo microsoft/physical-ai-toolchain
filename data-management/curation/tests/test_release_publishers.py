@@ -1414,3 +1414,320 @@ def test_given_non_blob_collection_when_constructed_then_unsupported_refused(
 
     with pytest.raises(ReleaseVerificationError, match="unsupported"):
         BlobSourceAssociations(destination, tmp_path, limits=RecordLimits())
+
+
+@pytest.mark.parametrize("chunk_size", [0, -1, 4 * 1024**2 + 1])
+def test_blob_store_rejects_invalid_stream_buffer_before_download(destination: _FakeContainer, chunk_size: int) -> None:
+    destination.forbid_downloads = True
+
+    with pytest.raises(ReleaseVerificationError, match="buffer size"):
+        list(BlobReleaseStore(destination, "release-a").iter_bytes(PATH, chunk_size=chunk_size))
+
+
+def test_blob_store_refuses_missing_payload(destination: _FakeContainer) -> None:
+    with pytest.raises(ReleaseVerificationError, match="missing"):
+        list(BlobReleaseStore(destination, "release-a").iter_bytes(PATH, chunk_size=2))
+
+
+def test_blob_store_refuses_pending_payload_before_download(destination: _FakeContainer) -> None:
+    destination.put("release-a/" + PATH, PAYLOAD)
+    destination.blobs["release-a/" + PATH].copy = _FakeCopy("pending", "copy-1")
+    destination.forbid_downloads = True
+
+    with pytest.raises(ReleaseVerificationError, match="not complete"):
+        list(BlobReleaseStore(destination, "release-a").iter_bytes(PATH, chunk_size=2))
+
+
+def test_blob_store_splits_service_chunks_and_enforces_control_bound(destination: _FakeContainer) -> None:
+    destination.put("release-a/" + PATH, b"abcdefg")
+    store = BlobReleaseStore(destination, "release-a")
+
+    assert list(store.iter_bytes(PATH, chunk_size=3)) == [b"abc", b"def", b"g"]
+    assert store.read_control_bytes(PATH, max_bytes=7) == b"abcdefg"
+    with pytest.raises(ReleaseVerificationError, match="control artifact exceeds"):
+        store.read_control_bytes(PATH, max_bytes=6)
+
+
+def test_blob_store_refuses_short_download(destination: _FakeContainer, monkeypatch: pytest.MonkeyPatch) -> None:
+    destination.put("release-a/" + PATH, b"abcdefg")
+    monkeypatch.setattr(_FakeBlobClient, "download_blob", lambda *_args, **_kwargs: _FakeDownload(b"abc"))
+
+    with pytest.raises(ReleaseVerificationError, match="changed during read"):
+        list(BlobReleaseStore(destination, "release-a").iter_bytes(PATH, chunk_size=2))
+
+
+def test_blob_store_refuses_listing_outside_attempt(
+    destination: _FakeContainer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination.put("outside/" + PATH, PAYLOAD)
+    foreign = destination.get_blob_client("outside/" + PATH).get_blob_properties()
+    monkeypatch.setattr(destination, "list_blobs", lambda **_kwargs: iter([foreign]))
+
+    with pytest.raises(ReleaseVerificationError, match="escaped"):
+        BlobReleaseStore(destination, "release-a").list_objects()
+
+
+@pytest.mark.parametrize("failure_after", [False, True])
+def test_blob_write_uncertain_outcome_is_inspected_before_retry(
+    destination: _FakeContainer, control: OwnedControl, failure_after: bool
+) -> None:
+    publisher = _publisher(destination, control)
+    publisher._claim_root()
+    destination.inject("upload_blob", _azure_errors().ServiceRequestError("response lost"), after=failure_after)
+
+    if failure_after:
+        publisher.write(PATH, (PAYLOAD,), length=len(PAYLOAD), sha256=sha256_hex(PAYLOAD))
+    else:
+        with pytest.raises(ReleaseVerificationError, match="write outcome unknown"):
+            publisher.write(PATH, (PAYLOAD,), length=len(PAYLOAD), sha256=sha256_hex(PAYLOAD))
+    publisher.write(PATH, (PAYLOAD,), length=len(PAYLOAD), sha256=sha256_hex(PAYLOAD))
+
+    assert destination.blobs[_name(publisher)].data == PAYLOAD
+    assert len([name for name in destination.blobs if name == _name(publisher)]) == 1
+
+
+@pytest.mark.parametrize("failure_after", [False, True])
+def test_blob_ownership_uncertain_outcome_never_overwrites_foreign_root(
+    destination: _FakeContainer, control: OwnedControl, failure_after: bool
+) -> None:
+    publisher = _publisher(destination, control)
+    destination.inject("upload_blob", _azure_errors().ServiceRequestError("response lost"), after=failure_after)
+
+    if failure_after:
+        publisher.write(PATH, (PAYLOAD,), length=len(PAYLOAD), sha256=sha256_hex(PAYLOAD))
+    else:
+        with pytest.raises(ReleaseVerificationError, match="ownership outcome is unresolved"):
+            publisher.write(PATH, (PAYLOAD,), length=len(PAYLOAD), sha256=sha256_hex(PAYLOAD))
+        assert destination.blobs == {}
+
+
+@pytest.mark.parametrize("damage", ["package", "effect", "length", "operation"])
+def test_blob_abort_requires_complete_journaled_owned_identity(
+    destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl, damage: str
+) -> None:
+    source, etag = _source(source_container)
+    destination.copy_outcome = "pending"
+    publisher = _publisher(destination, control)
+    progress = publisher.copy(source_container, source, etag)
+    metadata = destination.blobs[_name(publisher)].metadata
+    if damage == "package":
+        metadata["curation_package"] = "foreign"
+    else:
+        metadata.pop(
+            {"effect": "curation_effect_digest", "length": "curation_length", "operation": "curation_operation"}[damage]
+        )
+
+    with pytest.raises(ReleaseVerificationError, match=r"ownership conflict|incomplete"):
+        publisher.abort(PATH, progress.copy_id)
+
+    assert destination.blobs[_name(publisher)].copy.status == "pending"
+
+
+def test_blob_abort_requires_persisted_intent(
+    destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl
+) -> None:
+    source, etag = _source(source_container)
+    destination.copy_outcome = "pending"
+    publisher = _publisher(destination, control)
+    progress = publisher.copy(source_container, source, etag)
+    control.intents.clear()
+
+    with pytest.raises(ReleaseVerificationError, match="persisted intent"):
+        publisher.abort(PATH, progress.copy_id)
+
+    assert destination.blobs[_name(publisher)].copy.status == "pending"
+
+
+def test_blob_copy_completed_during_abort_is_safely_removed(
+    destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl
+) -> None:
+    source, etag = _source(source_container)
+    destination.copy_outcome = "pending"
+    publisher = _publisher(destination, control)
+    progress = publisher.copy(source_container, source, etag)
+    destination.complete_during_abort = True
+
+    publisher.abort(PATH, progress.copy_id)
+
+    assert _name(publisher) not in destination.blobs
+
+
+def test_blob_abort_service_failure_retains_owned_pending_copy(
+    destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl
+) -> None:
+    source, etag = _source(source_container)
+    destination.copy_outcome = "pending"
+    publisher = _publisher(destination, control)
+    progress = publisher.copy(source_container, source, etag)
+    error = _azure_errors().HttpResponseError("service unavailable")
+    error.status_code = 503
+    destination.inject("abort_copy", error, after=False)
+
+    with pytest.raises(type(error)) as raised:
+        publisher.abort(PATH, progress.copy_id)
+
+    assert raised.value is error
+    assert destination.blobs[_name(publisher)].copy.status == "pending"
+
+
+@pytest.mark.parametrize("operation", ["write", "copy", "abort"])
+def test_blob_marker_cannot_be_modified_as_payload(
+    destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl, operation: str
+) -> None:
+    publisher = _publisher(destination, control)
+    with pytest.raises(ReleaseVerificationError, match=r"marker|control"):
+        if operation == "write":
+            publisher.write(MARKER_PATH, (PAYLOAD,), length=len(PAYLOAD), sha256=sha256_hex(PAYLOAD))
+        elif operation == "copy":
+            source, etag = _source(source_container)
+            publisher.copy(source_container, source.model_copy(update={"path": MARKER_PATH}), etag)
+        else:
+            publisher.abort(MARKER_PATH, "copy-1")
+
+    assert destination.blobs == {}
+
+
+@pytest.mark.parametrize("damage", ["too_short", "too_long", "oversized_chunk"])
+def test_blob_write_enforces_declared_stream_bounds(
+    destination: _FakeContainer, control: OwnedControl, monkeypatch: pytest.MonkeyPatch, damage: str
+) -> None:
+    from physical_ai_curation.release import azure_publication
+
+    monkeypatch.setattr(azure_publication, "CHUNK_BYTES", 4)
+    publisher = _publisher(destination, control)
+    chunks = {"too_short": (b"a",), "too_long": (b"abc", b"def"), "oversized_chunk": (b"abcde",)}[damage]
+
+    with pytest.raises(ReleaseVerificationError, match=r"declared bound|declared identity"):
+        publisher.write(PATH, chunks, length=4, sha256=sha256_hex(b"abcd"))
+
+    assert _name(publisher) not in destination.blobs
+
+
+def test_blob_write_accepts_multiple_chunks_without_reordering(
+    destination: _FakeContainer, control: OwnedControl
+) -> None:
+    publisher = _publisher(destination, control)
+
+    publisher.write(PATH, (b"ab", b"", b"cd"), length=4, sha256=sha256_hex(b"abcd"))
+
+    assert destination.blobs[_name(publisher)].data == b"abcd"
+
+
+@pytest.mark.parametrize("operation", ["write", "copy"])
+def test_blob_unjournaled_existing_payload_cannot_be_adopted(
+    destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl, operation: str
+) -> None:
+    publisher = _publisher(destination, control)
+    publisher._claim_root()
+    destination.put(_name(publisher), PAYLOAD)
+    before = destination.blobs[_name(publisher)]
+    source, etag = _source(source_container)
+
+    with pytest.raises(ReleaseVerificationError, match="ownership conflict"):
+        if operation == "write":
+            publisher.write(PATH, (PAYLOAD,), length=len(PAYLOAD), sha256=sha256_hex(PAYLOAD))
+        else:
+            publisher.copy(source_container, source, etag)
+
+    assert destination.blobs[_name(publisher)] is before
+    assert destination.copy_count == 0
+
+
+@pytest.mark.parametrize("operation", ["copy", "abort", "reconcile"])
+def test_blob_marked_root_refuses_payload_mutations(
+    destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl, operation: str
+) -> None:
+    publisher = _publisher(destination, control)
+    publisher._claim_root()
+    destination.put(publisher.root + MARKER_PATH, b"marker")
+    source, etag = _source(source_container)
+
+    with pytest.raises(ReleaseVerificationError, match=r"immutable|published"):
+        if operation == "copy":
+            publisher.copy(source_container, source, etag)
+        elif operation == "abort":
+            publisher.abort(PATH, "copy-1")
+        else:
+            publisher.reconcile_copy(source, etag)
+
+    assert _name(publisher) not in destination.blobs
+
+
+def test_blob_abort_absent_payload_is_repeat_safe(destination: _FakeContainer, control: OwnedControl) -> None:
+    publisher = _publisher(destination, control)
+
+    publisher.abort(PATH, "copy-1")
+    publisher.abort(PATH, "copy-1")
+
+    assert destination.blobs == {}
+
+
+def test_blob_pending_copy_blocks_candidate_verification(
+    destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl
+) -> None:
+    source, etag = _source(source_container)
+    destination.copy_outcome = "pending"
+    publisher = _publisher(destination, control)
+    publisher.copy(source_container, source, etag)
+
+    with pytest.raises(ReleaseVerificationError, match="unsettled"):
+        publisher.prepare("a" * 64)
+
+    assert publisher.root + MARKER_PATH not in destination.blobs
+
+
+@pytest.mark.parametrize("damage", ["absent", "pending", "foreign"])
+def test_blob_residue_cleanup_never_deletes_unsettled_or_foreign_copy(
+    destination: _FakeContainer, control: OwnedControl, damage: str
+) -> None:
+    from physical_ai_curation.release.azure_publication import _ownership
+
+    publisher = _publisher(destination, control)
+    blob = destination.get_blob_client(_name(publisher))
+    if damage != "absent":
+        destination.put(
+            _name(publisher), PAYLOAD, _ownership(publisher.attempt, len(PAYLOAD), sha256_hex(PAYLOAD), "op")
+        )
+        destination.blobs[_name(publisher)].copy = _FakeCopy("pending" if damage == "pending" else "success", "copy-1")
+    if damage == "absent":
+        publisher._delete_owned_residue(blob, "copy-1", "op")
+    else:
+        with pytest.raises(ReleaseVerificationError, match=r"pending|ownership conflict"):
+            publisher._delete_owned_residue(blob, "copy-1", "foreign" if damage == "foreign" else "op")
+        assert _name(publisher) in destination.blobs
+
+
+@pytest.mark.parametrize("existing", [None, b"other"])
+def test_blob_marker_uncertainty_requires_matching_storage_observation(
+    destination: _FakeContainer, control: OwnedControl, existing: bytes | None
+) -> None:
+    publisher = _publisher(destination, control)
+    control.commit = True
+    if existing is not None:
+        destination.put(publisher.root + MARKER_PATH, existing)
+    destination.inject("upload_blob", _azure_errors().ServiceRequestError("response lost"), after=False)
+
+    with pytest.raises(ReleaseVerificationError, match="marker outcome unknown"):
+        publisher._publish_marker(b"expected", expected_manifest_sha256="a" * 64)
+
+    assert (publisher.root + MARKER_PATH in destination.blobs) == (existing is not None)
+
+
+def test_blob_marker_create_collision_replays_only_identical_marker(
+    destination: _FakeContainer, control: OwnedControl
+) -> None:
+    publisher = _publisher(destination, control)
+    control.commit = True
+    destination.put(publisher.root + MARKER_PATH, b"expected")
+
+    publisher._publish_marker(b"expected", expected_manifest_sha256="a" * 64)
+
+    assert destination.blobs[publisher.root + MARKER_PATH].data == b"expected"
+
+
+def test_blob_discovery_ignores_non_owner_control_residue(destination: _FakeContainer, control: OwnedControl) -> None:
+    publisher = _publisher(destination, control)
+    for path in ("note.txt", "nested/release-a.json", "oversized.json"):
+        destination.put(publisher.parent_prefix + "_releases/" + path, b"x" * (4097 if path == "oversized.json" else 1))
+
+    assert publisher.discover() == []

@@ -113,10 +113,13 @@ test('V02 and V18 preserve forward and reverse focus boundaries', async ({ page 
   await datasetButton.press('Enter')
   const filterInput = page.getByPlaceholder('Filter datasets')
   await expect(filterInput).toBeFocused()
+  const firstDataset = page
+    .getByRole('listbox', { name: 'Available datasets' })
+    .getByRole('option')
+    .first()
+  await expect(firstDataset).toBeVisible()
   await page.keyboard.press('Tab')
-  await expect(
-    page.getByRole('listbox', { name: 'Available datasets' }).getByRole('option').first(),
-  ).toBeFocused()
+  await expect(firstDataset).toBeFocused()
   await page.keyboard.press('Shift+Tab')
   await expect(filterInput).toBeFocused()
   await page.keyboard.press('Escape')

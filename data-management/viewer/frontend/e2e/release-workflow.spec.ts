@@ -784,11 +784,11 @@ test.describe('release dialog and job panel through the real API', () => {
     const before = await listOutput()
     const dialog = await startReleaseDraft(page, `e2e-ui-cancel-${Date.now()}`, [0])
     await previewAndAcknowledge(dialog)
-    await dialog.getByRole('button', { name: 'Submit release' }).click()
-    await expect(dialog).toBeHidden({ timeout: 30_000 })
+    const jobId = await submitDraft(page, dialog)
 
-    const cancel = page.getByRole('button', { name: 'Cancel job' })
-    await expect(cancel).toBeEnabled()
+    const panel = page.getByRole('region', { name: `Job ${jobId.slice(0, 8)}` })
+    const cancel = panel.getByRole('button', { name: 'Cancel job' })
+    await expect(cancel).toBeEnabled({ timeout: 30_000 })
     await cancel.click()
     await expect(cancel).toBeDisabled()
 

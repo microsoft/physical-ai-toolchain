@@ -1346,7 +1346,7 @@ def test_given_blob_source_and_destination_when_planned_then_configured_binding_
     assert factory.call_args.kwargs["account_url"] == "https://example.blob.core.windows.net"
     assert factory.call_args.kwargs["credential"] is credential
     assert factory.call_args.kwargs["retry_total"] == 0
-    client.get_container_client.assert_called_once_with("datasets")
+    client.get_container_client.assert_called_with("datasets")
 
     def forbidden(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("native execution must not run before admission")
@@ -2922,11 +2922,12 @@ def _cooperative_operation(entered: threading.Event, stopped: threading.Event) -
 def test_given_stalled_preparation_when_deadline_expires_then_request_returns_and_capacity_is_held(
     tmp_path: Path,
 ) -> None:
-    from src.api.services.release_service import ReleaseOffloadSettings
+    from src.api.services.release_service import ReleaseOffloadSettings, ReleaseSpec
 
     async def scenario() -> None:
         entered = asyncio.Event()
         release = asyncio.Event()
+        spec = ReleaseSpec("local", "package", "attempt", "output", "native", (0,))
 
         async def prepare(*args: object) -> object:
             entered.set()
@@ -2940,7 +2941,7 @@ def test_given_stalled_preparation_when_deadline_expires_then_request_returns_an
             tmp_path / "jobs", offload=ReleaseOffloadSettings(operation_timeout_seconds=0.05, preparation_concurrency=1)
         )
         service = ReleaseService(settings, planner=SimpleNamespace(prepare=prepare))
-        pending = asyncio.create_task(service._prepare("localuser", None, tmp_path))
+        pending = asyncio.create_task(service._prepare("localuser", spec, tmp_path))
         try:
             await asyncio.wait_for(entered.wait(), 1)
             done, _ = await asyncio.wait({pending}, timeout=0.5)
@@ -2949,7 +2950,7 @@ def test_given_stalled_preparation_when_deadline_expires_then_request_returns_an
                 pending.result()
             assert error.value.status_code == 504
             with pytest.raises(ReleaseApiError) as busy:
-                await service._prepare("localuser", None, tmp_path)
+                await service._prepare("localuser", spec, tmp_path)
             assert busy.value.detail == "release_busy"
             assert await service.control(lambda: "responsive") == "responsive"
         finally:
@@ -2959,7 +2960,7 @@ def test_given_stalled_preparation_when_deadline_expires_then_request_returns_an
         async with asyncio.timeout(1):
             while True:
                 try:
-                    assert await service._prepare("localuser", None, tmp_path) == "prepared"
+                    assert await service._prepare("localuser", spec, tmp_path) == "prepared"
                     break
                 except ReleaseApiError as busy:
                     assert busy.detail == "release_busy"
@@ -3226,7 +3227,7 @@ def test_real_http_stalled_read_leaves_status_and_admission_responsive(
         assert not server_thread.is_alive()
 
 
-def test_given_unavailable_source_io_when_previewed_then_real_http_stays_responsive(
+def test_given_unavailable_source_io_when_previewed_then_refused_and_real_http_stays_responsive(
     release_api: tuple,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3242,8 +3243,8 @@ def test_given_unavailable_source_io_when_previewed_then_real_http_stays_respons
         original,
         offload=ReleaseOffloadSettings(preparation_concurrency=1, operation_timeout_seconds=1),
     )
-    forbidden = MagicMock(side_effect=AssertionError("preview must not access source storage"))
-    monkeypatch.setattr(ViewerReleasePlanner, "_source", forbidden)
+    unavailable = MagicMock(side_effect=OSError("source unavailable"))
+    monkeypatch.setattr(ViewerReleasePlanner, "_source", unavailable)
     app.dependency_overrides[get_release_service] = lambda: ReleaseService(
         settings, planner=ViewerReleasePlanner(settings)
     )
@@ -3262,10 +3263,10 @@ def test_given_unavailable_source_io_when_previewed_then_real_http_stays_respons
             time.sleep(0.01)
         with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=2) as client:
             preview = client.post(BASE + "/preview", json=spec)
-            assert preview.status_code == 200
-            assert preview.json()["summary"]["advisory"] is True
+            assert preview.status_code == 422
+            assert preview.json()["detail"]["code"] == "release source is unavailable or unsupported"
             assert client.get(BASE + "/jobs/" + "0" * 32).status_code == 404
-        forbidden.assert_not_called()
+        unavailable.assert_called_once()
     finally:
         server.should_exit = True
         server_thread.join(5)

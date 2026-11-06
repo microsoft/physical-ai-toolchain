@@ -412,8 +412,11 @@ def test_given_identity_check_raises_when_child_opened_then_descriptor_closed(
     opened = mocker.spy(os, "open")
     with store_module.DescriptorHandle(partial(os.open, tmp_path, os.O_RDONLY | os.O_DIRECTORY)) as root:
         identity = mocker.patch.object(os, "fstat", side_effect=OSError("identity unavailable"))
-        with pytest.raises(OSError, match="identity unavailable"):
-            open_child(root.descriptor, "entry")
+        with (
+            pytest.raises(OSError, match="identity unavailable"),
+            store_module.DescriptorHandle(partial(open_child, root.descriptor, "entry")),
+        ):
+            pass
         mocker.stop(identity)
 
         with pytest.raises(OSError, match="Bad file descriptor"):
@@ -707,15 +710,21 @@ def test_given_stale_or_missing_source_when_independent_runner_restores_then_no_
     if not missing:
         (source.root / "meta/info.json").write_bytes(b"{}")
 
-    with pytest.raises(ReleaseInputError):
-        asyncio.run(
-            execute_job(
-                store, job_id, ConfiguredExecution(None if missing else source, reader, selection, context, destination)
-            )
-        )
+    configured = ConfiguredExecution(None if missing else source, reader, selection, context, destination)
+    if missing:
+        with pytest.raises(ReleaseInputError):
+            asyncio.run(execute_job(store, job_id, configured))
+    else:
+        assert asyncio.run(execute_job(store, job_id, configured)) is None
+        status = store.get(job_id, scope=_request(destination).scope, principal=OWNER)
+        assert status.state == "needs_input"
+        assert status.refusal_code == "source_binding_changed"
 
     assert not destination.exists()
-    assert store.storage.snapshot()[job_id]["diagnostics"]["validation.failed"]["count"] == 1
+    record = store.storage.snapshot()[job_id]
+    assert record["effects"] == {}
+    if missing:
+        assert record["diagnostics"]["validation.failed"]["count"] == 1
 
 
 @pytest.mark.parametrize("limit", [0, 101, True, 1.5])
@@ -1719,10 +1728,14 @@ def test_given_v21_source_when_validated_and_assembled_then_v3_native_metadata(t
 
 
 def test_given_v21_metadata_over_row_budget_when_read_then_refused_before_extra_decode() -> None:
+    from physical_ai_curation.release.inputs import SourceMetadataError
     from physical_ai_curation.release.source_format import v21_tasks_table
 
-    with pytest.raises(ReleaseInputError, match="row budget"):
+    with pytest.raises(SourceMetadataError) as raised:
         v21_tasks_table(lambda _path: b'{"task_index":0,"task":"pick"}\nnot-json\n', max_rows=1)
+    assert raised.value.code == "source_task_metadata_invalid"
+    assert isinstance(raised.value.__cause__, ReleaseInputError)
+    assert "row budget" in str(raised.value.__cause__)
 
 
 @pytest.mark.parametrize("content", [b"", b'{"task":"pick"}\n'])

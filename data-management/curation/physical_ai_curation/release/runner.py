@@ -383,7 +383,8 @@ async def run_queue(
         category = await _dispatch(store, resolve, job_id, worker_id)
         if category is None:
             outcome = {"job_id": job_id, "status": "settled"}
-            if store.storage.snapshot()[job_id]["state"] == "committed":
+            settled_record = store.storage.snapshot().get(job_id)
+            if settled_record is not None and settled_record["state"] == "committed":
                 registration_status = await _register_committed(registration, job_id)
                 if registration_status is not None:
                     outcome["registration"] = registration_status

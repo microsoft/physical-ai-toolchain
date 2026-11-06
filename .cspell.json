@@ -150,6 +150,7 @@
 		"nondecreasing",
 		"nonfinite",
 		"nonpositive",
+		"nonretryable",
 		"noremotefuncs",
 		"noserverdeployment",
 		"noout",
