@@ -55,6 +55,9 @@ dependencies = [
     # implementations (smolvla adds num2words to the shared transformers and
     # accelerate dependencies).
     "lerobot[dataset,pi,smolvla]==0.6.1",
+    # lerobot==0.6.1 caps Pillow below 13.0.0, which leaves the runtime exposed
+    # to GHSA-v9pv-5gc8-w2m6 and related advisories; use the patched release.
+    "Pillow==13.0.0",
     "torch==2.14.0",
     "torchvision==0.29.0",
     # Keep aligned with the root constraint used by CPU smoke resolution.
@@ -114,6 +117,9 @@ override-dependencies = [
     # diffusers: lerobot==0.6.1 pins a range that includes versions vulnerable
     # to GHSA-98h9-4798-4q5v; force the patched release.
     "diffusers==0.40.0",
+    # Pillow: lerobot==0.6.1 caps below 13.0.0; mirror the direct patched pin
+    # for GHSA-v9pv-5gc8-w2m6 and related advisories.
+    "Pillow==13.0.0",
     # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps below 12.30.1;
     # mirror the direct 12.30.1 pin.
     "azure-storage-blob==12.30.3",

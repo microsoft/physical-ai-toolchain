@@ -5,6 +5,17 @@ description = "Pinned LeRobot dependency lock for the SO-101 GPU-offload example
 requires-python = ">=3.12"
 dependencies = [
     "lerobot[core-scripts,feetech,training,evaluation,smolvla,pusht]==0.6.1",
+    # lerobot==0.6.1 caps Pillow below 13.0.0, which leaves the runtime exposed
+    # to GHSA-v9pv-5gc8-w2m6 and related advisories; use the patched release.
+    "Pillow==13.0.0",
+]
+
+[tool.uv]
+# `override-dependencies` forces uv to ignore upstream upper bounds. Each entry
+# repeats a direct pin above and must be removed when the upstream cap is lifted.
+override-dependencies = [
+    # lerobot==0.6.1 caps Pillow below 13.0.0; use the patched release.
+    "Pillow==13.0.0",
 ]
 
 [[tool.uv.index]]
