@@ -625,7 +625,6 @@ jobs:
           config: .syft.yaml
           output-file: dependencies.spdx.json
           artifact-name: ''
-          dependency-snapshot: true
           syft-version: v1.20.0
 
       - name: Generate dependency SBOM (CycloneDX)
@@ -636,7 +635,6 @@ jobs:
           config: .syft.yaml
           output-file: dependencies.cdx.json
           artifact-name: ''
-          dependency-snapshot: true
           upload-artifact: false
           syft-version: v1.20.0
 
