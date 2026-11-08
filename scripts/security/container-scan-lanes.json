@@ -34,6 +34,14 @@
     {
       "id": "gpu-offload-ur10e-client",
       "sources": [{ "path": "gpu-offload/examples/ur10e-single/Containerfile", "from": 1 }]
+    },
+    {
+      "id": "gpu-offload-so101",
+      "sources": [{ "path": "gpu-offload/examples/so101-real-hardware/docker/Dockerfile", "from": 0 }]
+    },
+    {
+      "id": "avops-odd",
+      "sources": [{ "path": "AVOPS/ODD/Dockerfile", "from": 0 }]
     }
   ]
 }

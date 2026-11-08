@@ -205,12 +205,12 @@ bash "$1" "$2"
     }
 
     Context 'checked-in source lanes' {
-        It 'resolves all eight stable categories and exact concrete refs' {
+        It 'resolves all ten stable categories and exact concrete refs' {
             $matrix = & bash $script:DiscoverScript --matrix | ConvertFrom-Json
             $LASTEXITCODE | Should -Be 0
-            @($matrix).Count | Should -Be 8
-            @($matrix.lane | Sort-Object -Unique).Count | Should -Be 8
-            @($matrix.category | Sort-Object -Unique).Count | Should -Be 8
+            @($matrix).Count | Should -Be 10
+            @($matrix.lane | Sort-Object -Unique).Count | Should -Be 10
+            @($matrix.category | Sort-Object -Unique).Count | Should -Be 10
             foreach ($row in $matrix) {
                 @($row.PSObject.Properties.Name | Sort-Object) | Should -Be @('category', 'image', 'lane')
                 $row.category | Should -Be "trivy-image-$($row.lane)"
