@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -12,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 from physical_ai_curation.release import blob_worker
-from physical_ai_curation.release.azure_publication import BlobPublisher, _ownership
+from physical_ai_curation.release.azure_publication import BlobPublisher, _operation_id, _ownership
 from physical_ai_curation.release.blob_worker import SupervisedBlobPublisher
 from physical_ai_curation.release.canonical import sha256_hex
 from physical_ai_curation.release.errors import ReleaseVerificationError
@@ -173,6 +174,104 @@ def test_generated_upload_replay_requires_matching_owned_output(
         publisher._verify_generated({"path": PATH, "length": len(PAYLOAD), "sha256": sha256_hex(PAYLOAD)})
 
 
+@pytest.mark.parametrize("observed", ["absent", "complete", "foreign"])
+def test_given_interrupted_generated_upload_when_recovered_then_only_owned_bytes_are_acknowledged(
+    publisher: SupervisedBlobPublisher, observed: str
+) -> None:
+    digest = sha256_hex(PAYLOAD)
+    publisher.jobs.recovery_effects.return_value = [{"path": PATH, "length": len(PAYLOAD), "digest": digest}]
+    if observed != "absent":
+        operation = _operation_id(ATTEMPT, PATH, len(PAYLOAD), digest)
+        publisher.container.put(publisher.parent_prefix + ownership_path(ATTEMPT.prefix), ownership_bytes(ATTEMPT))
+        publisher.container.put(
+            publisher.root + PATH,
+            PAYLOAD,
+            _ownership(ATTEMPT, len(PAYLOAD), digest, operation if observed == "complete" else "foreign"),
+        )
+
+    if observed == "foreign":
+        with pytest.raises(ReleaseVerificationError, match="ownership conflict"):
+            publisher.recover_outputs({})
+        publisher.jobs.reconcile_effect.assert_not_called()
+        publisher.jobs.record_io.assert_not_called()
+    else:
+        publisher.recover_outputs({})
+        publisher.jobs.reconcile_effect.assert_called_once_with(
+            publisher.job_id, publisher.fence, PATH, observed=observed, length=len(PAYLOAD), digest=digest
+        )
+        assert publisher.jobs.record_io.call_count == (1 if observed == "complete" else 0)
+
+
+def test_given_interrupted_copy_when_recovered_then_source_revision_is_retained(
+    publisher: SupervisedBlobPublisher, mocker: Any
+) -> None:
+    source = _source()
+    publisher.jobs.recovery_effects.return_value = [{"path": PATH}]
+    reconcile = mocker.patch.object(publisher, "reconcile_copy")
+
+    publisher.recover_outputs({PATH: (source, "source-etag")})
+
+    reconcile.assert_called_once_with(source, "source-etag")
+    publisher.jobs.reconcile_effect.assert_not_called()
+
+
+@pytest.mark.parametrize("replay", [True, False])
+def test_given_generated_upload_batch_when_flushed_then_only_fresh_items_are_dispatched(
+    publisher: SupervisedBlobPublisher, mocker: Any, replay: bool
+) -> None:
+    digest = sha256_hex(PAYLOAD)
+    publisher.jobs.begin_effects.return_value = [replay]
+    execute = mocker.patch.object(publisher, "_execute_batch")
+
+    def upload(*args: object) -> None:
+        publisher.container.put(publisher.parent_prefix + ownership_path(ATTEMPT.prefix), ownership_bytes(ATTEMPT))
+        publisher.container.put(
+            publisher.root + PATH,
+            PAYLOAD,
+            _ownership(ATTEMPT, len(PAYLOAD), digest, _operation_id(ATTEMPT, PATH, len(PAYLOAD), digest)),
+        )
+
+    execute.side_effect = upload
+    if replay:
+        upload()
+    with publisher.write_batch():
+        publisher.write(PATH, (PAYLOAD,), length=len(PAYLOAD), sha256=digest)
+
+    assert execute.call_count == (0 if replay else 1)
+    assert publisher.jobs.finish_effects.call_count == (0 if replay else 1)
+    assert publisher.container.blobs[publisher.root + PATH].data == PAYLOAD
+    assert publisher._generated is None
+
+
+def test_given_empty_generated_upload_batch_when_flushed_then_no_authority_or_dispatch(
+    publisher: SupervisedBlobPublisher, mocker: Any
+) -> None:
+    execute = mocker.patch.object(publisher, "_execute_batch")
+
+    with publisher.write_batch():
+        pass
+
+    execute.assert_not_called()
+    publisher.jobs.begin_effects.assert_not_called()
+
+
+def test_given_oversized_generated_batch_item_when_queued_then_pending_items_flush_first(
+    publisher: SupervisedBlobPublisher, monkeypatch: pytest.MonkeyPatch, mocker: Any
+) -> None:
+    monkeypatch.setattr(blob_worker, "_UPLOAD_BATCH_BYTES", 1)
+    flush = mocker.patch.object(publisher, "_flush_generated")
+    write = mocker.patch.object(publisher, "_write")
+    calls = mocker.Mock()
+    calls.attach_mock(flush, "flush")
+    calls.attach_mock(write, "write")
+
+    with publisher.write_batch():
+        publisher._generate(PATH, len(PAYLOAD), sha256_hex(PAYLOAD), {"mode": "inline", "content": "bounded"})
+
+    assert [call[0] for call in calls.mock_calls] == ["flush", "write", "flush"]
+    write.assert_called_once_with(PATH, len(PAYLOAD), sha256_hex(PAYLOAD), {"mode": "inline", "content": "bounded"})
+
+
 def test_nested_upload_batch_does_not_destroy_outer_batch(publisher: SupervisedBlobPublisher) -> None:
     publisher._flush_generated = Mock()
 
@@ -243,6 +342,80 @@ def test_generated_upload_protocol_is_bounded_before_dispatch(
         publisher._protocol(PATH, len(PAYLOAD), sha256_hex(PAYLOAD), {"mode": "inline", "content": "x" * 64})
 
     assert publisher.container.calls == []
+
+
+@pytest.mark.parametrize("mode", ["upload_batch", "blob_copy_batch"])
+def test_given_default_blob_client_factory_when_child_runs_then_clients_and_credentials_close(
+    publisher: SupervisedBlobPublisher, mocker: Any, mode: str
+) -> None:
+    registry = {}
+    destination = _FakeContainer("example", publisher.location.container, registry)
+    source_container = _FakeContainer("example", "source", registry)
+    source, source_etag = _copy_source(source_container)
+    digest = sha256_hex(PAYLOAD)
+    item = {
+        "path": PATH,
+        "length": len(PAYLOAD),
+        "sha256": digest,
+        "mode": "inline",
+        "content": base64.b64encode(PAYLOAD).decode("ascii"),
+    }
+    if mode == "blob_copy_batch":
+        digest = blob_worker.source_effect_digest(source)
+        item.update(
+            sha256=digest,
+            source=source.model_dump(mode="json"),
+            source_url=f"https://example.blob.core.windows.net/source/{PATH}",
+            source_etag=source_etag,
+        )
+    content = publisher._protocol(PATH, len(PAYLOAD), digest, {"mode": mode, "items": [item]})
+    credential = mocker.MagicMock()
+    credential.__enter__.return_value = credential
+    credential.get_token.return_value = SimpleNamespace(token="test-token")
+    clients = []
+
+    def container_client(account: str, name: str, **kwargs: Any) -> Any:
+        client = mocker.MagicMock()
+        client.__enter__.return_value = destination if name == publisher.location.container else source_container
+        clients.append(client)
+        return client
+
+    mocker.patch("azure.identity.DefaultAzureCredential", return_value=credential)
+    mocker.patch("azure.storage.blob.ContainerClient", side_effect=container_client)
+    mocker.patch.object(blob_worker, "ReleaseJobStore", return_value=publisher.jobs)
+    descriptor = os.memfd_create("test-owned-blob-child", os.MFD_CLOEXEC)
+    try:
+        os.write(descriptor, content)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        blob_worker._process(os.dup(descriptor))
+        assert os.fstat(descriptor).st_size == len(content)
+    finally:
+        os.close(descriptor)
+
+    assert destination.blobs[publisher.root + PATH].data == PAYLOAD
+    credential.__exit__.assert_called_once()
+    assert len(clients) == (2 if mode == "blob_copy_batch" else 1)
+    for client in clients:
+        client.__exit__.assert_called_once()
+    publisher.jobs.authorize_blob_writers.assert_called_once()
+
+
+@pytest.mark.parametrize("arguments", [["worker"], ["worker", "not-an-integer"], ["worker", "12"]])
+def test_given_blob_worker_arguments_when_dispatched_then_exit_status_and_descriptor_are_checked(
+    mocker: Any, arguments: list[str]
+) -> None:
+    mocker.patch.object(sys, "argv", arguments)
+    process = mocker.patch.object(blob_worker, "_process")
+
+    assert blob_worker.main() == (0 if arguments == ["worker", "12"] else 2 if len(arguments) != 2 else 1)
+    assert process.call_count == (1 if arguments == ["worker", "12"] else 0)
+
+
+def test_given_blob_worker_process_failure_when_dispatched_then_fixed_failure_status(mocker: Any) -> None:
+    mocker.patch.object(sys, "argv", ["worker", "12"])
+    mocker.patch.object(blob_worker, "_process", side_effect=OSError("fixed test failure"))
+
+    assert blob_worker.main() == 1
 
 
 @pytest.mark.parametrize("damage", ["version", "mode", "destination", "root", "blob_name", "bound"])

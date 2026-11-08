@@ -8,7 +8,7 @@ import os
 import sys
 import threading
 import time
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
@@ -42,6 +42,7 @@ from physical_ai_curation.release.jobs import (
     AuthorityError,
     CancellationError,
     JobRequest,
+    ReleaseJobControl,
     ReleaseJobStore,
     ReleaseRefusal,
     ReleaseRuntimeSettings,
@@ -53,7 +54,7 @@ from physical_ai_curation.release.media import (
     StorageEndpoint,
     SubsetEpisodeInput,
 )
-from physical_ai_curation.release.models import ProducerIdentity, VersionIdentity
+from physical_ai_curation.release.models import CHECKSUMS_PATH, RECEIPT_PATH, ProducerIdentity, VersionIdentity
 from physical_ai_curation.release.native_inputs import _validate_native_inputs
 from physical_ai_curation.release.native_worker import _source_spec, native_operation, restore_inputs
 from physical_ai_curation.release.publication import LocalPublisher, PublicationAttempt
@@ -62,12 +63,12 @@ from physical_ai_curation.release.runner import ConfiguredExecution, _LifecycleM
 from physical_ai_curation.release.runner import main as run_worker
 from physical_ai_curation.release.source_associations import LocalSourceAssociations, source_association_binding
 from physical_ai_curation.release.store import LocalReleaseStore
-from physical_ai_curation.release.verification import verify_published
+from physical_ai_curation.release.verification import verify_candidate, verify_published
 from physical_ai_curation.saved_input import SavedResource
 from pydantic import TypeAdapter
 from pytest_mock import MockerFixture
 from test_release_composition import _generation_case
-from test_release_contracts import _producer_dict
+from test_release_contracts import _manifest_for, _payload_files, _producer_dict, _write_package
 from test_release_inputs import SavedReader, _context, _selection
 from test_release_jobs import (
     ATTEMPT,
@@ -176,6 +177,78 @@ def test_given_typed_source_refusal_when_capture_runs_then_no_retry_or_destinati
     assert not destination.exists()
 
 
+@pytest.mark.parametrize(
+    "outcome", ["missing_capture", "capacity", "missing_source", "cancelled_capture", "capture_failed"]
+)
+def test_given_accepted_intent_when_capture_cannot_dispatch_then_no_publication_effect_is_created(
+    tmp_path: Path, outcome: str
+) -> None:
+    destination = tmp_path / "output"
+    store = _store(tmp_path / "jobs", OffsetClock())
+    intent = b'{"schema_version":"curated-release-intent/v1"}'
+    captured = b'{"schema_version":"curated-release-generation/v1"}'
+    job_id = store.accept(replace(_request(destination), frozen_request=intent)).job_id
+    execution = ConfiguredExecution(None, SavedReader(), _selection(), None, destination)
+
+    async def capture(checkpoint: object) -> tuple[bytes, bytes, int, ConfiguredExecution]:
+        if outcome == "cancelled_capture":
+            store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+        elif outcome == "capture_failed":
+            raise RuntimeError("private capture detail")
+        return captured, b"{}", 10**12 + 1 if outcome == "capacity" else 1024, execution
+
+    configured = replace(execution, capture=None if outcome == "missing_capture" else capture)
+    if outcome == "capacity":
+        assert asyncio.run(execute_job(store, job_id, configured)) is None
+        status = store.get(job_id, scope=SCOPE, principal=OWNER)
+        assert status.state == "needs_input"
+        assert status.refusal_code == "insufficient_capacity"
+    else:
+        error = (
+            CancellationError
+            if outcome == "cancelled_capture"
+            else RuntimeError
+            if outcome == "capture_failed"
+            else ReleaseInputError
+        )
+        with pytest.raises(error):
+            asyncio.run(execute_job(store, job_id, configured))
+
+    row = store.storage.snapshot()[job_id]
+    assert row["effects"] == {}
+    assert not destination.exists()
+    assert store.frozen_request(job_id) == (captured if outcome == "missing_source" else intent)
+    if outcome == "cancelled_capture":
+        assert row["cancel_requested"]
+        assert row["lease_expires"] is None
+    assert "private capture detail" not in repr(row)
+
+
+@pytest.mark.parametrize("foreign_output", [False, True])
+def test_given_cancelled_local_release_when_worker_resumes_then_only_settled_cleanup_is_purged(
+    tmp_path: Path, mocker: MockerFixture, foreign_output: bool
+) -> None:
+    destination = tmp_path / "output"
+    store = _store(tmp_path / "jobs", OffsetClock())
+    job_id = store.accept(_request(destination)).job_id
+    store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+    capture = mocker.AsyncMock()
+    configured = ConfiguredExecution(None, SavedReader(), _selection(), None, destination, capture)
+    target = destination / ATTEMPT.prefix / "retain.bin"
+    if foreign_output:
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"foreign output")
+        with pytest.raises(ReleaseInputError, match="cleanup remains unresolved"):
+            asyncio.run(execute_job(store, job_id, configured))
+        assert target.read_bytes() == b"foreign output"
+        status = store.get(job_id, scope=SCOPE, principal=OWNER)
+        assert status.cleanup_state == "retained"
+    else:
+        assert asyncio.run(execute_job(store, job_id, configured)) is None
+        assert store.storage.snapshot() == {}
+    capture.assert_not_awaited()
+
+
 def _inputs(request: object) -> GenerationInputs:
     return GenerationInputs(
         request=request,  # type: ignore[arg-type]
@@ -192,6 +265,128 @@ def _inputs(request: object) -> GenerationInputs:
         scratch_bytes=0,
         output_bytes=0,
     )
+
+
+@pytest.mark.parametrize("state", ["sealed", "committing", "committed"])
+def test_given_retained_publication_when_worker_restarts_then_same_manifest_is_independently_verified(
+    tmp_path: Path, state: str
+) -> None:
+    source_root = tmp_path / "source"
+    files = _payload_files()
+    digest = _write_package(source_root, files, _manifest_for(files))
+    clock = OffsetClock()
+    store = _store(tmp_path / "jobs", clock)
+    destination = tmp_path / "output"
+    job_id = store.accept(_request(destination, reserved=1024**2)).job_id
+    fence = store.claim(job_id, "original")
+    publisher = LocalPublisher(destination, ATTEMPT, ReleaseJobControl(store, job_id, fence))
+    for item in LocalReleaseStore(source_root).list_objects():
+        content = (source_root / item.path).read_bytes()
+        publisher.write(item.path, (content,), length=len(content), sha256=sha256_hex(content))
+    candidate = verify_candidate(publisher.store, digest)
+    store.seal(
+        job_id,
+        fence,
+        {
+            RECEIPT_PATH: (len(candidate.receipt_bytes), sha256_hex(candidate.receipt_bytes)),
+            CHECKSUMS_PATH: (len(candidate.checksums_bytes), sha256_hex(candidate.checksums_bytes)),
+        },
+    )
+    publisher.prepare(digest)
+    if state == "committing":
+        store._begin_publication(job_id, fence, ATTEMPT, digest)
+    elif state == "committed":
+        publisher.publish(digest)
+    source_root.rename(tmp_path / "unavailable-source")
+    clock.advance(31)
+    configured = ConfiguredExecution(None, SavedReader(), _selection(), None, destination)
+
+    result = asyncio.run(execute_job(store, job_id, configured))
+
+    assert result is not None and result.discoverable
+    assert result.identity.manifest_sha256 == digest
+    assert store.get(job_id, scope=SCOPE, principal=OWNER).state == "committed"
+    assert verify_published(LocalReleaseStore(publisher.root), digest) == result
+
+
+@pytest.mark.parametrize("outcome", ["absent", "cancelled", "foreign_destination"])
+def test_given_unexecutable_restored_job_when_worker_runs_then_no_capture_or_publication(
+    tmp_path: Path, mocker: MockerFixture, outcome: str
+) -> None:
+    store = _store(tmp_path / "jobs", OffsetClock())
+    destination = tmp_path / "output"
+    job_id = "a" * 32 if outcome == "absent" else store.accept(_request(destination)).job_id
+    if outcome == "cancelled":
+        fence = store.claim(job_id, "original")
+        store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+        store.confirm_stopped(job_id, fence)
+        store.settle_cancellation(job_id, fence, output_removed=True)
+    capture = mocker.AsyncMock()
+    configured = ConfiguredExecution(
+        None,
+        SavedReader(),
+        _selection(),
+        None,
+        tmp_path / "foreign" if outcome == "foreign_destination" else destination,
+        capture,
+    )
+
+    if outcome == "foreign_destination":
+        with pytest.raises(AuthorityError, match="configured destination"):
+            asyncio.run(execute_job(store, job_id, configured))
+    else:
+        assert asyncio.run(execute_job(store, job_id, configured)) is None
+    capture.assert_not_awaited()
+    assert not destination.exists()
+
+
+def test_given_native_provider_factory_when_stack_closes_then_credentials_and_clients_are_released(
+    mocker: MockerFixture,
+) -> None:
+    from contextlib import ExitStack
+
+    from physical_ai_curation.release.native_worker import _entra_container_factory
+
+    credential = mocker.MagicMock()
+    credential.__enter__.return_value = credential
+    client = mocker.MagicMock()
+    client.__enter__.return_value = client
+    mocker.patch("azure.identity.DefaultAzureCredential", return_value=credential)
+    constructor = mocker.patch("azure.storage.blob.ContainerClient", return_value=client)
+
+    with ExitStack() as stack:
+        factory = _entra_container_factory(stack, 10.0)
+        assert factory("https://example.blob.core.windows.net", "datasets") is client
+
+    constructor.assert_called_once_with(
+        "https://example.blob.core.windows.net",
+        "datasets",
+        credential=credential,
+        connection_timeout=10.0,
+        read_timeout=10.0,
+        retry_total=0,
+    )
+    client.__exit__.assert_called_once()
+    credential.__exit__.assert_called_once()
+
+
+@pytest.mark.parametrize("damage", ["version", "mode", "bound"])
+def test_given_invalid_native_child_request_when_read_then_rejected_before_source_or_ledger_access(
+    tmp_path: Path, mocker: MockerFixture, damage: str
+) -> None:
+    from physical_ai_curation.release import native_worker
+    from physical_ai_curation.release.jobs import CapacityError
+
+    request = tmp_path / "request.json"
+    request.write_bytes(json.dumps({"version": 2 if damage == "version" else 1, "mode": "unsupported"}).encode())
+    if damage == "bound":
+        mocker.patch.object(native_worker, "MAX_SPEC_BYTES", 1)
+    source = mocker.patch.object(native_worker, "LocalReleaseSource")
+
+    with pytest.raises(CapacityError if damage == "bound" else ReleaseInputError, match="protocol"):
+        native_worker._process(request)
+
+    source.assert_not_called()
 
 
 def test_given_source_drift_after_freeze_when_generation_then_refused_before_any_effect(tmp_path: Path) -> None:
@@ -1459,6 +1654,180 @@ def test_given_container_url_when_blob_location_then_container_and_https_account
     assert location.account_url.startswith("https://")
 
 
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "source_root",
+        "source_info",
+        "tasks",
+        "missing_descriptor",
+        "length",
+        "fps",
+        "removed_frames",
+        "table",
+        "windows",
+        "statistics",
+        "budget",
+        "camera_identity",
+    ],
+)
+def test_given_inconsistent_native_input_when_verified_then_controller_data_is_refused(
+    tmp_path: Path, damage: str
+) -> None:
+    source, _reader, _selection, _context, frozen, inputs, video = _native_case(tmp_path)
+    episode = frozen.content.selected_episode_ids[0]
+    if damage == "source_root":
+        inputs = replace(inputs, source_root=tmp_path / "foreign")
+    elif damage == "source_info":
+        inputs = replace(inputs, source_info={})
+    elif damage == "tasks":
+        inputs = replace(inputs, source_tasks=pa.table({"task_index": [0], "task": ["foreign"]}))
+    elif damage == "missing_descriptor":
+        inputs = replace(inputs, sources={})
+    elif damage in {"length", "fps", "removed_frames"}:
+        changes = {"length": {"length": 3}, "fps": {"fps": 20}, "removed_frames": {"removed_frames": frozenset({0})}}[
+            damage
+        ]
+        inputs = replace(inputs, sources={episode: replace(inputs.sources[episode], **changes)})
+    elif damage == "table":
+        inputs = replace(inputs, source_tables={})
+    elif damage == "windows":
+        inputs = replace(inputs, request=replace(inputs.request, windows=()))
+    elif damage == "statistics":
+        inputs = replace(inputs, camera_statistics={})
+    elif damage == "camera_identity":
+        frozen = replace(
+            frozen,
+            content=frozen.content.model_copy(
+                update={
+                    "source_objects": tuple(
+                        item for item in frozen.content.source_objects if not item.path.startswith("videos/")
+                    )
+                }
+            ),
+        )
+    before = (
+        (source.root / inputs.request.source_objects[-1].path).read_bytes() if inputs.request.source_objects else video
+    )
+
+    with pytest.raises(ReleaseInputError, match=r"condition-bound|memory budget|camera windows|camera statistics"):
+        _validate_native_inputs(source, frozen, inputs, 1 if damage == "budget" else 8 * 1024**2)
+
+    if inputs.request.source_objects:
+        assert (source.root / inputs.request.source_objects[-1].path).read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [pa.list_(pa.int32()), pa.large_list(pa.int32()), pa.list_(pa.int32(), 2), pa.struct([("nested", pa.int32())])],
+)
+def test_given_nested_arrow_table_when_identity_computed_then_chunks_and_metadata_do_not_change_hash(
+    dtype: pa.DataType,
+) -> None:
+    from physical_ai_curation.release.native_inputs import table_identity
+
+    values = [{"nested": 1}, {"nested": 2}] if pa.types.is_struct(dtype) else [[1, 2], [3, 4]]
+    table = pa.table({"value": pa.array(values, type=dtype)})
+    fragmented = pa.concat_tables([table.slice(0, 1), table.slice(1, 1)]).replace_schema_metadata(
+        {b"private": b"not an identity"}
+    )
+
+    assert table_identity(table) == table_identity(fragmented)
+    assert table_identity(table) != table_identity(table.slice(0, 1))
+
+
+@pytest.mark.parametrize("budget", [0, -1, True])
+def test_given_invalid_planning_metadata_budget_when_read_then_refused_before_source_access(
+    tmp_path: Path, budget: Any
+) -> None:
+    source = LocalReleaseSource(tmp_path, finalized=True)
+
+    with pytest.raises(ReleaseInputError, match="budget must be positive"):
+        coordinator_module._planning_metadata(source, (), budget, None)
+
+
+@pytest.mark.parametrize("damage", ["missing", "digest", "length", "not_object"])
+def test_given_invalid_planning_metadata_when_read_then_frozen_identity_is_enforced(
+    tmp_path: Path, damage: str
+) -> None:
+    from physical_ai_curation.release.models import SourceObject
+
+    root = tmp_path / "source"
+    (root / "meta").mkdir(parents=True)
+    content = b"[]" if damage == "not_object" else b"{}"
+    (root / "meta/info.json").write_bytes(content)
+    identity = SourceObject(
+        path="meta/info.json",
+        revision="r1",
+        length=1 if damage == "length" else len(content),
+        sha256="a" * 64 if damage == "digest" else sha256_hex(content),
+    )
+    source = LocalReleaseSource(root, finalized=True)
+
+    with pytest.raises(ReleaseInputError, match=r"metadata changed|metadata exceeds|info must be an object"):
+        coordinator_module._planning_metadata(source, () if damage == "missing" else (identity,), 1024, None)
+
+
+@pytest.mark.parametrize("damage", ["source_revision", "uploaded_revision"])
+def test_given_incomplete_storage_revision_when_inventory_built_then_no_payload_download(
+    mocker: MockerFixture, damage: str
+) -> None:
+    stat = SimpleNamespace(
+        path="data/item",
+        length=1,
+        source_revision="r1" if damage == "source_revision" else None,
+        uploaded_sha256="a" * 64 if damage == "uploaded_revision" else None,
+        revision=None,
+        copy_operation_sha256=None,
+    )
+    store = mocker.Mock()
+    store.list_objects.return_value = [stat]
+
+    with pytest.raises(ReleaseInputError, match="revision evidence unavailable"):
+        coordinator_module._inventory(store)
+
+    store.iter_bytes.assert_not_called()
+
+
+def test_given_arrow_table_when_serialized_then_parquet_round_trip_preserves_values() -> None:
+    table = pa.table({"frame": [0, 1], "value": [1.0, 2.0]})
+
+    content = coordinator_module._parquet_bytes(table)
+
+    assert pq.read_table(pa.BufferReader(content)).equals(table)
+
+
+@pytest.mark.parametrize("route", ["local", "blob"])
+def test_given_configured_publication_runtime_when_opened_then_clients_close_without_mutation(
+    tmp_path: Path, mocker: MockerFixture, route: str
+) -> None:
+    from physical_ai_curation.release.blob_worker import SupervisedBlobPublisher
+    from physical_ai_curation.release.local_worker import SupervisedLocalPublisher
+
+    jobs = mocker.Mock(settings=ReleaseRuntimeSettings())
+    jobs.source_association.return_value = None
+    credential = mocker.MagicMock()
+    credential.__enter__.return_value = credential
+    container = mocker.MagicMock()
+    container.__enter__.return_value = container
+    mocker.patch("azure.identity.DefaultAzureCredential", return_value=credential)
+    mocker.patch("azure.storage.blob.ContainerClient", return_value=container)
+    destination = (
+        tmp_path / "output"
+        if route == "local"
+        else BlobLocation("https://example.blob.core.windows.net", "release-state", "selected")
+    )
+
+    with coordinator_module._publication_runtime(destination, ATTEMPT, jobs, "a" * 32, 1, None) as publisher:
+        assert isinstance(publisher, SupervisedLocalPublisher if route == "local" else SupervisedBlobPublisher)
+        assert publisher.jobs is jobs and publisher.fence == 1
+
+    if route == "blob":
+        credential.__exit__.assert_called_once()
+        container.__exit__.assert_called_once()
+    assert not (tmp_path / "output").exists()
+
+
 def _native_case(
     tmp_path: Path,
     *,
@@ -1586,6 +1955,44 @@ def _native_case(
         frozen.content, request, inputs.sources, camera_statistics=inputs.camera_statistics
     )
     return source, reader, selection, context, frozen, replace(inputs, confirmed_digest=prepared.plan.digest), video
+
+
+@pytest.mark.parametrize("damage", ["changed_bytes", "info_array", "ambiguous_episodes", "decoded_budget"])
+def test_given_condition_bound_native_metadata_when_verified_then_specific_integrity_or_budget_refusal_is_reached(
+    tmp_path: Path, damage: str
+) -> None:
+    source, _reader, _selection_value, _context_value, frozen, inputs, _video = _native_case(tmp_path)
+    budget = 8 * 1024**2
+    if damage == "changed_bytes":
+        path = source.root / "meta/info.json"
+        original = path.read_bytes()
+        changed = original.replace(b"10.0", b"20.0")
+        assert len(changed) == len(original) and changed != original
+        path.write_bytes(changed)
+        message = "condition-bound native input changed"
+    elif damage in {"info_array", "ambiguous_episodes"}:
+        path = source.root / (
+            "meta/info.json" if damage == "info_array" else "meta/episodes/chunk-000/file-000.parquet"
+        )
+        if damage == "info_array":
+            path.write_bytes(b"[]")
+            message = "native dataset info must be an object"
+        else:
+            table = pq.read_table(path)
+            pq.write_table(pa.concat_tables([table, table]), path)
+            message = "episode metadata is ambiguous"
+        identities = tuple(source.inventory())
+        frozen = replace(frozen, content=frozen.content.model_copy(update={"source_objects": identities}))
+    else:
+        info = next(item for item in frozen.content.source_objects if item.path == "meta/info.json")
+        tasks = next(item for item in frozen.content.source_objects if item.path == "meta/tasks.parquet")
+        metadata = pq.ParquetFile(source.root / tasks.path).metadata
+        decoded = sum(metadata.row_group(index).total_byte_size for index in range(metadata.num_row_groups))
+        budget = info.length + tasks.length + decoded * 3 - 1
+        message = "native tables exceed the memory budget"
+
+    with pytest.raises(ReleaseInputError, match=message):
+        _validate_native_inputs(source, frozen, inputs, budget)
 
 
 @pytest.mark.parametrize("processed", [False, True])
@@ -1970,6 +2377,67 @@ def _blob_native_case(
     return source, reader, selection, context, frozen, inputs, sdk, remote
 
 
+@pytest.mark.parametrize("version", ["v3.0", "v2.1"])
+def test_given_condition_bound_blob_inputs_when_restored_in_process_then_only_remote_tables_are_read(
+    tmp_path: Path, version: str
+) -> None:
+    source, _reader, _selection_value, _context_value, frozen, inputs, sdk, _remote = _blob_native_case(
+        tmp_path, version=version
+    )
+
+    restored = _validate_native_inputs(source, frozen, inputs, 8 * 1024**2, restore=True)
+
+    assert restored.source_info == inputs.source_info
+    assert restored.source_tasks.equals(inputs.source_tasks)
+    assert all(restored.source_tables[episode].equals(table) for episode, table in inputs.source_tables.items())
+    assert not (tmp_path / "native").exists()
+    downloads = _sdk_calls(sdk, "download_blob")
+    assert downloads
+    assert any("/data/" in call["name"] for call in downloads)
+    assert not any("/videos/" in call["name"] for call in downloads)
+    assert _sdk_calls(sdk, "upload_blob") == []
+
+
+@pytest.mark.parametrize("damage", ["root", "missing_camera", "invalid_rows", "task_identity", "table_identity"])
+def test_given_inconsistent_blob_native_inputs_when_restored_then_source_authority_is_refused(
+    tmp_path: Path, damage: str
+) -> None:
+    source, _reader, _selection_value, _context_value, frozen, inputs, sdk, remote = _blob_native_case(tmp_path)
+    if damage == "root":
+        inputs = replace(inputs, source_root=tmp_path / "not-the-blob-source")
+    elif damage == "missing_camera":
+        frozen = replace(
+            frozen,
+            content=frozen.content.model_copy(
+                update={
+                    "source_objects": tuple(
+                        item for item in frozen.content.source_objects if not item.path.startswith("videos/")
+                    )
+                }
+            ),
+        )
+    elif damage == "invalid_rows":
+        remote.put("native/data/chunk-000/file-000.parquet", b"not a parquet object")
+        source = BlobReleaseSource(remote, prefix="native")
+        frozen = replace(
+            frozen, content=frozen.content.model_copy(update={"source_objects": tuple(source.inventory())})
+        )
+    episode = frozen.content.selected_episode_ids[0]
+
+    with pytest.raises(ReleaseInputError):
+        _validate_native_inputs(
+            source,
+            frozen,
+            inputs,
+            8 * 1024**2,
+            task_identity="0" * 64 if damage == "task_identity" else None,
+            table_identities={episode: "0" * 64} if damage == "table_identity" else None,
+        )
+
+    assert _sdk_calls(sdk, "upload_blob") == []
+    assert not any("/videos/" in call["name"] for call in _sdk_calls(sdk, "download_blob"))
+
+
 def test_given_blob_selection_when_discovered_then_only_metadata_listed_and_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2104,18 +2572,27 @@ def test_given_blob_native_inputs_when_supervised_then_only_conditioned_tables_r
 
 
 @pytest.mark.parametrize(
-    ("processed", "saved", "version", "with_stats"),
+    ("processed", "saved", "version", "with_stats", "through_runner"),
     [
-        (False, False, "v3.0", True),
-        (True, False, "v3.0", True),
-        (False, True, "v3.0", True),
-        (True, True, "v3.0", True),
-        (False, True, "v2.1", True),
-        (False, False, "v2.1", False),
+        (False, False, "v3.0", True, False),
+        (True, False, "v3.0", True, False),
+        (False, True, "v3.0", True, False),
+        (True, True, "v3.0", True, False),
+        (False, True, "v2.1", True, False),
+        (False, False, "v2.1", False, False),
+        pytest.param(False, False, "v3.0", True, True, id="durable-runner"),
+        pytest.param(True, True, "v3.0", True, True, id="durable-runner-processed"),
+        pytest.param(False, True, "v2.1", True, True, id="durable-runner-v21"),
     ],
 )
 def test_given_blob_source_when_coordinated_then_independent_native_release(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, processed: bool, saved: bool, version: str, with_stats: bool
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    processed: bool,
+    saved: bool,
+    version: str,
+    with_stats: bool,
+    through_runner: bool,
 ) -> None:
     source, reader, selection, context, frozen, inputs, sdk, remote = _blob_native_case(
         tmp_path, processed=processed, saved=saved, version=version, with_stats=with_stats
@@ -2137,7 +2614,7 @@ def test_given_blob_source_when_coordinated_then_independent_native_release(
             route="blob",
         )
     )
-    fence = store.claim(job.job_id, "worker")
+    fence = 1 if through_runner else store.claim(job.job_id, "worker")
     publisher = _ChildBlobPublisher(
         FsContainer(sdk, "example", "release"), BLOB, ATTEMPT, store, job.job_id, fence, sdk_root=sdk
     )
@@ -2145,22 +2622,31 @@ def test_given_blob_source_when_coordinated_then_independent_native_release(
         remote.inject_response_loss("forbid_video_downloads")
         remote.inject_response_loss("forbid_destination_tables")
 
-    result = asyncio.run(
-        run_release_generation(
-            store=store,
-            job_id=job.job_id,
-            fence=fence,
-            destination=BLOB,
-            attempt=ATTEMPT,
-            expected=frozen,
-            source=source,
-            reader=reader,
-            selection=selection,
-            context=context,
-            inputs=inputs,
-            publisher=publisher,
+    if through_runner:
+        monkeypatch.setattr(
+            coordinator_module, "_publication_runtime", lambda *_args, **_kwargs: nullcontext(publisher)
         )
-    )
+        result = asyncio.run(
+            execute_job(store, job.job_id, ConfiguredExecution(source, reader, selection, context, BLOB))
+        )
+        assert result is not None
+    else:
+        result = asyncio.run(
+            run_release_generation(
+                store=store,
+                job_id=job.job_id,
+                fence=fence,
+                destination=BLOB,
+                attempt=ATTEMPT,
+                expected=frozen,
+                source=source,
+                reader=reader,
+                selection=selection,
+                context=context,
+                inputs=inputs,
+                publisher=publisher,
+            )
+        )
     for item in list(remote.list_blobs(name_starts_with="native/")):
         remote.remove(item.name)
 

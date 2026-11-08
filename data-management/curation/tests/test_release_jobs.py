@@ -98,6 +98,71 @@ MEMORY = 512 * 1024**2
 SETTINGS = ReleaseRuntimeSettings(lease_seconds=30, reserve_bytes=0)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("lease_seconds", 0),
+        ("lease_seconds", True),
+        ("reserve_bytes", -1),
+        ("memory_bytes", 1),
+        ("grace_seconds", -1),
+        ("guardian_seconds", 1),
+        ("state_timeout_seconds", 301),
+        ("state_max_record_bytes", 0),
+        ("state_max_total_bytes", 0),
+        ("state_max_jobs", 0),
+        ("recovery_seconds", -1),
+        ("cleanup_seconds", 0),
+        ("blob_reservation_limit_bytes", 0),
+        ("retry_base_seconds", 0),
+        ("retry_max_seconds", 1),
+        ("max_failed_dispatches", 101),
+        ("blob_batch_size", 65),
+    ],
+)
+def test_given_invalid_runtime_setting_when_constructed_then_refused(field: str, value: object) -> None:
+    with pytest.raises(ReleaseJobError):
+        replace(SETTINGS, **{field: value})
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("scope", "../foreign"),
+        ("idempotency_key", ""),
+        ("route", "../route"),
+        ("route", "blob"),
+        ("principal", ""),
+        ("principal", False),
+        ("principal", "x" * 513),
+        ("attempt", "unbound"),
+        ("destination", "unbound"),
+        ("frozen_request", "not bytes"),
+        ("frozen_request", b""),
+        ("execution_binding", "not bytes"),
+        ("client_request_digest", "invalid"),
+        ("reserved_bytes", 0),
+        ("reserved_bytes", True),
+    ],
+)
+def test_given_invalid_job_admission_when_constructed_then_refused(tmp_path: Path, field: str, value: object) -> None:
+    request = _request(tmp_path / "destination")
+
+    with pytest.raises(ReleaseJobError):
+        replace(request, **{field: value})
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"bad-key": 1}, {"ok": True}, {"ok": None}, {"ok": "x" * 65}, {f"key_{index}": index for index in range(9)}],
+)
+def test_given_unbounded_event_body_when_serialized_then_refused(body: dict[str, object]) -> None:
+    from physical_ai_curation.release.jobs import _bounded_body
+
+    with pytest.raises(ReleaseJobError):
+        _bounded_body(body)
+
+
 @pytest.mark.parametrize("failure", [None, "fence", "cancel", "capacity", "effects"])
 def test_given_accepted_intent_when_captured_then_binding_is_atomic_and_fenced(
     tmp_path: Path,
@@ -486,6 +551,353 @@ def _request(
     )
 
 
+@pytest.mark.parametrize("damage", ["empty", "oversized", "duplicate", "marker", "companion", "negative", "boolean"])
+def test_given_invalid_effect_batch_when_admitted_then_the_journal_is_unchanged(tmp_path: Path, damage: str) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker")
+    effects = [("data/a.bin", 1, DIGEST)]
+    if damage == "empty":
+        effects = []
+    elif damage == "oversized":
+        effects = [(f"data/{index}.bin", 1, DIGEST) for index in range(store.settings.blob_batch_size + 1)]
+    elif damage == "duplicate":
+        effects *= 2
+    elif damage in {"marker", "companion"}:
+        effects = [(MARKER_PATH if damage == "marker" else BLOB_OWNER_CLEANUP_PATH, 1, DIGEST)]
+    else:
+        effects = [("data/a.bin", -1 if damage == "negative" else True, DIGEST)]
+    before = store.storage.snapshot()
+
+    with pytest.raises(ReleaseJobError):
+        store.begin_effects(job_id, fence, ATTEMPT, effects)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize("paths", [[], ["data/a.bin", "data/a.bin"]])
+def test_given_invalid_finish_batch_when_acknowledged_then_dispatched_effect_is_not_changed(
+    tmp_path: Path, paths: list[str]
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker")
+    assert not store.begin_effect(job_id, fence, ATTEMPT, "data/a.bin", 1, DIGEST)
+    before = store.storage.snapshot()
+
+    with pytest.raises(ReleaseJobError):
+        store.finish_effects(job_id, fence, paths, ok=True)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize("damage", ["name", "directory", "nonempty", "unregistered_writer"])
+def test_given_unowned_temporary_when_registered_then_no_file_or_ownership_record_changes(
+    tmp_path: Path, damage: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker")
+    temporary = tmp_path / "temporary"
+    if damage == "directory":
+        temporary.mkdir()
+    else:
+        temporary.write_bytes(b"retained bytes" if damage == "nonempty" else b"")
+    name = "foreign.partial" if damage == "name" else f".curation-copy-{'a' * 32}.partial"
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError):
+        store.register_local_temporary(job_id, fence, "data/a.bin", name, temporary.stat())
+
+    assert store.storage.snapshot() == before
+    if damage == "directory":
+        assert temporary.is_dir()
+    else:
+        assert temporary.read_bytes() == (b"retained bytes" if damage == "nonempty" else b"")
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_given_ambiguous_acceptance_history_when_restored_then_no_timestamp_is_invented(
+    tmp_path: Path, count: int
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    with store._transaction() as records:
+        accepted = records[job_id]["events"][0]
+        records[job_id]["events"] = [dict(accepted) for _ in range(count)]
+    before = store.storage.snapshot()
+
+    with pytest.raises(ReleaseJobError, match="acceptance record"):
+        store.accepted_at(job_id)
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_verified_output_when_named_inode_is_replaced_then_cleanup_preserves_both_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.release.jobs import _remove_verified
+
+    root = tmp_path / "outputs"
+    root.mkdir()
+    original = root / "owned.bin"
+    payload = b"owned output"
+    original.write_bytes(payload)
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    original_stat = os.stat
+    swaps = []
+
+    def replace_before_stat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+        if path == "owned.bin" and kwargs.get("dir_fd") == descriptor:
+            original.rename(root / "retained.bin")
+            original.write_bytes(b"foreign replacement")
+            swaps.append(path)
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", replace_before_stat)
+    try:
+        assert not _remove_verified(descriptor, "owned.bin", len(payload), sha256(payload).hexdigest())
+    finally:
+        os.close(descriptor)
+
+    assert swaps == ["owned.bin"]
+    assert original.read_bytes() == b"foreign replacement"
+    assert (root / "retained.bin").read_bytes() == payload
+
+
+def test_given_private_scratch_when_child_inode_changes_before_open_then_cleanup_preserves_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.release.jobs import _clear_scratch_directory
+
+    root = tmp_path / "scratch"
+    child = root / "child"
+    child.mkdir(parents=True)
+    (child / "owned.bin").write_bytes(b"owned scratch")
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    original_open = os.open
+    swaps = []
+
+    def replace_before_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if path == "child" and kwargs.get("dir_fd") == descriptor:
+            child.rename(root / "retained")
+            child.mkdir()
+            (child / "foreign.bin").write_bytes(b"foreign scratch")
+            swaps.append(path)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", replace_before_open)
+    try:
+        with pytest.raises(AuthorityError, match="directory changed"):
+            _clear_scratch_directory(descriptor, time.monotonic() + 10, [10], 0)
+    finally:
+        os.close(descriptor)
+
+    assert swaps == ["child"]
+    assert (root / "retained/owned.bin").read_bytes() == b"owned scratch"
+    assert (child / "foreign.bin").read_bytes() == b"foreign scratch"
+
+
+@pytest.mark.parametrize("phase", ["open", "remove"])
+def test_given_empty_output_directory_when_replaced_during_cleanup_then_foreign_content_is_retained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    from physical_ai_curation.release.jobs import _remove_empty_output_tree
+
+    root = tmp_path / "outputs"
+    child = root / "child"
+    child.mkdir(parents=True)
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    original_open = os.open
+    original_rmdir = os.rmdir
+    swaps = []
+
+    def replace() -> None:
+        child.rename(root / "retained")
+        if phase == "open":
+            child.write_bytes(b"foreign replacement")
+        else:
+            child.mkdir()
+            (child / "foreign.bin").write_bytes(b"foreign replacement")
+        swaps.append(phase)
+
+    def open_directory(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if phase == "open" and path == "child" and kwargs.get("dir_fd") == descriptor:
+            replace()
+        return original_open(path, flags, *args, **kwargs)
+
+    def remove_directory(path: Any, *args: Any, **kwargs: Any) -> None:
+        if phase == "remove" and path == "child" and kwargs.get("dir_fd") == descriptor:
+            replace()
+        original_rmdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", open_directory)
+    monkeypatch.setattr(os, "rmdir", remove_directory)
+    try:
+        assert not _remove_empty_output_tree(descriptor, [10], 0, time.monotonic() + 10)
+    finally:
+        os.close(descriptor)
+
+    assert swaps == [phase]
+    assert (root / "retained").is_dir()
+    assert (child if phase == "open" else child / "foreign.bin").read_bytes() == b"foreign replacement"
+
+
+@pytest.mark.parametrize(
+    "damage", ["empty", "identity", "no_counters", "unknown_counter", "batch_conflict", "recorded_conflict", "replay"]
+)
+def test_given_io_observation_when_identity_or_categories_conflict_then_recorded_totals_are_preserved(
+    tmp_path: Path, damage: str
+) -> None:
+    from physical_ai_curation.release.jobs import IO_COUNTERS
+
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker")
+    counter = sorted(IO_COUNTERS)[0]
+    operation = "a" * 32
+    observation = (operation, {counter: 3}, 1)
+    if damage in {"recorded_conflict", "replay"}:
+        store.record_ios(job_id, fence, [observation])
+    observations = [observation]
+    if damage == "empty":
+        observations = []
+    elif damage == "identity":
+        observations = [("unbound", {counter: 3}, 1)]
+    elif damage == "no_counters":
+        observations = [(operation, {}, 1)]
+    elif damage == "unknown_counter":
+        observations = [(operation, {"unrecorded_counter": 3}, 1)]
+    elif damage == "batch_conflict":
+        observations.append((operation, {counter: 4}, 1))
+    elif damage == "recorded_conflict":
+        observations = [(operation, {counter: 4}, 1)]
+    before = store.storage.snapshot()
+
+    if damage == "replay":
+        store.record_ios(job_id, fence, observations)
+    else:
+        with pytest.raises(ReleaseJobError):
+            store.record_ios(job_id, fence, observations)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize(
+    "damage", ["planned", "other_fence", "foreign_boot", "live_creator", "inode", "active_runtime"]
+)
+def test_given_private_workspace_when_cleanup_authority_is_unresolved_then_all_scratch_is_retained(
+    tmp_path: Path, damage: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker")
+    workspace = store.create_scratch_workspace(job_id, fence, 64)
+    (workspace / "owned.bin").write_bytes(b"owned scratch")
+    if damage == "inode":
+        retained = workspace.with_name("retained")
+        workspace.rename(retained)
+        workspace.mkdir()
+        (workspace / "foreign.bin").write_bytes(b"foreign scratch")
+    elif damage != "live_creator":
+        with store._transaction() as records:
+            row = records[job_id]
+            if damage == "planned":
+                row["workspace"]["status"] = "planned"
+            elif damage == "other_fence":
+                row["workspace"]["fence"] = fence + 1
+            elif damage == "foreign_boot":
+                row["workspace"]["owner"]["boot_id"] = "00000000-0000-0000-0000-000000000000"
+            else:
+                row["runtimes"]["pending"] = {"fence": fence, "stopped": False}
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError):
+        store.cleanup_scratch_workspace(job_id, fence, recover=damage in {"foreign_boot", "live_creator"})
+
+    assert store.storage.snapshot() == before
+    assert (workspace / "owned.bin" if damage != "inode" else retained / "owned.bin").read_bytes() == b"owned scratch"
+    if damage == "inode":
+        assert (workspace / "foreign.bin").read_bytes() == b"foreign scratch"
+
+
+@pytest.mark.parametrize("operation", ["release", "authorize"])
+def test_given_unstopped_scratch_writer_when_releasing_capacity_then_reservation_is_preserved(
+    tmp_path: Path, operation: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker")
+    store.reserve_scratch(job_id, fence, 64)
+    with store._transaction() as records:
+        records[job_id]["runtimes"]["pending"] = {"fence": fence, "stopped": False}
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError, match="runtime stop proof"):
+        if operation == "release":
+            store.release_scratch(job_id, fence)
+        else:
+            store.authorize_scratch_cleanup(job_id, fence)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize(
+    "damage", ["no_path", "foreign_path", "unregistered", "oversized", "invalid_json", "foreign_identity"]
+)
+def test_given_restored_stop_record_when_proof_is_untrusted_then_cancellation_cannot_release_capacity(
+    tmp_path: Path, damage: str
+) -> None:
+    from physical_ai_curation.release.supervision import MAX_PROOF_BYTES
+
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker")
+    identity = ProcessIdentity.of(os.getpid())
+    proof = store.runtime_proof_path(job_id, fence)
+    runtime = SupervisedRuntime(identity, identity, proof)
+    store.register_runtime(job_id, fence, runtime)
+    with store._transaction() as records:
+        recorded = next(iter(records[job_id]["runtimes"].values()))
+        recorded["stopped"] = True
+        if damage == "no_path":
+            recorded["runtime"]["proof_path"] = None
+        elif damage == "foreign_path":
+            recorded["runtime"]["proof_path"] = str(tmp_path / "foreign.json")
+    store.confirm_stopped(job_id, fence)
+    store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+    artifact = proof
+    if damage == "unregistered":
+        artifact = proof.with_name("unregistered.json")
+        artifact.write_bytes(b"unregistered proof")
+    elif damage == "oversized":
+        proof.write_bytes(b"x" * (MAX_PROOF_BYTES + 1))
+    elif damage == "invalid_json":
+        proof.write_bytes(b"not-json")
+    elif damage == "foreign_identity":
+        proof.write_bytes(
+            canonical_json_bytes(
+                {
+                    "v": 1,
+                    "state": "stopped",
+                    "guardian": {**identity.to_dict(), "pid": identity.pid + 1},
+                    "leader": identity.to_dict(),
+                    "leader_exit_code": 0,
+                    "members_reaped": 1,
+                }
+            )
+        )
+    before = store.storage.snapshot()
+    retained_bytes = artifact.read_bytes() if artifact.exists() else None
+
+    with pytest.raises((AuthorityError, ReleaseVerificationError, json.JSONDecodeError)):
+        store.settle_cancellation(job_id, fence, output_removed=True)
+
+    assert store.storage.snapshot() == before
+    if retained_bytes is not None:
+        assert artifact.read_bytes() == retained_bytes
+
+
 def _sealed_job(store: ReleaseJobStore, destination: Path) -> tuple[str, int]:
     job_id = store.accept(_request(destination)).job_id
     fence = store.claim(job_id, "worker-a")
@@ -496,11 +908,252 @@ def _sealed_job(store: ReleaseJobStore, destination: Path) -> tuple[str, int]:
     return job_id, fence
 
 
+@pytest.mark.parametrize(
+    "damage",
+    ["missing_control", "extra_control", "negative_length", "boolean_length", "bad_digest", "uppercase_digest"],
+)
+def test_given_invalid_seal_controls_when_submitted_then_ledger_stays_running(tmp_path: Path, damage: str) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker")
+    controls = dict(CONTROLS)
+    if damage == "missing_control":
+        del controls[RECEIPT_PATH]
+    elif damage == "extra_control":
+        controls["foreign.json"] = (1, DIGEST)
+    else:
+        controls[RECEIPT_PATH] = (
+            (-1, DIGEST)
+            if damage == "negative_length"
+            else (True, DIGEST)
+            if damage == "boolean_length"
+            else (1, "invalid")
+            if damage == "bad_digest"
+            else (1, DIGEST.upper())
+        )
+    before = store.storage.snapshot()
+
+    with pytest.raises(ReleaseJobError):
+        store.seal(job_id, fence, controls)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize(
+    "obligation",
+    ["runtime", "temporary", "workspace", "scratch_residue", "proof_residue", "scratch_symlink", "proof_symlink"],
+)
+def test_given_unresolved_cleanup_obligation_when_proofs_purged_then_foreign_bytes_and_ledger_survive(
+    tmp_path: Path, obligation: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    row = store.storage.snapshot()[job_id]
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    survivor = foreign / "retain.bin"
+    survivor.write_bytes(b"foreign output")
+    if obligation == "runtime":
+        row["runtimes"] = {"pending": {"stopped": False}}
+    elif obligation == "temporary":
+        row["temporaries"] = [{"removed": False}]
+    elif obligation == "workspace":
+        row["workspace"] = {"status": "retained"}
+    else:
+        root = store.root / ("scratch" if obligation.startswith("scratch") else "runtimes") / job_id
+        root.parent.mkdir(parents=True, exist_ok=True)
+        if obligation.endswith("symlink"):
+            root.symlink_to(foreign, target_is_directory=True)
+        else:
+            root.mkdir()
+            (root / "retain.bin").write_bytes(b"unregistered output")
+    before = store.storage.snapshot()
+
+    with pytest.raises((AuthorityError, OSError)):
+        store._purge_runtime_proofs(row)
+
+    assert store.storage.snapshot() == before
+    assert survivor.read_bytes() == b"foreign output"
+    if obligation.endswith("residue"):
+        assert (root / "retain.bin").read_bytes() == b"unregistered output"
+
+
+def test_given_empty_registered_cleanup_directories_when_proofs_purged_then_directories_are_removed(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    roots = [store.root / namespace / job_id for namespace in ("scratch", "runtimes")]
+    for root in roots:
+        root.mkdir(parents=True)
+    before = store.storage.snapshot()
+
+    store._purge_runtime_proofs(before[job_id])
+
+    assert all(not root.exists() for root in roots)
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize(
+    "damage", ["uncancelled", "stale_fence", "scratch_retained", "reservation_retained", "stop_unconfirmed"]
+)
+def test_given_unsettled_cancelled_ledger_when_purged_then_durable_record_remains(tmp_path: Path, damage: str) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker")
+    if damage != "uncancelled":
+        store.confirm_stopped(job_id, fence)
+        store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+        store.settle_cancellation(job_id, fence, output_removed=True)
+        with store._transaction() as records:
+            row = records[job_id]
+            if damage == "scratch_retained":
+                row["scratch_bytes"] = 1
+            elif damage == "reservation_retained":
+                row["reservation"]["status"] = "retained"
+            elif damage == "stop_unconfirmed":
+                row["stopped_fence"] = 0
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError):
+        store.purge_cancelled(job_id, fence + 1 if damage == "stale_fence" else fence)
+
+    assert store.storage.snapshot() == before
+
+
 def _committed_job(store: ReleaseJobStore, destination: Path) -> tuple[str, int]:
     job_id, fence = _sealed_job(store, destination)
     with ReleaseJobControl(store, job_id, fence).publication(ATTEMPT, COMMIT_DIGEST):
         pass
     return job_id, fence
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "absolute",
+        "parent",
+        "empty",
+        "missing",
+        "missing_parent",
+        "foreign_symlink",
+        "parent_symlink",
+        "wrong_length",
+        "wrong_digest",
+        "wrong_inode",
+        "deadline",
+        "owned",
+    ],
+)
+def test_given_descriptor_owned_cleanup_when_file_identity_is_checked_then_only_admitted_bytes_are_unlinked(
+    tmp_path: Path, case: str
+) -> None:
+    from physical_ai_curation.release.jobs import _remove_verified
+
+    root = tmp_path / "output"
+    root.mkdir()
+    target = root / "owned.bin"
+    target.write_bytes(b"owned output")
+    foreign = tmp_path / "foreign.bin"
+    foreign.write_bytes(b"foreign output")
+    relative = "owned.bin"
+    if case == "absolute":
+        relative = str(foreign)
+    elif case == "parent":
+        relative = "../foreign.bin"
+    elif case == "empty":
+        relative = ""
+    elif case in {"missing", "missing_parent"}:
+        relative = "missing.bin" if case == "missing" else "missing/owned.bin"
+    elif case == "foreign_symlink":
+        (root / "link.bin").symlink_to(foreign)
+        relative = "link.bin"
+    elif case == "parent_symlink":
+        (root / "link").symlink_to(tmp_path, target_is_directory=True)
+        relative = "link/foreign.bin"
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        removed = _remove_verified(
+            descriptor,
+            relative,
+            1 if case == "wrong_length" else 12,
+            DIGEST if case == "wrong_digest" else sha256_hex(b"owned output"),
+            expected_inode=(0, 0) if case == "wrong_inode" else None,
+            deadline=-1 if case == "deadline" else None,
+        )
+    finally:
+        os.close(descriptor)
+
+    assert removed == (case in {"missing", "missing_parent", "owned"})
+    assert foreign.read_bytes() == b"foreign output"
+    if case == "owned":
+        assert not target.exists()
+    else:
+        assert target.read_bytes() == b"owned output"
+
+
+@pytest.mark.parametrize("budget", ["depth", "deadline", "entries", "file", "symlink", "empty"])
+def test_given_output_tree_cleanup_when_budget_or_ownership_is_unproven_then_tree_is_retained(
+    tmp_path: Path, budget: str
+) -> None:
+    from physical_ai_curation.release.jobs import _remove_empty_output_tree
+
+    root = tmp_path / "output"
+    root.mkdir()
+    child = root / "child"
+    if budget == "file":
+        child.write_bytes(b"foreign payload")
+    elif budget == "symlink":
+        child.symlink_to(tmp_path, target_is_directory=True)
+    else:
+        child.mkdir()
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        removed = _remove_empty_output_tree(
+            descriptor,
+            [0 if budget == "entries" else 16],
+            33 if budget == "depth" else 0,
+            -1 if budget == "deadline" else time.monotonic() + 10,
+        )
+    finally:
+        os.close(descriptor)
+
+    assert removed == (budget == "empty")
+    assert child.exists() == (budget != "empty")
+    if budget == "file":
+        assert child.read_bytes() == b"foreign payload"
+
+
+@pytest.mark.parametrize("budget", ["depth", "deadline", "entries", "symlink", "fifo"])
+def test_given_private_scratch_cleanup_when_unowned_or_over_budget_then_bytes_remain(
+    tmp_path: Path, budget: str
+) -> None:
+    from physical_ai_curation.release.jobs import _clear_scratch_directory
+
+    root = tmp_path / "scratch"
+    root.mkdir()
+    child = root / "child"
+    if budget == "symlink":
+        child.symlink_to(tmp_path, target_is_directory=True)
+    elif budget == "fifo":
+        os.mkfifo(child)
+    else:
+        child.write_bytes(b"retained scratch")
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        with pytest.raises(AuthorityError):
+            _clear_scratch_directory(
+                descriptor,
+                -1 if budget == "deadline" else time.monotonic() + 10,
+                [0 if budget == "entries" else 16],
+                33 if budget == "depth" else 0,
+            )
+    finally:
+        os.close(descriptor)
+
+    assert os.path.lexists(child)
+    if budget in {"depth", "deadline", "entries"}:
+        assert child.read_bytes() == b"retained scratch"
 
 
 def test_given_committed_release_when_registration_finished_then_projection_is_sanitized(tmp_path: Path) -> None:
@@ -520,6 +1173,220 @@ def test_given_committed_release_when_registration_finished_then_projection_is_s
     assert status.registration["last_error_category"] is None
     assert COMMIT_DIGEST not in repr(status.registration)
     assert token not in repr(status.registration)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"asset_name": ""},
+        {"asset_name": "bad/name"},
+        {"asset_version": ""},
+        {"asset_version": "bad/version"},
+        {"target_digest": "invalid"},
+        {"target_digest": COMMIT_DIGEST.upper()},
+    ],
+)
+def test_given_invalid_registration_identity_when_started_then_release_is_unchanged(
+    tmp_path: Path, changes: dict[str, str]
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, _fence = _committed_job(store, tmp_path / "output")
+    before = store.storage.snapshot()
+
+    with pytest.raises(ReleaseJobError):
+        store.begin_registration(
+            job_id, **({"asset_name": "model", "asset_version": "1", "target_digest": COMMIT_DIGEST} | changes)
+        )
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize("digest", [None, "invalid"])
+def test_given_malformed_retained_commit_when_registration_started_then_provider_authority_is_not_issued(
+    tmp_path: Path, digest: str | None
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, _fence = _committed_job(store, tmp_path / "output")
+    with store._transaction() as records:
+        records[job_id]["commit_digest"] = digest
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError, match="valid committed manifest"):
+        store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize("reason", ["absent", "foreign_token", "expired", "completed", "not_committed"])
+def test_given_nonlive_registration_authority_when_renewed_then_it_is_not_revived(tmp_path: Path, reason: str) -> None:
+    clock = FakeClock()
+    store = _store(tmp_path / "ledger", clock)
+    job_id, _fence = _committed_job(store, tmp_path / "output")
+    token = "not-issued"
+    if reason != "absent":
+        issued = store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+        assert issued is not None
+        token = "different-token" if reason == "foreign_token" else issued
+        if reason == "expired":
+            clock.advance(SETTINGS.lease_seconds)
+        elif reason == "completed":
+            store.finish_registration(job_id, token, status="registered")
+        elif reason == "not_committed":
+            with store._transaction() as records:
+                records[job_id]["state"] = "committing"
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError, match="not live"):
+        store.renew_registration(job_id, token)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize(
+    ("status", "category"),
+    [("unknown", None), ("failed", None), ("failed", "private-provider-message"), ("registered", "provider_error")],
+)
+def test_given_invalid_registration_outcome_when_finished_then_pending_attempt_is_preserved(
+    tmp_path: Path, status: str, category: str | None
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, _fence = _committed_job(store, tmp_path / "output")
+    token = store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+    assert token is not None
+    before = store.storage.snapshot()
+
+    with pytest.raises(ReleaseJobError):
+        store.finish_registration(job_id, token, status=status, error_category=category)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize("reason", ["invalid_category", "cancelled", "sealed", "retained_scratch", "unconfirmed_stop"])
+def test_given_unresolved_release_work_when_input_required_then_job_is_not_paused(tmp_path: Path, reason: str) -> None:
+    from physical_ai_curation.release.jobs import INPUT_REFUSALS
+
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker")
+    if reason != "unconfirmed_stop":
+        store.confirm_stopped(job_id, fence)
+    if reason == "cancelled":
+        store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+    elif reason == "sealed":
+        store.seal(job_id, fence, CONTROLS)
+    elif reason == "retained_scratch":
+        with store._transaction() as records:
+            records[job_id]["scratch_bytes"] = 1
+    before = store.storage.snapshot()
+
+    with pytest.raises(
+        ReleaseJobError
+        if reason == "invalid_category"
+        else CancellationError
+        if reason == "cancelled"
+        else AuthorityError
+    ):
+        store.require_input(job_id, fence, "invalid" if reason == "invalid_category" else sorted(INPUT_REFUSALS)[0])
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_uncancelled_release_when_claim_yielded_then_live_authority_is_preserved(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker")
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError, match="not requested"):
+        store.yield_cancellation(job_id, fence)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "bad_digest",
+        "foreign_attempt",
+        "foreign_manifest",
+        "cancelled",
+        "capacity",
+        "active_runtime",
+        "identity_conflict",
+        "replay",
+    ],
+)
+def test_given_chosen_commit_when_marker_intent_is_admitted_then_only_matching_stopped_authority_can_replay(
+    tmp_path: Path, reason: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, fence = _sealed_job(store, tmp_path / "output")
+    store._begin_publication(job_id, fence, ATTEMPT, COMMIT_DIGEST)
+    marker_digest = sha256_hex(b"marker")
+    if reason in {"identity_conflict", "replay"}:
+        assert not store.begin_marker_effect(job_id, fence, ATTEMPT, COMMIT_DIGEST, 6, marker_digest)
+        store.finish_effect(job_id, fence, MARKER_PATH, ok=True)
+    elif reason in {"cancelled", "active_runtime"}:
+        with store._transaction() as records:
+            if reason == "cancelled":
+                records[job_id]["cancel_requested"] = True
+            else:
+                records[job_id]["runtimes"]["pending"] = {"fence": fence, "stopped": False}
+    before = store.storage.snapshot()
+    arguments = (
+        job_id,
+        fence,
+        OTHER_ATTEMPT if reason == "foreign_attempt" else ATTEMPT,
+        DIGEST if reason == "foreign_manifest" else COMMIT_DIGEST,
+        1025 if reason == "capacity" else 7 if reason == "identity_conflict" else 6,
+        "invalid" if reason == "bad_digest" else marker_digest,
+    )
+
+    if reason == "replay":
+        assert store.begin_marker_effect(*arguments)
+    else:
+        with pytest.raises(ReleaseJobError):
+            store.begin_marker_effect(*arguments)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize(
+    "reason", ["wrong_root", "not_committing", "active_runtime", "foreign_temporary", "unregistered_partial", "empty"]
+)
+def test_given_marker_residue_when_cleanup_is_requested_then_unresolved_ownership_is_retained(
+    tmp_path: Path, reason: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    destination = tmp_path / "output"
+    job_id, fence = _sealed_job(store, destination)
+    if reason != "not_committing":
+        store._begin_publication(job_id, fence, ATTEMPT, COMMIT_DIGEST)
+    root = destination / ATTEMPT.prefix
+    root.mkdir(parents=True)
+    (root / Path(MARKER_PATH).parent).mkdir(parents=True, exist_ok=True)
+    if reason in {"active_runtime", "foreign_temporary"}:
+        with store._transaction() as records:
+            if reason == "active_runtime":
+                records[job_id]["runtimes"]["pending"] = {"fence": fence, "stopped": False}
+            else:
+                records[job_id]["temporaries"] = [
+                    {"name": "foreign.partial", "path": "data/foreign.bin", "removed": False}
+                ]
+    partial = root / Path(MARKER_PATH).parent / f".curation-copy-{'a' * 32}.partial"
+    if reason == "unregistered_partial":
+        partial.write_bytes(b"unregistered output")
+    before = store.storage.snapshot()
+
+    if reason == "empty":
+        store.remove_marker_temporaries(job_id, fence, root)
+    else:
+        with pytest.raises(AuthorityError):
+            store.remove_marker_temporaries(job_id, fence, tmp_path / "foreign" if reason == "wrong_root" else root)
+
+    assert store.storage.snapshot() == before
+    if reason == "unregistered_partial":
+        assert partial.read_bytes() == b"unregistered output"
 
 
 def test_given_uncommitted_job_when_registration_begun_then_refused_without_records(tmp_path: Path) -> None:
@@ -4189,6 +5056,104 @@ def test_given_cancelled_job_when_cleanup_then_only_recorded_outputs_removed(tmp
     assert status.capacity_state == "retained"
 
 
+@pytest.mark.parametrize("damage", ["foreign_companion", "companion_directory", "companion_symlink", "root_symlink"])
+def test_given_cancelled_release_when_cleanup_identity_is_untrusted_then_owned_and_foreign_bytes_survive(
+    tmp_path: Path, damage: str
+) -> None:
+    payload = b"owned-bytes"
+    store, job_id, fence, root = _owned_effect_job(tmp_path, FakeClock(), "data/a.bin", payload)
+    (root / "data").mkdir(parents=True)
+    (root / "data/a.bin").write_bytes(payload)
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"foreign-bytes")
+    companion = root.parent / ownership_path(ATTEMPT.prefix)
+    companion.parent.mkdir(parents=True, exist_ok=True)
+    if damage == "foreign_companion":
+        companion.write_bytes(b"foreign ownership")
+    elif damage == "companion_directory":
+        companion.mkdir()
+    elif damage == "companion_symlink":
+        companion.symlink_to(outside)
+    else:
+        retained_root = root.with_name("retained-root")
+        root.rename(retained_root)
+        root.symlink_to(retained_root, target_is_directory=True)
+    before = store.storage.snapshot()
+
+    assert not store.cleanup_owned_outputs(job_id, fence, root)
+
+    assert store.storage.snapshot() == before
+    assert (root / "data/a.bin").read_bytes() == payload
+    assert outside.read_bytes() == b"foreign-bytes"
+    if damage == "foreign_companion":
+        assert companion.read_bytes() == b"foreign ownership"
+    elif damage == "companion_directory":
+        assert companion.is_dir()
+    else:
+        assert (companion if damage == "companion_symlink" else root).is_symlink()
+
+
+@pytest.mark.parametrize(
+    "damage", ["uncancelled", "terminal", "foreign_route", "stale_fence", "unstopped", "open_effect"]
+)
+def test_given_cancelled_release_when_cleanup_authority_is_lost_then_no_files_or_journal_rows_change(
+    tmp_path: Path, damage: str
+) -> None:
+    payload = b"owned-bytes"
+    store, job_id, fence, root = _owned_effect_job(tmp_path, FakeClock(), "data/a.bin", payload)
+    (root / "data").mkdir(parents=True)
+    (root / "data/a.bin").write_bytes(payload)
+    with store._transaction() as records:
+        row = records[job_id]
+        if damage == "uncancelled":
+            row["cancel_requested"] = False
+        elif damage == "terminal":
+            row["state"] = "cancelled"
+        elif damage == "foreign_route":
+            row["route"] = "blob"
+        elif damage == "unstopped":
+            row["stopped_fence"] = fence - 1
+        elif damage == "open_effect":
+            row["effects"]["data/a.bin"]["status"] = "uncertain"
+    before = store.storage.snapshot()
+
+    with pytest.raises(CancellationError if damage == "uncancelled" else AuthorityError):
+        store.cleanup_owned_outputs(job_id, fence + 1 if damage == "stale_fence" else fence, root)
+
+    assert store.storage.snapshot() == before
+    assert (root / "data/a.bin").read_bytes() == payload
+
+
+@pytest.mark.parametrize("damage", ["digest", "foreign_attempt", "running", "controls", "chosen_digest"])
+def test_given_release_publication_when_commit_admission_is_invalid_then_decision_is_not_changed(
+    tmp_path: Path, damage: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, fence = _sealed_job(store, tmp_path / "output")
+    if damage == "chosen_digest":
+        store._begin_publication(job_id, fence, ATTEMPT, COMMIT_DIGEST)
+    elif damage in {"running", "controls"}:
+        with store._transaction() as records:
+            if damage == "running":
+                records[job_id]["state"] = "running"
+            else:
+                del records[job_id]["effects"][RECEIPT_PATH]
+    before = store.storage.snapshot()
+
+    with (
+        pytest.raises(ReleaseJobError),
+        store.publication(
+            job_id,
+            fence,
+            OTHER_ATTEMPT if damage == "foreign_attempt" else ATTEMPT,
+            "invalid" if damage == "digest" else DIGEST if damage == "chosen_digest" else COMMIT_DIGEST,
+        ),
+    ):
+        pytest.fail("Invalid publication must not receive commit authority")
+
+    assert store.storage.snapshot() == before
+
+
 def test_given_changed_recorded_output_when_cleanup_then_retained(tmp_path: Path) -> None:
     store, job_id, fence, root = _owned_effect_job(tmp_path, FakeClock(), "data/a.bin", b"expected")
     (root / "data").mkdir(parents=True)
@@ -4418,6 +5383,178 @@ def test_given_bounded_native_sink_when_growth_exceeds_limit_then_no_extra_bytes
         with pytest.raises(CapacityError):
             sink.write(b"d")
         assert path.stat().st_size <= 3
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, 1.5])
+def test_given_invalid_native_sink_bound_when_created_then_refused(tmp_path: Path, limit: Any) -> None:
+    from physical_ai_curation.release.execution import BoundedSink
+
+    with (tmp_path / "output").open("w+b") as stream, pytest.raises(CapacityError):
+        BoundedSink(stream, limit)
+
+
+@pytest.mark.parametrize("damage", ["version", "mode", "bound"])
+def test_given_invalid_local_child_protocol_when_read_then_descriptor_closes_before_ledger_access(
+    mocker: MockerFixture, damage: str
+) -> None:
+    from physical_ai_curation.release import local_worker
+
+    spec = {"version": 2 if damage == "version" else 1, "mode": "unsupported"}
+    if damage == "bound":
+        mocker.patch.object(local_worker, "MAX_PROTOCOL_BYTES", 1)
+    store = mocker.patch.object(local_worker, "ReleaseJobStore")
+    content = canonical_json_bytes(spec)
+    descriptor = os.memfd_create("test-local-child", os.MFD_CLOEXEC)
+    try:
+        os.write(descriptor, content)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        child_descriptor = os.dup(descriptor)
+        with pytest.raises(ReleaseVerificationError, match=r"protocol|mode"):
+            local_worker._process(child_descriptor)
+        with pytest.raises(OSError):
+            os.fstat(child_descriptor)
+        assert os.fstat(descriptor).st_size == len(content)
+    finally:
+        os.close(descriptor)
+
+    store.assert_not_called()
+
+
+@pytest.mark.parametrize("worker", ["local_worker", "execution"])
+@pytest.mark.parametrize("outcome", ["invalid", "failure", "success"])
+def test_given_private_worker_entry_when_invoked_then_fixed_exit_code_is_returned(
+    mocker: MockerFixture, worker: str, outcome: str
+) -> None:
+    from physical_ai_curation.release import execution, local_worker
+
+    module = local_worker if worker == "local_worker" else execution
+    operation = mocker.patch.object(module, "_process" if worker == "local_worker" else "_encode")
+    if outcome == "failure":
+        operation.side_effect = OSError("fixed test failure")
+    arguments = [] if outcome == "invalid" else ["12"] if worker == "local_worker" else ["encode", "request.json"]
+    mocker.patch.object(sys, "argv", ["worker", *arguments])
+
+    assert module.main() == {"invalid": 2, "failure": 1, "success": 0}[outcome]
+    assert operation.call_count == (0 if outcome == "invalid" else 1)
+
+
+def test_given_native_sink_when_seek_exceeds_bound_then_position_and_bytes_are_preserved(tmp_path: Path) -> None:
+    from physical_ai_curation.release.execution import BoundedSink
+
+    with (tmp_path / "output").open("w+b") as stream:
+        sink = BoundedSink(stream, 3)
+        sink.write(b"abc")
+        sink.seek(1)
+        with pytest.raises(CapacityError, match="seek"):
+            sink.seek(4)
+        assert sink.tell() == 1
+        sink.flush()
+        assert sink.writable() and sink.seekable() and not sink.closed
+        assert (tmp_path / "output").read_bytes() == b"abc"
+    assert sink.closed
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "source_short",
+        "source_long",
+        "source_digest",
+        "source_chunk",
+        "request_bound",
+        "child_failure",
+        "result_bound",
+        "output_bound",
+        "scratch_bound",
+        "success",
+    ],
+)
+def test_given_native_encoding_boundary_when_child_or_content_invalid_then_scratch_is_released(
+    tmp_path: Path, mocker: MockerFixture, damage: str
+) -> None:
+    from physical_ai_curation.release import execution
+    from physical_ai_curation.release.composition import NativeGenerationPlan, PreparedMediaWindow
+    from physical_ai_curation.release.encoding import EncodeOptions, EncodingWindow
+    from physical_ai_curation.release.media import ReleaseExecutionError, SubsetEpisodeInput, plan_release_objects
+    from test_release_media import LOCAL_SCRATCH_SAME, VIDEO, _window
+    from test_release_media import _request as media_request
+
+    content = b"frozen native source"
+    source = SourceObject(path=VIDEO, revision="frozen", length=len(content), sha256=sha256_hex(content))
+    plan = plan_release_objects(
+        media_request(
+            selected_episode_ids=("ep-0",),
+            windows=(_window(source=source, end=0.2, duration=0.2, reasons=("invert",)),),
+            scratch=LOCAL_SCRATCH_SAME,
+        )
+    )
+    prepared = NativeGenerationPlan(
+        plan,
+        (SubsetEpisodeInput("ep-0", 0, 2, 10),),
+        (PreparedMediaWindow(VIDEO, "front", EncodingWindow("ep-0", 0, 2, (0, 1), "invert")),),
+        EncodeOptions(),
+    )
+    directory = tmp_path / "scratch"
+    directory.mkdir()
+    store = mocker.Mock(settings=SETTINGS)
+    store.create_scratch_workspace.return_value = directory
+    output_bound = 1024**2
+    payload = b"encoded bytes"
+
+    def child(*args: Any, **kwargs: Any) -> SupervisedOutcome:
+        output = payload if damage != "output_bound" else b"x" * (output_bound + 1)
+        (directory / "encoded.mp4").write_bytes(output)
+        result = {
+            "media": {
+                "windows": [],
+                "codec": "libx264",
+                "pix_fmt": "yuv420p",
+                "fps": 10,
+                "width": 32,
+                "height": 24,
+                "statistic_algorithm": "test",
+                "sampling_recipe": "test",
+            },
+            "peak_output_bytes": 16 * 1024**2 if damage == "scratch_bound" else len(output),
+        }
+        (directory / "result.json").write_bytes(canonical_json_bytes(result))
+        return SimpleNamespace(reason="exited", returncode=1 if damage == "child_failure" else 0)
+
+    native = mocker.patch.object(execution, "run_supervised", side_effect=child)
+    if damage in {"request_bound", "result_bound", "source_chunk"}:
+        mocker.patch.object(
+            execution,
+            {"request_bound": "MAX_SPEC_BYTES", "result_bound": "MAX_RESULT_BYTES", "source_chunk": "CHUNK_BYTES"}[
+                damage
+            ],
+            1,
+        )
+    chunks = {"source_short": content[:-1], "source_long": content + b"x", "source_digest": b"x" * len(content)}.get(
+        damage, content
+    )
+    operation = execution.encode_planned_object(
+        store,
+        "a" * 32,
+        1,
+        prepared,
+        plan.objects[0],
+        (chunks,),
+        confirmed_digest=plan.digest,
+        scratch_bytes=8 * 1024**2,
+        output_bytes=output_bound,
+    )
+
+    if damage == "success":
+        with operation as encoded:
+            assert encoded.path.read_bytes() == payload
+            assert encoded.sha256 == sha256_hex(payload)
+    else:
+        with pytest.raises((CapacityError, ReleaseExecutionError)), operation:
+            pass
+    store.cleanup_scratch_workspace.assert_called_once_with("a" * 32, 1)
+    store.release_scratch.assert_called_once_with("a" * 32, 1)
+    if damage.startswith("source_") or damage == "request_bound":
+        native.assert_not_called()
 
 
 def test_given_retained_native_scratch_when_seal_or_cancel_cleanup_then_capacity_stays_charged(tmp_path: Path) -> None:

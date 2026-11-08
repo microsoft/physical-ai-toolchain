@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -22,6 +24,47 @@ from test_release_jobs import _blob_record_store, _RecordContainer
 
 KEY = "a" * 32
 OTHER = "b" * 32
+
+
+def test_given_blob_record_configuration_when_sdk_is_built_then_bound_container_and_credential_are_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import azure.identity
+    import azure.storage.blob
+
+    credential = object()
+    container = object()
+    service = Mock()
+    service.get_container_client.return_value = container
+    credential_factory = Mock(return_value=credential)
+    service_factory = Mock(return_value=service)
+    monkeypatch.setattr(azure.identity, "DefaultAzureCredential", credential_factory)
+    monkeypatch.setattr(azure.storage.blob, "BlobServiceClient", service_factory)
+
+    result = record_storage._blob_container_client("https://example.blob.core.windows.net", "release-state")
+
+    assert result is container
+    credential_factory.assert_called_once_with()
+    service_factory.assert_called_once_with("https://example.blob.core.windows.net", credential=credential)
+    service.get_container_client.assert_called_once_with("release-state")
+
+
+def test_given_source_collection_symlink_when_resolved_then_no_path_outside_destination_is_admitted(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "destination"
+    outside = tmp_path / "foreign"
+    root.mkdir()
+    outside.mkdir()
+    (root / "source").symlink_to(outside, target_is_directory=True)
+    sentinel = outside / "retained.bin"
+    sentinel.write_bytes(b"foreign bytes")
+
+    with pytest.raises(ValueError, match="escapes configured destination"):
+        record_storage.release_collection_location(root, "source")
+
+    assert sentinel.read_bytes() == b"foreign bytes"
+    assert not (outside / "releases").exists()
 
 
 def _record(key: str = KEY) -> dict[str, object]:
@@ -148,6 +191,105 @@ def test_record_limit_must_fit_total_budget() -> None:
 def test_storage_configuration_refuses_unknown_contract(config: dict[str, object]) -> None:
     with pytest.raises(ValueError, match="unsupported"):
         storage_from_configuration(config)
+
+
+@pytest.mark.parametrize("backend", ["local", "blob"])
+def test_given_serialized_storage_configuration_when_restored_then_records_are_preserved(
+    tmp_path: Path, mocker: Any, backend: str
+) -> None:
+    storage = _storage(tmp_path, backend)
+    with storage.transaction() as working:
+        working[KEY] = _record()
+    if backend == "blob":
+        mocker.patch.object(record_storage, "_blob_container_client", return_value=storage._container)
+
+    restored = storage_from_configuration(storage.configuration())
+
+    assert restored.configuration() == storage.configuration()
+    assert restored.snapshot() == storage.snapshot()
+
+
+@pytest.mark.parametrize("outcome", ["missing_revision", "absent", "changed", "deleted"])
+def test_given_blob_record_delete_when_revision_checked_then_foreign_bytes_are_retained(outcome: str) -> None:
+    container = _RecordContainer()
+    storage = _blob_record_store(container)
+    name = f"{storage._jobs_prefix}{KEY}.json"
+    content = canonical_json_bytes(_record())
+    if outcome != "absent":
+        container.put(name, content)
+    revision = (
+        None
+        if outcome == "missing_revision"
+        else "foreign"
+        if outcome in {"absent", "changed"}
+        else container.blobs[name].etag
+    )
+
+    if outcome in {"missing_revision", "changed"}:
+        with pytest.raises(ReleaseVerificationError, match=r"revision|concurrently"):
+            storage._delete(KEY, revision)
+        assert container.blobs[name].data == content
+    else:
+        storage._delete(KEY, revision)
+        assert name not in container.blobs
+
+
+@pytest.mark.parametrize("replay", [False, True])
+def test_given_concurrent_blob_record_create_when_replayed_then_only_exact_bytes_are_accepted(replay: bool) -> None:
+    container = _RecordContainer()
+    storage = _blob_record_store(container)
+    name = f"{storage._jobs_prefix}{KEY}.json"
+    content = canonical_json_bytes(_record())
+    container.put(name, content)
+    requested = content if replay else canonical_json_bytes({**_record(), "foreign": True})
+
+    if replay:
+        storage._write(KEY, requested, None)
+    else:
+        with pytest.raises(ReleaseVerificationError, match="concurrently"):
+            storage._write(KEY, requested, None)
+    assert container.blobs[name].data == content
+
+
+@pytest.mark.parametrize("status", [403, 409, 503])
+def test_given_blob_lease_failure_when_acquired_then_noncontention_errors_propagate(mocker: Any, status: int) -> None:
+    from azure.core.exceptions import HttpResponseError
+
+    storage = _blob_record_store(_RecordContainer())
+    storage._limits = RecordLimits(timeout_seconds=1)
+    error = HttpResponseError(
+        "fixed provider failure", response=SimpleNamespace(status_code=status, reason="failure", headers={})
+    )
+    blob = mocker.Mock()
+    blob.acquire_lease.side_effect = error
+    mocker.patch.object(record_storage.time, "monotonic", side_effect=[0, 0, 2])
+
+    with pytest.raises(TimeoutError if status == 409 else HttpResponseError):
+        storage._acquire(blob)
+
+
+def test_given_missing_coordinator_when_lease_acquired_then_readiness_is_reset(mocker: Any) -> None:
+    from azure.core.exceptions import ResourceNotFoundError
+
+    storage = _blob_record_store(_RecordContainer())
+    storage._coordinator_ready = True
+    mocker.patch.object(storage, "_acquire", side_effect=ResourceNotFoundError("missing"))
+
+    with pytest.raises(ResourceNotFoundError), storage._coordinator_lease():
+        pass
+
+    assert not storage._coordinator_ready
+
+
+def test_given_oversized_blob_record_when_read_directly_then_refused_before_decode() -> None:
+    container = _RecordContainer()
+    storage = _blob_record_store(container)
+    storage._limits = RecordLimits(max_record_bytes=64)
+    name = f"{storage._jobs_prefix}{KEY}.json"
+    container.put(name, b"x" * 65)
+
+    with pytest.raises(ReleaseVerificationError, match="max_record_bytes"):
+        storage._read(name, container.blobs[name].etag)
 
 
 @pytest.mark.parametrize("container", [None, "ab", "Uppercase"])

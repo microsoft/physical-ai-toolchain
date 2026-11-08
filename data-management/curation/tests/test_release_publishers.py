@@ -17,7 +17,13 @@ from physical_ai_curation.release.azure_publication import BlobPublisher, BlobRe
 from physical_ai_curation.release.canonical import canonical_json_bytes, sha256_hex
 from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.models import MARKER_PATH, SourceObject
-from physical_ai_curation.release.publication import LocalPublisher, PublicationAttempt, local_dataset_admitted
+from physical_ai_curation.release.publication import (
+    LocalPublisher,
+    PublicationAttempt,
+    local_dataset_admitted,
+    ownership_bytes,
+    parse_ownership,
+)
 from physical_ai_curation.release.record_storage import BlobLocation, RecordLimits, release_collection_location
 from physical_ai_curation.release.source_associations import (
     LocalSourceAssociations,
@@ -424,6 +430,151 @@ def test_given_existing_legacy_dataset_when_release_claimed_then_no_files_added(
 def test_given_unsafe_attempt_when_construct_then_refused(package: str, attempt: str) -> None:
     with pytest.raises(ReleaseVerificationError):
         PublicationAttempt(package, attempt)
+
+
+@pytest.mark.parametrize("name", [12, "bad/name", "bad--name", "_releases"])
+def test_given_invalid_dataset_name_when_attempt_constructed_then_refused(name: Any) -> None:
+    with pytest.raises(ReleaseVerificationError, match="dataset name"):
+        PublicationAttempt("package", "attempt", name, "org--dataset")
+
+
+@pytest.mark.parametrize("source", [12, "", "../dataset", "a" * 257])
+def test_given_invalid_source_identity_when_attempt_constructed_then_refused(source: Any) -> None:
+    with pytest.raises(ReleaseVerificationError, match="source dataset identity"):
+        PublicationAttempt("package", "attempt", "release", source)
+
+
+@pytest.mark.parametrize("damage", ["oversized", "array", "schema", "extra", "dataset", "source"])
+def test_given_malformed_ownership_when_admitted_then_refused(damage: str) -> None:
+    content = ownership_bytes(PublicationAttempt("package", "attempt", "release", "org--dataset"))
+    record = json.loads(content)
+    if damage == "oversized":
+        content = b" " * 4097
+    elif damage == "array":
+        content = b"[]"
+    else:
+        if damage == "schema":
+            record["schema_version"] = "unsupported"
+        elif damage == "extra":
+            record["extra"] = "not admitted"
+        elif damage == "dataset":
+            record["dataset_name"] = "foreign"
+        else:
+            record["source_dataset_id"] = None
+        content = canonical_json_bytes(record)
+
+    with pytest.raises(ReleaseVerificationError, match="ownership"):
+        parse_ownership(content, "release")
+
+
+@pytest.mark.parametrize("namespace", ["_releases", "_release_associations"])
+def test_given_operational_namespace_when_dataset_admission_checked_then_hidden(tmp_path: Path, namespace: str) -> None:
+    assert not local_dataset_admitted(tmp_path / namespace)
+
+
+def test_given_unreadable_ownership_when_dataset_admission_checked_then_fail_closed(
+    tmp_path: Path, mocker: Any
+) -> None:
+    root = tmp_path / "dataset"
+    original = Path.stat
+
+    def inspect(path: Path, *args: Any, **kwargs: Any) -> Any:
+        if path == tmp_path / "_releases/dataset.json":
+            raise PermissionError("denied")
+        return original(path, *args, **kwargs)
+
+    mocker.patch.object(Path, "stat", inspect)
+
+    assert not local_dataset_admitted(root)
+
+
+@pytest.mark.parametrize("damage", ["same_length", "fresh_collision", "marker", "marker_path"])
+def test_given_protected_local_output_when_written_then_existing_bytes_are_retained(
+    tmp_path: Path, damage: str
+) -> None:
+    publisher = LocalPublisher(
+        tmp_path, PublicationAttempt("package", "attempt", "release", "org--dataset"), OwnedControl()
+    )
+    content = b"original"
+    publisher.write("data/item", (content,), length=len(content), sha256=sha256_hex(content))
+    if damage == "same_length":
+        (publisher.root / "data/item").write_bytes(b"modified")
+    elif damage == "fresh_collision":
+        publisher.control.intents.clear()
+    elif damage == "marker":
+        (publisher.root / MARKER_PATH).write_bytes(b"published")
+    before = (publisher.root / "data/item").read_bytes()
+
+    with pytest.raises(ReleaseVerificationError):
+        publisher.write(
+            MARKER_PATH if damage == "marker_path" else "data/item",
+            (content,),
+            length=len(content),
+            sha256=sha256_hex(content),
+        )
+
+    assert (publisher.root / "data/item").read_bytes() == before
+
+
+@pytest.mark.parametrize("overlap", ["same", "source_parent", "destination_parent"])
+def test_given_overlapping_copy_roots_when_local_copy_requested_then_no_effect(tmp_path: Path, overlap: str) -> None:
+    publisher = LocalPublisher(
+        tmp_path, PublicationAttempt("package", "attempt", "release", "org--dataset"), OwnedControl()
+    )
+    source_root = {"same": publisher.root, "source_parent": tmp_path, "destination_parent": publisher.root / "nested"}[
+        overlap
+    ]
+    source = SourceObject(path="data/item", revision="r1", length=1, sha256=sha256_hex(b"x"))
+
+    with pytest.raises(ReleaseVerificationError, match="overlap"):
+        publisher.copy(source_root, source)
+
+    assert publisher.control.intents == {}
+
+
+def test_given_independent_local_source_when_copied_then_verified_bytes_are_renamed(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    source = SourceObject(path="data/item", revision="r1", length=1, sha256=sha256_hex(b"x"))
+    LocalReleaseStore(source_root).write_verified_object(source.path, (b"x",), length=1, sha256=source.sha256)
+    publisher = LocalPublisher(
+        tmp_path / "destination", PublicationAttempt("package", "attempt", "release", "org--dataset"), OwnedControl()
+    )
+
+    publisher.copy(source_root, source, output_path="data/renamed")
+
+    assert (publisher.root / "data/renamed").read_bytes() == b"x"
+    assert (source_root / source.path).read_bytes() == b"x"
+
+
+@pytest.mark.parametrize(
+    "entry", ["non_json", "record_directory", "record_symlink", "absent_root", "root_symlink", "namespace_symlink"]
+)
+def test_given_unsafe_discovery_entry_when_local_releases_listed_then_not_admitted(tmp_path: Path, entry: str) -> None:
+    publisher = LocalPublisher(
+        tmp_path, PublicationAttempt("package", "attempt", "release", "org--dataset"), OwnedControl()
+    )
+    namespace = tmp_path / "_releases"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    if entry == "namespace_symlink":
+        namespace.symlink_to(outside, target_is_directory=True)
+    else:
+        namespace.mkdir()
+        record = namespace / "release.json"
+        if entry == "non_json":
+            record = namespace / "ignored.txt"
+        if entry == "record_directory":
+            record.mkdir()
+        elif entry == "record_symlink":
+            target = outside / "owner.json"
+            target.write_bytes(b"{}")
+            record.symlink_to(target)
+        else:
+            record.write_bytes(b"{}")
+        if entry == "root_symlink":
+            publisher.root.symlink_to(outside, target_is_directory=True)
+
+    assert publisher.discover() == []
 
 
 def test_given_lost_authority_when_write_then_no_output(tmp_path: Path) -> None:

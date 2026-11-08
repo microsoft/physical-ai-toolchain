@@ -18,6 +18,74 @@ from physical_ai_curation.release.media import (
 from test_release_media import LOCAL_SCRATCH_SAME, VIDEO, _exact_copy_plan, _request, _source, _window
 
 
+@pytest.mark.parametrize("fps", [True, 0, -1, float("nan"), float("inf"), "25"])
+def test_given_invalid_encoder_rate_when_admitted_then_sink_is_not_opened(fps: object) -> None:
+    import io
+
+    from physical_ai_curation.release.encoding import EncodingWindow, encode_windows
+
+    sink = io.BytesIO()
+    with pytest.raises(ReleasePlanError, match="fps"):
+        encode_windows(io.BytesIO(b"unread source"), sink, [EncodingWindow("episode", 0.0, 1, (0,))], fps=fps)
+    assert sink.getvalue() == b""
+
+
+@pytest.mark.parametrize("damage", ["empty", "wrong_type", "duplicate"])
+def test_given_invalid_encoder_windows_when_admitted_then_source_and_sink_remain_untouched(damage: str) -> None:
+    import io
+
+    from physical_ai_curation.release.encoding import EncodingWindow, encode_windows
+
+    window = EncodingWindow("episode", 0.0, 1, (0,))
+    windows = [] if damage == "empty" else ["unbound"] if damage == "wrong_type" else [window, window]
+    source = io.BytesIO(b"unread source")
+    sink = io.BytesIO()
+
+    with pytest.raises(ReleasePlanError):
+        encode_windows(source, sink, windows, fps=25)
+
+    assert source.tell() == 0
+    assert sink.getvalue() == b""
+
+
+@pytest.mark.parametrize("source_kind", ["invalid", "audio_only", "high_depth"])
+def test_given_unadmitted_media_stream_when_encoder_opens_source_then_output_is_not_created(source_kind: str) -> None:
+    import io
+    import wave
+
+    from physical_ai_curation.release.encoding import EncodingWindow, encode_windows
+
+    source = io.BytesIO()
+    if source_kind == "invalid":
+        source.write(b"not a media container")
+    elif source_kind == "audio_only":
+        with wave.open(source, "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(8000)
+            audio.writeframes(b"\0\0" * 16)
+    else:
+        import numpy as np
+        from PIL import Image
+
+        Image.fromarray(np.zeros((32, 32), dtype=np.uint16)).save(source, format="PNG")
+    source.seek(0)
+    sink = io.BytesIO()
+    error = ReleasePlanError if source_kind == "high_depth" else ReleaseExecutionError
+
+    with pytest.raises(
+        error,
+        match="unsupported source depth"
+        if source_kind == "high_depth"
+        else "no video stream"
+        if source_kind == "audio_only"
+        else "source or encoder is invalid",
+    ):
+        encode_windows(source, sink, [EncodingWindow("episode", 0.0, 1, (0,))], fps=25)
+
+    assert sink.getvalue() == b""
+
+
 @pytest.mark.parametrize(
     "options",
     [

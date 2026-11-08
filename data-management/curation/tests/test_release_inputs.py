@@ -8,6 +8,7 @@ import os
 import threading
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -30,7 +31,7 @@ from physical_ai_curation.release.inputs import (
 )
 from physical_ai_curation.release.jobs import CancellationError
 from physical_ai_curation.release.models import RevisionSourceObject, SourceObject
-from physical_ai_curation.saved_input import SavedInputError, SavedResource
+from physical_ai_curation.saved_input import SavedInputError, SavedInputSnapshot, SavedResource
 
 
 class SavedReader:
@@ -61,6 +62,116 @@ class SavedReader:
         return self.edit
 
 
+def _validation_snapshot() -> SavedInputSnapshot:
+    return SavedInputSnapshot(
+        snapshot_id="saved-snapshot",
+        dataset_id="sample",
+        episode_index=0,
+        principal_scope_id="principal",
+        source_id="source",
+        source_revision="source-revision",
+        annotation_author_id="human",
+        annotation_revision="annotation-v1",
+        edit_revision=None,
+        instruction="Move the cup",
+        instruction_origin="annotation",
+    )
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "dataset",
+        "episode",
+        "revision",
+        "missing_author",
+        "duplicate_author",
+        "instruction",
+        "outcome",
+        "second_revision",
+        "valid",
+    ],
+)
+async def test_given_saved_annotation_baseline_when_resolved_then_current_single_authority_is_required(
+    damage: str, mocker: Any
+) -> None:
+    from physical_ai_curation.saved_input import resolve_validation_sample
+
+    snapshot = _validation_snapshot()
+    reader = SavedReader()
+    entry = {
+        "annotator_id": "human",
+        "language_instruction": {"instruction": snapshot.instruction},
+        "task_completeness": {"rating": "success"},
+    }
+    value = {"dataset_id": snapshot.dataset_id, "episode_index": snapshot.episode_index, "annotations": [entry]}
+    if damage == "dataset":
+        value["dataset_id"] = "different"
+    elif damage == "episode":
+        value["episode_index"] = 1
+    elif damage == "missing_author":
+        entry["annotator_id"] = "different"
+    elif damage == "duplicate_author":
+        value["annotations"].append(dict(entry))
+    elif damage == "instruction":
+        entry["language_instruction"]["instruction"] = "different"
+    elif damage == "outcome":
+        entry["task_completeness"]["rating"] = "unknown"
+    reader.annotations = SavedResource(value, "different" if damage == "revision" else snapshot.annotation_revision)
+    if damage == "second_revision":
+        mocker.patch.object(
+            reader,
+            "annotation",
+            new=mocker.AsyncMock(side_effect=[reader.annotations, replace(reader.annotations, etag="changed")]),
+        )
+    reference = {
+        "snapshot_id": snapshot.snapshot_id,
+        "annotation_author_id": snapshot.annotation_author_id,
+        "annotation_revision": snapshot.annotation_revision,
+    }
+
+    if damage == "valid":
+        sample = await resolve_validation_sample(reader, snapshot, reference)
+        assert sample["human_outcome"] == "success"
+        assert sample["input"] == snapshot.model_dump(mode="json")
+        assert sample["reference"] == reference
+        assert reader.reads == ["annotation", "annotation"]
+    else:
+        with pytest.raises(SavedInputError):
+            await resolve_validation_sample(reader, snapshot, reference)
+
+
+@pytest.mark.parametrize("damage", ["absent", "foreign_dataset", "ambiguous", "changed_revision", "valid"])
+async def test_given_saved_label_baseline_when_validation_sample_resolved_then_exact_outcome_revision_is_required(
+    damage: str,
+) -> None:
+    from physical_ai_curation.models import DatasetLabelsFile
+    from physical_ai_curation.saved_input import label_baseline, resolve_validation_sample
+
+    snapshot = _validation_snapshot()
+    reader = SavedReader()
+    labels = DatasetLabelsFile(
+        dataset_id="different" if damage == "foreign_dataset" else snapshot.dataset_id,
+        episodes={"0": ["SUCCESS", "FAILURE"] if damage == "ambiguous" else ["SUCCESS"]},
+    )
+    baseline = label_baseline(labels, 0)
+    reference = {
+        "snapshot_id": snapshot.snapshot_id,
+        "labels_revision": baseline["revision"] if baseline and damage != "changed_revision" else "changed",
+    }
+
+    if damage == "valid":
+        sample = await resolve_validation_sample(reader, snapshot, reference, labels=labels)
+        assert sample["baseline_source"] == "label"
+        assert sample["human_outcome"] == "success"
+        assert sample["reference"] == reference
+    else:
+        with pytest.raises(SavedInputError):
+            await resolve_validation_sample(reader, snapshot, reference, labels=None if damage == "absent" else labels)
+
+    assert reader.reads == []
+
+
 @pytest.fixture
 def local_source(tmp_path: Path) -> LocalReleaseSource:
     (tmp_path / "data").mkdir()
@@ -83,6 +194,88 @@ def _context() -> FreezeContext:
 
 def _selection(*resources: SavedSelection) -> ReleaseSelection:
     return ReleaseSelection(dataset_id="sample", episode_indices=(0,), resources=resources)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("kind", "unsupported"),
+        ("episode_index", -1),
+        ("episode_index", True),
+        ("expected_revision", ""),
+        ("annotation_author_id", ""),
+        ("annotation_author_id", "not-for-edits"),
+    ],
+)
+def test_given_invalid_saved_selection_when_constructed_then_refused(field: str, value: object) -> None:
+    selection = SavedSelection("edits", 0, "r1")
+
+    with pytest.raises(ReleaseInputError):
+        replace(selection, **{field: value})
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("dataset_id", ""),
+        ("episode_indices", ()),
+        ("episode_indices", (True,)),
+        ("episode_indices", (-1,)),
+        ("episode_indices", (0, 0)),
+        ("resources", (SavedSelection("edits", 1, "r1"),)),
+        ("resources", (SavedSelection("edits", 0, "r1"), SavedSelection("edits", 0, "r1"))),
+    ],
+)
+def test_given_invalid_release_selection_when_constructed_then_refused(field: str, value: object) -> None:
+    with pytest.raises(ReleaseInputError):
+        replace(_selection(), **{field: value})
+
+
+@pytest.mark.parametrize(
+    "bindings",
+    [(("first", "one"), ("first", "two")), (("first", "one"), ("second", "one")), (("", "one"),), (("first", ""),)],
+)
+def test_given_invalid_contributor_bindings_when_context_created_then_refused(
+    bindings: tuple[tuple[str, str], ...],
+) -> None:
+    with pytest.raises(ReleaseInputError):
+        replace(_context(), contributor_labels=bindings)
+
+
+@pytest.mark.parametrize("field", ["principal_scope_id", "source"])
+def test_given_missing_private_context_when_frozen_then_refused_before_saved_reads(
+    local_source: LocalReleaseSource, field: str
+) -> None:
+    reader = SavedReader()
+    context = replace(_context(), **{field: "" if field == "principal_scope_id" else ("", "")})
+
+    with pytest.raises(ReleaseInputError, match="context is required"):
+        asyncio.run(freeze_release_inputs(local_source, reader, _selection(), context))
+
+    assert reader.reads == []
+
+
+def test_given_unsupported_extended_resource_when_frozen_then_refused(local_source: LocalReleaseSource) -> None:
+    selection = _selection(SavedSelection("labels", 0, "labels-v1"))
+
+    with pytest.raises(ReleaseInputError, match="not supported by this reader"):
+        asyncio.run(freeze_release_inputs(local_source, SavedReader(), selection, _context()))
+
+
+def test_given_contributor_alias_collision_when_frozen_then_distinct_portable_alias_is_allocated(
+    local_source: LocalReleaseSource,
+) -> None:
+    reader = SavedReader()
+    reader.annotations = SavedResource({"annotations": [{"author_id": "third-private"}]}, "annotation-v1")
+    context = FreezeContext(
+        "first-private", reader.source, (("first-private", "contributor-3"), ("second-private", "contributor-1"))
+    )
+    selection = _selection(SavedSelection("annotation", 0, "annotation-v1"))
+
+    frozen = asyncio.run(freeze_release_inputs(local_source, reader, selection, context))
+
+    assert "contributor-4" in frozen.content.saved_resources[0].value_json
+    assert "third-private" not in frozen.content.saved_resources[0].value_json
 
 
 def test_given_unfinalized_local_source_when_inventory_then_refused(

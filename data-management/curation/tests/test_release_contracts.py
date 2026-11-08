@@ -282,6 +282,48 @@ class TestSchemaRoundTrip:
 
 
 class TestResultIdentity:
+    @pytest.mark.parametrize(
+        "claim",
+        [
+            {"origin": "supplied_receipt"},
+            {"origin": "imported_timestamp"},
+            {"origin": "unknown", "receipt_sha256": DIGEST},
+            {"origin": "unknown", "claimed_timestamp": "2026-01-01T00:00:00Z"},
+        ],
+    )
+    def test_given_inconsistent_recording_claim_when_validated_then_unobserved_facts_are_refused(
+        self, claim: dict[str, str]
+    ) -> None:
+        from physical_ai_curation.release.models import RecordingClaim
+
+        with pytest.raises(ValidationError):
+            RecordingClaim(episode_id="ep-000", **claim)
+
+    @pytest.mark.parametrize("collection", ["selected_episode_ids", "source_objects", "saved_resources"])
+    def test_given_duplicate_frozen_identity_when_validated_then_ambiguous_authority_is_refused(
+        self, collection: str
+    ) -> None:
+        frozen = FrozenInput.model_validate_json(_payload_files()[FROZEN_PATH]).model_dump(mode="json")
+        if collection == "saved_resources":
+            frozen[collection] = [{"resource_id": "annotation", "revision": "v1", "value_json": "{}"}]
+        frozen[collection] *= 2
+
+        with pytest.raises(ValidationError, match="unique"):
+            FrozenInput.model_validate(frozen)
+
+    @pytest.mark.parametrize("damage", ["shared_control_path", "duplicate_target"])
+    def test_given_ambiguous_manifest_mapping_when_validated_then_distinct_bindings_are_required(
+        self, damage: str
+    ) -> None:
+        manifest = _manifest_for(_payload_files()).model_dump(mode="json")
+        if damage == "shared_control_path":
+            manifest["frozen_input_path"] = manifest["preview_path"]
+        else:
+            manifest["mappings"] *= 2
+
+        with pytest.raises(ValidationError):
+            ReleaseManifest.model_validate(manifest)
+
     def test_given_registered_integration_when_not_published_then_rejected(self) -> None:
         # Arrange
         identity = PackageIdentity(package_id="pkg-001", manifest_sha256=DIGEST)
@@ -309,6 +351,102 @@ class TestResultIdentity:
 
 
 class TestCandidateAndPublicVerification:
+    @pytest.mark.parametrize(
+        "damage",
+        [
+            "frozen_digest",
+            "preview_digest",
+            "outside_target",
+            "preview_count",
+            "preview_digest_binding",
+            "preview_output",
+        ],
+    )
+    def test_given_self_consistent_inventory_when_authoritative_bindings_conflict_then_verification_refuses(
+        self, tmp_path: Path, damage: str
+    ) -> None:
+        files = _payload_files()
+        if damage.startswith("preview_") and damage != "preview_digest":
+            preview = ReleasePreview.model_validate_json(files[PREVIEW_PATH]).model_dump(mode="json")
+            if damage == "preview_count":
+                preview["episode_count"] = 2
+            elif damage == "preview_digest_binding":
+                preview["frozen_input_sha256"] = "0" * 64
+            else:
+                preview["actions"] = [
+                    {
+                        "object_path": "data/foreign.bin",
+                        "action": "copy",
+                        "route": "copy",
+                        "tool": "fixture",
+                        "destination_alias": "release",
+                        "confirmation_required": False,
+                    }
+                ]
+            files[PREVIEW_PATH] = serialize_model(ReleasePreview.model_validate(preview))
+        manifest = _manifest_for(files)
+        if damage in {"frozen_digest", "preview_digest"}:
+            manifest = manifest.model_copy(
+                update={"frozen_input_sha256" if damage == "frozen_digest" else "preview_sha256": "0" * 64}
+            )
+        elif damage == "outside_target":
+            manifest = manifest.model_copy(
+                update={"mappings": (ProvenanceMapping(source="data/episode-000.jsonl", target="data/foreign.bin"),)}
+            )
+        _write_package(tmp_path, files, manifest)
+        before = {path: (tmp_path / path).read_bytes() for path in files}
+
+        with pytest.raises(ReleaseVerificationError):
+            verify_candidate(LocalReleaseStore(tmp_path))
+
+        assert {path: (tmp_path / path).read_bytes() for path in files} == before
+        assert not (tmp_path / MARKER_PATH).exists()
+
+    def test_given_duplicate_adapter_listing_when_verified_then_ambiguous_object_identity_is_refused(
+        self, miniature: MiniaturePackage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = LocalReleaseStore(miniature.root)
+        objects = store.list_objects()
+        monkeypatch.setattr(store, "list_objects", lambda: [*objects, objects[0]])
+
+        with pytest.raises(ReleaseVerificationError, match="duplicate release object path"):
+            verify_candidate(store)
+
+        assert not (miniature.root / MARKER_PATH).exists()
+
+    def test_given_inventory_payload_when_growing_after_admission_then_verification_refuses_extra_bytes(
+        self, miniature: MiniaturePackage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = LocalReleaseStore(miniature.root)
+        original_iter = store.iter_bytes
+        grown = []
+
+        def grow_then_read(path: str, *, chunk_size: int) -> Iterator[bytes]:
+            if path == FROZEN_PATH:
+                target = miniature.root / path
+                target.write_bytes(target.read_bytes() + b" ")
+                grown.append(path)
+            yield from original_iter(path, chunk_size=chunk_size)
+
+        monkeypatch.setattr(store, "iter_bytes", grow_then_read)
+        with pytest.raises(ReleaseVerificationError, match="length mismatch"):
+            verify_candidate(store)
+
+        assert grown == [FROZEN_PATH]
+        assert (miniature.root / FROZEN_PATH).read_bytes() == miniature.files[FROZEN_PATH] + b" "
+        assert not (miniature.root / MARKER_PATH).exists()
+
+    def test_given_published_package_when_expected_source_is_foreign_then_verification_refuses(
+        self, miniature: MiniaturePackage
+    ) -> None:
+        _finalize(miniature.root)
+        marker = (miniature.root / MARKER_PATH).read_bytes()
+
+        with pytest.raises(ReleaseVerificationError, match="expected source dataset"):
+            verify_published(LocalReleaseStore(miniature.root), expected_source_dataset_id="foreign")
+
+        assert (miniature.root / MARKER_PATH).read_bytes() == marker
+
     def test_given_source_only_in_frozen_provenance_when_verify_then_original_payload_is_not_required(
         self, tmp_path: Path
     ) -> None:

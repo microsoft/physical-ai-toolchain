@@ -165,6 +165,71 @@ def _seed(client: _FakeAssetClient, asset: AzureMLDataAsset, **changes: object) 
     client.assets[(seeded.name, seeded.version)] = seeded
 
 
+@pytest.mark.parametrize("status", [404, 403, 503])
+def test_given_sdk_asset_lookup_failure_when_read_then_only_not_found_becomes_absent(
+    mocker: MockerFixture, status: int
+) -> None:
+    from physical_ai_curation.release.azureml import _MLClientDataAssets
+
+    client = mocker.Mock()
+    client.data.get.side_effect = _StatusError(status)
+    adapter = _MLClientDataAssets(
+        client, subscription_id="test-subscription", resource_group="test-group", workspace_name="test-workspace"
+    )
+
+    if status == 404:
+        assert adapter.get_data_asset("release", "1") is None
+    else:
+        with pytest.raises(_StatusError):
+            adapter.get_data_asset("release", "1")
+
+
+@pytest.mark.parametrize("suffix", ["", "?version=1", "#fragment"])
+def test_given_workspace_qualified_sdk_asset_when_read_then_only_exact_clean_workspace_path_is_normalized(
+    mocker: MockerFixture, suffix: str
+) -> None:
+    from physical_ai_curation.release.azureml import _MLClientDataAssets
+
+    path = f"azureml://subscriptions/test-subscription/resourcegroups/test-group/workspaces/test-workspace/datastores/{DATASTORE}/paths/{PREFIX}/{suffix}"
+    client = mocker.Mock()
+    client.data.get.return_value = SimpleNamespace(
+        name="release", version="1", path=path, properties=None, tags=None, type="uri_folder"
+    )
+    adapter = _MLClientDataAssets(
+        client, subscription_id="test-subscription", resource_group="test-group", workspace_name="test-workspace"
+    )
+
+    asset = adapter.get_data_asset("release", "1")
+
+    assert asset is not None
+    assert asset.path == (EXPECTED_PATH if not suffix else path)
+    assert asset.properties == {} and asset.tags == {}
+
+
+def test_given_sdk_asset_creation_when_dispatched_then_entity_preserves_verified_metadata(
+    mocker: MockerFixture,
+) -> None:
+    from physical_ai_curation.release.azureml import _MLClientDataAssets
+
+    client = mocker.Mock()
+    adapter = _MLClientDataAssets(
+        client, subscription_id="test-subscription", resource_group="test-group", workspace_name="test-workspace"
+    )
+    asset = AzureMLDataAsset(
+        name="release",
+        version="1",
+        path=EXPECTED_PATH,
+        properties={"manifest_sha256": DIGEST},
+        tags={"release_name": "release-a"},
+    )
+
+    adapter.create_data_asset(asset)
+
+    entity = client.data.create_or_update.call_args.args[0]
+    assert entity.name == asset.name and entity.version == asset.version and entity.path == asset.path
+    assert entity.properties == asset.properties and entity.tags == asset.tags and entity.type == "uri_folder"
+
+
 def test_given_published_release_when_register_then_creates_asset(tmp_path: Path) -> None:
     # Arrange
     manifest_sha256 = _build_package(tmp_path)
@@ -341,6 +406,49 @@ def test_given_create_raises_secret_bearing_error_when_register_then_bounded_pro
 
     # Assert
     assert (info.value.category, "secret" not in repr(info.value)) == ("provider_error", True)
+
+
+@pytest.mark.parametrize("supplied_credential", [False, True])
+def test_given_workspace_configuration_when_client_is_built_then_sdk_receives_exact_identity(
+    mocker: MockerFixture, supplied_credential: bool
+) -> None:
+    credential = object()
+    data = mocker.Mock()
+    data.get.side_effect = _StatusError(404)
+    sdk = mocker.patch("azure.ai.ml.MLClient", return_value=SimpleNamespace(data=data))
+    default = mocker.patch("azure.identity.DefaultAzureCredential", return_value=credential)
+
+    client = create_azureml_client(
+        subscription_id="subscription",
+        resource_group="resource-group",
+        workspace_name="workspace",
+        credential=credential if supplied_credential else None,
+    )
+
+    sdk.assert_called_once_with(
+        credential=credential,
+        subscription_id="subscription",
+        resource_group_name="resource-group",
+        workspace_name="workspace",
+    )
+    assert default.call_count == (0 if supplied_credential else 1)
+    assert client.get_data_asset("release", "version") is None
+    data.get.assert_called_once_with(name="release", version="version")
+
+
+@pytest.mark.parametrize("field", ["subscription_id", "resource_group", "workspace_name"])
+def test_given_incomplete_workspace_when_client_is_built_then_sdk_is_not_initialized(
+    mocker: MockerFixture, field: str
+) -> None:
+    sdk = mocker.patch("azure.ai.ml.MLClient")
+    options = {"subscription_id": "subscription", "resource_group": "resource-group", "workspace_name": "workspace"}
+    options[field] = ""
+
+    with pytest.raises(AzureMLRegistrationError) as error:
+        create_azureml_client(**options)
+
+    assert error.value.category == "invalid_request"
+    sdk.assert_not_called()
 
 
 def test_given_sdk_missing_when_create_client_then_not_configured(mocker: MockerFixture) -> None:

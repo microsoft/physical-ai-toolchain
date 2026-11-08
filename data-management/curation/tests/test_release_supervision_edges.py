@@ -7,12 +7,14 @@ import os
 import signal
 import socket
 import struct
+from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
 from physical_ai_curation.release import supervision
 from physical_ai_curation.release.errors import ReleaseVerificationError
-from physical_ai_curation.release.supervision import ProcessIdentity
+from physical_ai_curation.release.supervision import ProcessIdentity, ProcessSupervisor, SupervisedRuntime
 
 
 def test_guardian_channel_buffers_fragmented_frames_and_preserves_message_order() -> None:
@@ -130,3 +132,121 @@ def test_supervision_refuses_unsupported_kernel_capabilities(monkeypatch: pytest
 
     with pytest.raises(ReleaseVerificationError, match="require Linux pidfds"):
         supervision._require_linux()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("argv", "not a list"),
+        ("argv", [1]),
+        ("inherit_fds", "not a list"),
+        ("inherit_fds", [True]),
+        ("memory", True),
+        ("file", "unbounded"),
+        ("cwd", 12),
+        ("proof_path", 12),
+        ("output_fd", -1),
+        ("grace", -1),
+        ("liveness", 0),
+    ],
+)
+def test_given_invalid_guardian_configuration_when_decoded_then_no_process_is_admitted(
+    field: str, value: object
+) -> None:
+    config = {
+        "argv": ["true"],
+        "inherit_fds": [],
+        "memory": 512 * 1024**2,
+        "file": 1024,
+        "cwd": None,
+        "proof_path": None,
+        "output_fd": 1,
+        "grace": 0.0,
+        "liveness": 1.0,
+        field: value,
+    }
+
+    with pytest.raises(ReleaseVerificationError):
+        supervision._GuardianConfig.from_message(config)
+
+
+@pytest.mark.parametrize("damage", ["missing", "directory", "symlink", "oversized", "invalid_json", "missing_path"])
+def test_given_untrusted_stop_proof_when_read_then_only_missing_file_is_absent(tmp_path: Path, damage: str) -> None:
+    path = tmp_path / "proof.json"
+    if damage == "directory":
+        path.mkdir()
+    elif damage == "symlink":
+        target = tmp_path / "target.json"
+        target.write_bytes(b"{}")
+        path.symlink_to(target)
+    elif damage in {"oversized", "invalid_json"}:
+        path.write_bytes(b"x" * (supervision.MAX_PROOF_BYTES + 1) if damage == "oversized" else b"invalid JSON")
+    identity = ProcessIdentity(pid=123, start=1, boot_id="test-boot")
+    runtime = SupervisedRuntime(identity, identity, None if damage == "missing_path" else str(path))
+
+    if damage == "missing":
+        assert supervision._read_proof(runtime) is None
+    else:
+        with pytest.raises(ReleaseVerificationError, match="unresolved"):
+            supervision._read_proof(runtime)
+
+
+def test_given_stop_proof_metadata_read_failure_when_checked_then_descriptor_is_closed(
+    tmp_path: Path, mocker: Any
+) -> None:
+    path = tmp_path / "proof.json"
+    path.write_bytes(b"{}")
+    identity = ProcessIdentity(pid=123, start=1, boot_id="test-boot")
+    runtime = SupervisedRuntime(identity, identity, str(path))
+    opened = mocker.spy(os, "open")
+    metadata = mocker.patch.object(os, "fstat", side_effect=OSError("metadata unavailable"))
+
+    with pytest.raises(ReleaseVerificationError, match="unresolved"):
+        supervision._read_proof(runtime)
+    mocker.stop(metadata)
+
+    with pytest.raises(OSError):
+        os.fstat(opened.spy_return)
+
+
+@pytest.mark.parametrize("reply", ["failed", "malformed"])
+def test_given_failed_guardian_handshake_when_received_then_control_channel_is_closed(reply: str) -> None:
+    sender, receiver = socket.socketpair()
+    with sender, receiver:
+        channel = supervision._Channel(sender)
+        supervisor = ProcessSupervisor(["true"], memory_bytes=512 * 1024**2)
+        supervisor._channel = supervision._Channel(receiver)
+        if reply == "failed":
+            channel.send({"op": "failed"})
+        else:
+            channel.send({"op": "spawned", "guardian": {}, "leader": {}})
+            channel.send({"op": "stopped"})
+
+        with pytest.raises(ReleaseVerificationError, match="supervised start"):
+            supervisor._handshake({"op": "start"})
+
+        assert receiver.fileno() == -1
+        assert supervisor._runtime is None
+
+
+def test_given_unstarted_supervisor_when_channel_required_then_refused() -> None:
+    supervisor = ProcessSupervisor(["true"], memory_bytes=512 * 1024**2)
+
+    with pytest.raises(ReleaseVerificationError, match="not started"):
+        supervisor._require_channel()
+
+
+@pytest.mark.parametrize("message", [{"op": "unknown"}, {"op": "leader_exited", "code": True}])
+def test_given_invalid_guardian_message_when_dispatched_then_protocol_is_refused(message: dict[str, object]) -> None:
+    supervisor = ProcessSupervisor(["true"], memory_bytes=512 * 1024**2)
+
+    with pytest.raises(ReleaseVerificationError):
+        supervisor._dispatch(message)
+
+
+def test_given_already_exited_process_group_when_signalled_then_absence_is_complete(mocker: Any) -> None:
+    kill = mocker.patch.object(os, "killpg", side_effect=ProcessLookupError)
+
+    supervision._signal_group(123, signal.SIGTERM)
+
+    kill.assert_called_once_with(123, signal.SIGTERM)

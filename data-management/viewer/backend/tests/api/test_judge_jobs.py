@@ -16,6 +16,121 @@ from physical_ai_dataset_io.lerobot import EpisodeRecord
 ECHO_CONFIG = {"execution": {"backend": "echo", "model_id": "echo"}, "agent": {}, "prompt_version": "test"}
 
 
+@pytest.mark.parametrize(
+    ("authority", "scheme"),
+    [
+        ("", "http"),
+        ("localhost:", "http"),
+        ("localhost:0", "http"),
+        ("localhost", "ftp"),
+        ("192.0.2.1", "http"),
+        ("localhost@127.0.0.1", "http"),
+        ("localhost,127.0.0.1", "http"),
+        ("localhost/path", "http"),
+        ("localhost:invalid", "http"),
+    ],
+)
+def test_given_untrusted_local_authority_when_parsed_then_no_network_identity_is_inferred(
+    authority: str, scheme: str
+) -> None:
+    from physical_ai_curation.api import _local_authority
+
+    with pytest.raises(ValueError):
+        _local_authority(authority, scheme)
+
+
+@pytest.mark.parametrize(
+    ("authority", "scheme", "expected"),
+    [
+        ("localhost", "http", ("http", "localhost", 80)),
+        ("127.0.0.1", "https", ("https", "127.0.0.1", 443)),
+        ("[::1]:8080", "http", ("http", "::1", 8080)),
+    ],
+)
+def test_given_literal_loopback_authority_when_parsed_then_exact_host_scheme_and_port_are_retained(
+    authority: str, scheme: str, expected: tuple[str, str, int]
+) -> None:
+    from physical_ai_curation.api import _local_authority
+
+    assert _local_authority(authority, scheme) == expected
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "no_client",
+        "nonlocal_client",
+        "invalid_client",
+        "forwarded",
+        "duplicate_host",
+        "missing_host",
+        "duplicate_origin",
+        "origin_path",
+        "origin_query",
+        "origin_fragment",
+        "foreign_origin",
+        "cross_site",
+        "duplicate_content_type",
+        "wrong_content_type",
+    ],
+)
+def test_given_untrusted_local_http_request_when_admitted_then_it_is_refused(damage: str) -> None:
+    from physical_ai_curation.api import _admit_local_request
+    from starlette.requests import Request
+
+    headers = [(b"host", b"localhost"), (b"content-type", b"application/json")]
+    client = ("127.0.0.1", 4242)
+    if damage == "no_client":
+        client = None
+    elif damage in {"nonlocal_client", "invalid_client"}:
+        client = ("192.0.2.1" if damage == "nonlocal_client" else "invalid-client", 4242)
+    elif damage == "forwarded":
+        headers.append((b"forwarded", b"for=127.0.0.1"))
+    elif damage == "duplicate_host":
+        headers.append((b"host", b"localhost"))
+    elif damage == "missing_host":
+        headers = [item for item in headers if item[0] != b"host"]
+    elif damage == "duplicate_origin":
+        headers.extend([(b"origin", b"http://localhost"), (b"origin", b"http://localhost")])
+    elif damage.startswith("origin_"):
+        suffix = {"origin_path": "/path", "origin_query": "?query=1", "origin_fragment": "#fragment"}[damage]
+        headers.append((b"origin", f"http://localhost{suffix}".encode()))
+    elif damage == "foreign_origin":
+        headers.append((b"origin", b"http://localhost:8080"))
+    elif damage == "cross_site":
+        headers.append((b"sec-fetch-site", b"cross-site"))
+    elif damage == "duplicate_content_type":
+        headers.append((b"content-type", b"application/json"))
+    else:
+        headers = [(b"host", b"localhost"), (b"content-type", b"text/plain")]
+    request = Request(
+        {"type": "http", "scheme": "http", "method": "POST", "path": "/judge", "headers": headers, "client": client}
+    )
+
+    assert not _admit_local_request(request)
+
+
+@pytest.mark.parametrize(("method", "require_json"), [("GET", True), ("HEAD", True), ("POST", False)])
+def test_given_local_bodyless_http_request_when_admitted_then_allowed_without_content_type(
+    method: str, require_json: bool
+) -> None:
+    from physical_ai_curation.api import _admit_local_request
+    from starlette.requests import Request
+
+    request = Request(
+        {
+            "type": "http",
+            "scheme": "http",
+            "method": method,
+            "path": "/health",
+            "headers": [(b"host", b"localhost")],
+            "client": ("127.0.0.1", 4242),
+        }
+    )
+
+    assert _admit_local_request(request, require_json=require_json)
+
+
 class Resolver:
     async def episode_indices(self, dataset_id: str, *, principal_scope_id: str) -> list[int]:
         return [3, 1005]
@@ -106,6 +221,160 @@ async def test_given_versioned_evidence_when_read_then_preserves_payload_and_ide
     with pytest.raises(ValueError, match="Missing evidence envelope"):
         read_evidence(payload)
     assert snapshot.model_dump(mode="json")["snapshot_id"] == "snapshot-3"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("episode_id", " "),
+        ("instruction", " "),
+        ("judge_model", " "),
+        ("prompt_version", " "),
+        ("progress_per_frame", [0]),
+        ("progress_per_frame", [-1, 25]),
+        ("progress_per_frame", [0, 101]),
+        ("milestones", [{"name": " ", "completed": True, "frame_range": "0:1", "evidence": "observed"}]),
+        ("n_frames", True),
+        ("outcome_success", 1),
+        ("outcome_confidence", float("nan")),
+    ],
+)
+async def test_given_invalid_judge_evidence_content_when_validated_then_stored_payload_is_not_coerced(
+    field: str, value: object
+) -> None:
+    from physical_ai_curation.evidence import validate_payload
+
+    record, snapshot = await Resolver().resolve("dataset", 3, principal_scope_id="actor")
+    payload = await infer(record, snapshot, {})
+    payload[field] = value
+
+    with pytest.raises(ValueError, match="Invalid judge evidence"):
+        validate_payload(payload, "judge")
+
+    assert payload[field] is value
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "metadata_keys",
+        "blank_metadata",
+        "wrong_metadata_type",
+        "findings_type",
+        "findings_keys",
+        "blank_text",
+        "wrong_text_type",
+        "coerced_boolean",
+    ],
+)
+async def test_given_invalid_task_findings_when_validated_then_strict_contract_is_refused(damage: str) -> None:
+    from physical_ai_curation.evidence import validate_payload
+
+    record, snapshot = await Resolver().resolve("dataset", 3, principal_scope_id="actor")
+    payload = {
+        "episode_id": record.episode_id,
+        "instruction": snapshot.instruction,
+        "judge_model": "echo",
+        "prompt_version": "test",
+        "findings": {
+            "pick_from": "table",
+            "object": "cup",
+            "movement_quality": "smooth",
+            "notes": "",
+            "grasp_success": False,
+            "place_success": False,
+        },
+    }
+    if damage == "metadata_keys":
+        payload["unexpected"] = "value"
+    elif damage == "blank_metadata":
+        payload["instruction"] = " "
+    elif damage == "wrong_metadata_type":
+        payload["episode_id"] = 3
+    elif damage == "findings_type":
+        payload["findings"] = []
+    elif damage == "findings_keys":
+        del payload["findings"]["notes"]
+    elif damage == "blank_text":
+        payload["findings"]["object"] = " "
+    elif damage == "wrong_text_type":
+        payload["findings"]["notes"] = 12
+    else:
+        payload["findings"]["grasp_success"] = 1
+
+    with pytest.raises(ValueError, match="Invalid task findings"):
+        validate_payload(payload, "task-findings")
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "boolean_version",
+        "invalid_envelope",
+        "missing_binding",
+        "payload_model",
+        "payload_prompt",
+        "episode",
+        "instruction",
+    ],
+)
+async def test_given_unbound_evidence_envelope_when_restored_then_caller_identity_is_authoritative(damage: str) -> None:
+    from physical_ai_curation.evidence import bind_evidence, read_evidence
+    from physical_ai_curation.judge_port import JudgeInvocation
+
+    record, snapshot = await Resolver().resolve("dataset", 3, principal_scope_id="actor")
+    invocation = JudgeInvocation(
+        invocation_id="request",
+        input_id=snapshot.snapshot_id,
+        episode_id=record.episode_id,
+        instruction=snapshot.instruction,
+        views=(),
+        options={},
+        declared_identity={"model_id": "echo", "prompt_version": "test"},
+    )
+    envelope = bind_evidence(invocation, await infer(record, snapshot, {})).to_dict()
+    if damage == "boolean_version":
+        envelope["schema_version"] = True
+    elif damage == "invalid_envelope":
+        envelope["payload"] = []
+    elif damage == "missing_binding":
+        envelope["declared_identity"] = {}
+    else:
+        field = {
+            "payload_model": "judge_model",
+            "payload_prompt": "prompt_version",
+            "episode": "episode_id",
+            "instruction": "instruction",
+        }[damage]
+        envelope["payload"][field] = "different"
+
+    with pytest.raises(ValueError):
+        read_evidence(envelope, expected=invocation)
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"execution": None, "prompt_version": "test"},
+        {"execution": {}, "prompt_version": "test"},
+        {"execution": {"backend": "echo"}, "prompt_version": ""},
+    ],
+)
+async def test_given_missing_caller_evidence_declaration_when_bound_then_payload_cannot_supply_authority(
+    config: dict[str, object],
+) -> None:
+    record, snapshot = await Resolver().resolve("dataset", 3, principal_scope_id="actor")
+    payload = await infer(record, snapshot, {})
+
+    with pytest.raises(ValueError, match="Missing declared evidence identity"):
+        bind_job_evidence({"config": config}, {}, payload)
+
+
+def test_given_unsupported_evidence_kind_when_validated_then_no_payload_fallback() -> None:
+    from physical_ai_curation.evidence import validate_payload
+
+    with pytest.raises(ValueError, match="Unsupported evidence kind"):
+        validate_payload({}, "unknown")
 
 
 @pytest.mark.parametrize(
@@ -1277,6 +1546,173 @@ class MemoryBlob:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("backend", ["local", "blob"])
+async def test_given_rejected_transaction_publication_when_storage_fails_then_prior_durable_state_survives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str
+) -> None:
+    from physical_ai_curation.adapters import job_storage as storage_module
+
+    blob = MemoryBlob()
+    store = storage_module.LocalJobStore(tmp_path) if backend == "local" else storage_module.BlobJobStore(blob)
+    async with store.transaction() as state:
+        state["sequence"] = 1
+    before = await store.read()
+    if backend == "blob":
+        blob.reject_publication = True
+    else:
+
+        def refuse_replace(*arguments: object) -> None:
+            raise OSError("publication unavailable")
+
+        monkeypatch.setattr(storage_module.os, "replace", refuse_replace)
+
+    with pytest.raises(Exception, match=r"publication unavailable|State changed"):
+        async with store.transaction() as state:
+            state["sequence"] = 2
+
+    assert await store.read() == before
+    assert not blob.leased
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+async def test_given_local_publication_when_caller_is_cancelled_then_atomic_state_is_still_committed(
+    tmp_path: Path,
+) -> None:
+    from physical_ai_curation.adapters.job_storage import LocalJobStore
+
+    store = LocalJobStore(tmp_path)
+
+    async def cancelled_transaction() -> None:
+        async with store.transaction() as state:
+            state["sequence"] = 42
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.create_task(cancelled_transaction())
+
+    assert (await store.read())["sequence"] == 42
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+@pytest.mark.parametrize(
+    "content", [b"[]", b"null", b'{"schema_version":2,"jobs":{}}', b'{"schema_version":1,"jobs":[]}', b'{"jobs":{}}']
+)
+def test_given_invalid_durable_state_when_decoded_then_no_schema_fallback(content: bytes) -> None:
+    from physical_ai_curation.adapters.job_storage import decode_state
+
+    with pytest.raises(ValueError, match="Invalid durable judge state"):
+        decode_state(content)
+
+
+@pytest.mark.parametrize("status", [403, 503])
+async def test_given_noncontention_blob_lease_error_when_transaction_starts_then_no_state_is_written(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    import json
+
+    from azure.core.exceptions import HttpResponseError
+    from physical_ai_curation.adapters.job_storage import BlobJobStore, empty_state
+
+    blob = MemoryBlob()
+    blob.content = json.dumps(empty_state()).encode()
+    before = blob.content
+    error = HttpResponseError("private provider detail")
+    error.status_code = status
+
+    async def refuse_lease(**options: object) -> object:
+        raise error
+
+    monkeypatch.setattr(blob, "acquire_lease", refuse_lease)
+
+    with pytest.raises(HttpResponseError) as caught:
+        async with BlobJobStore(blob).transaction():
+            pytest.fail("A refused lease cannot enter a transaction")
+
+    assert caught.value is error
+    assert blob.content == before
+    assert not blob.leased
+
+
+async def test_given_expired_blob_lease_budget_when_transaction_starts_then_no_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from physical_ai_curation.adapters import job_storage as storage_module
+
+    blob = MemoryBlob()
+    clock = iter([0.0, 31.0])
+    monkeypatch.setattr(storage_module, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+
+    with pytest.raises(TimeoutError, match="lease unavailable"):
+        async with storage_module.BlobJobStore(blob).transaction():
+            pytest.fail("An exhausted lease budget cannot enter a transaction")
+
+    assert blob.content is None
+    assert not blob.leased
+
+
+async def test_given_missing_blob_state_revision_when_transaction_starts_then_lease_is_released(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    from physical_ai_curation.adapters.job_storage import BlobJobStore, empty_state
+
+    blob = MemoryBlob()
+    blob.content = json.dumps(empty_state()).encode()
+    before = blob.content
+    download = blob.download_blob
+
+    async def revisionless(**options: object) -> object:
+        response = await download(**options)
+        response.properties.etag = None
+        return response
+
+    monkeypatch.setattr(blob, "download_blob", revisionless)
+
+    with pytest.raises(ValueError, match="Missing durable judge state revision"):
+        async with BlobJobStore(blob).transaction():
+            pytest.fail("Unversioned state cannot enter a transaction")
+
+    assert blob.content == before
+    assert not blob.leased
+
+
+async def test_given_blob_lease_lost_during_transaction_when_committing_then_mutation_is_not_published(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    from physical_ai_curation.adapters import job_storage as storage_module
+
+    blob = MemoryBlob()
+    blob.content = json.dumps(storage_module.empty_state()).encode()
+    before = blob.content
+    schedule = asyncio.sleep
+
+    async def renewal_tick(delay: float) -> None:
+        await schedule(0)
+
+    async def failed_renewal() -> None:
+        raise RuntimeError("private renewal detail")
+
+    monkeypatch.setattr(storage_module.asyncio, "sleep", renewal_tick)
+    monkeypatch.setattr(blob, "renew", failed_renewal)
+
+    with pytest.raises(RuntimeError, match="state lease lost"):
+        async with storage_module.BlobJobStore(blob).transaction() as state:
+            state["sequence"] = 42
+            await schedule(0)
+            await schedule(0)
+
+    assert blob.content == before
+    assert not blob.leased
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["local", "blob"])
 @pytest.mark.parametrize("failure", ["storage", "human-edit"])
 async def test_reset_recovery_preserves_humans_and_reports_safe_failures(
     tmp_path: Path,
@@ -1616,6 +2052,118 @@ def test_given_http_dataset_work_when_submitting_then_explicit_approval_is_requi
         accepted = client.post("/jobs", json=target, headers={"Idempotency-Key": "approved"})
         assert accepted.status_code == 202, accepted.text
         assert client.get("/approvals", params={"dataset_id": "dataset"}).json()["items"][0]["current"] is True
+
+
+@pytest.mark.parametrize("route", ["results", "approvals"])
+@pytest.mark.parametrize("failure_status", [None, 401, 403, 404, 409, 422, 503])
+def test_given_retained_evidence_when_authority_changes_then_http_reads_preserve_access_boundaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route: str, failure_status: int | None
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from physical_ai_curation.api import build_job_router
+    from physical_ai_curation.saved_input import SavedInputError
+
+    jobs = manager(tmp_path)
+    accepted = asyncio.run(
+        jobs.submit(
+            "dataset",
+            "actor",
+            [3],
+            ECHO_CONFIG,
+            idempotency_key="authority-sample",
+            mode="sample",
+            samples={
+                3: {
+                    "annotation_author_id": "human",
+                    "annotation_revision": "annotation",
+                    "snapshot_id": "snapshot-3",
+                }
+            },
+        )
+    )
+    assert asyncio.run(jobs.run_once())
+    approval = asyncio.run(jobs.approve(accepted["id"], "actor"))
+    before = asyncio.run(jobs.store.read())
+    calls = []
+    original_resolve = jobs.resolver.resolve
+
+    async def resolve(
+        dataset_id: str, episode_index: int, **kwargs: object
+    ) -> tuple[EpisodeRecord, SavedInputSnapshot]:
+        calls.append(episode_index)
+        if failure_status is not None:
+            raise SavedInputError("Saved authority unavailable", status_code=failure_status)
+        return await original_resolve(dataset_id, episode_index, **kwargs)
+
+    monkeypatch.setattr(jobs.resolver, "resolve", resolve)
+    app = FastAPI()
+    app.include_router(
+        build_job_router(
+            lambda: jobs, actor_dependency=lambda: "actor", prepare_config=lambda value: {**ECHO_CONFIG, **value}
+        )
+    )
+    with TestClient(app) as client:
+        response = client.get(f"/{route}", params={"dataset_id": "dataset", "episode_index": 3})
+
+    assert calls == [3]
+    assert asyncio.run(jobs.store.read()) == before
+    if failure_status in {401, 403}:
+        assert response.status_code == failure_status
+        assert "items" not in response.json()
+        if route == "results":
+            assert response.json() == {"detail": "Judge evidence access denied"}
+    else:
+        assert response.status_code == 200, response.text
+        assert response.json()["total"] == 1
+        item = response.json()["items"][0]
+        if route == "results":
+            assert item["applicability"] == ("current" if failure_status is None else "stale")
+            assert item["run_id"] == accepted["id"]
+        else:
+            assert item["current"] is (failure_status is None)
+            assert item["id"] == approval["id"]
+            assert "actor" not in item
+
+
+def test_given_withdrawn_evidence_when_read_over_http_then_saved_inputs_are_not_resolved_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from physical_ai_curation.api import build_job_router
+
+    jobs = manager(tmp_path)
+    accepted = asyncio.run(jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="withdrawn"))
+    assert asyncio.run(jobs.run_once())
+
+    async def withdraw() -> None:
+        async with jobs.store.transaction() as state:
+            state["generations"]["dataset"] = 1
+
+    asyncio.run(withdraw())
+    before = asyncio.run(jobs.store.read())
+
+    async def unavailable_inputs(
+        dataset_id: str, episode_index: int, **kwargs: object
+    ) -> tuple[EpisodeRecord, SavedInputSnapshot]:
+        pytest.fail("Withdrawn evidence must not reread saved inputs")
+
+    monkeypatch.setattr(jobs.resolver, "resolve", unavailable_inputs)
+    app = FastAPI()
+    app.include_router(
+        build_job_router(
+            lambda: jobs, actor_dependency=lambda: "actor", prepare_config=lambda value: {**ECHO_CONFIG, **value}
+        )
+    )
+    with TestClient(app) as client:
+        response = client.get("/results", params={"dataset_id": "dataset", "episode_index": 3})
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["run_id"] == accepted["id"]
+    assert response.json()["items"][0]["applicability"] == "withdrawn"
+    assert asyncio.run(jobs.store.read()) == before
 
 
 def test_given_no_withdrawal_history_when_reading_reset_status_then_successful_empty_state(tmp_path: Path) -> None:

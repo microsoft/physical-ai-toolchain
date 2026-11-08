@@ -172,3 +172,93 @@ def test_given_fetch_when_read_then_returns_fetched_bytes_only() -> None:
     file.allow(8)
 
     assert file.read(8) == b"z" * 8
+
+
+def test_given_seekable_range_file_when_read_to_end_then_empty_reads_spend_no_allowance() -> None:
+    requests = []
+    file = _range_file(b"abcdef", counter=requests)
+    assert file.readable()
+    assert file.seekable()
+    file.allow(4)
+    assert file.seek(2) == 2
+    assert file.seek(1, io.SEEK_CUR) == 3
+    assert file.read(3) == b"def"
+    assert file.read(1) == b""
+    assert file.readinto(bytearray()) == 0
+    assert file.transferred == 3
+    assert requests == [(3, 3)]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"",
+        b"PAR1",
+        b"PAR1" + b"x" * 4 + struct.pack("<I", 4) + b"XXXX",
+        b"PAR1" + b"x" * 4 + struct.pack("<I", 4) + b"PAR1",
+        b"PAR1" + b"x" * 4 + struct.pack("<I", 1000) + b"PAR1",
+    ],
+)
+def test_given_invalid_parquet_footer_when_admitted_then_no_whole_object_fallback(payload: bytes) -> None:
+    requests = []
+    file = _range_file(payload, counter=requests)
+
+    with pytest.raises(RangeReadError):
+        read_footer(file, max_footer_bytes=4096)
+
+    assert file.transferred <= 20
+    assert all(offset >= len(payload) - 12 for offset, _length in requests)
+
+
+@pytest.mark.parametrize("statistics", ["absent", "null_only", "string"])
+def test_given_untrustworthy_episode_statistics_when_selected_then_refused(statistics: str) -> None:
+    values = (
+        pa.array(["1", "2"])
+        if statistics == "string"
+        else pa.array([None, None], type=pa.int64())
+        if statistics == "null_only"
+        else pa.array([1, 2], type=pa.int64())
+    )
+    sink = io.BytesIO()
+    pq.write_table(pa.table({"episode_index": values}), sink, write_statistics=statistics != "absent")
+    metadata = read_footer(_range_file(sink.getvalue()), max_footer_bytes=4096)
+
+    with pytest.raises(RangeReadError, match="statistics"):
+        selected_row_groups(metadata, "episode_index", {1}, max_decoded_bytes=1 << 20)
+
+
+@pytest.mark.parametrize(
+    ("episodes", "footer_bound", "decoded_bound"),
+    [(set(), 4096, 1024), ({0}, True, 1024), ({0}, 4096, 0), ({0}, 4096, True)],
+)
+def test_given_invalid_row_selection_bound_when_admitted_then_provider_is_not_read(
+    episodes: set[int], footer_bound: int, decoded_bound: int
+) -> None:
+    requests = []
+    file = _range_file(_parquet_bytes([0], rows_per_group=1), counter=requests)
+
+    with pytest.raises(RangeReadError):
+        read_selected_rows(
+            file, "episode_index", episodes, max_footer_bytes=footer_bound, max_decoded_bytes=decoded_bound
+        )
+
+    assert requests == []
+
+
+def test_given_parquet_overhead_exceeding_decode_bound_when_selected_then_transfer_is_refused_before_data_read() -> (
+    None
+):
+    payload = _parquet_bytes([0], rows_per_group=1)
+    metadata = pq.ParquetFile(pa.BufferReader(payload)).metadata
+    group = metadata.row_group(0)
+    assert (
+        sum(group.column(position).total_compressed_size for position in range(group.num_columns))
+        > group.total_byte_size
+    )
+    requests = []
+    file = _range_file(payload, counter=requests)
+
+    with pytest.raises(RangeReadError, match="transfer byte bound"):
+        read_selected_rows(file, "episode_index", {0}, max_footer_bytes=4096, max_decoded_bytes=group.total_byte_size)
+
+    assert all(offset >= _footer_start(payload) for offset, _length in requests)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from physical_ai_curation.release.canonical import canonical_json_bytes
 from physical_ai_curation.release.composition import (
@@ -11,6 +13,7 @@ from physical_ai_curation.release.composition import (
     media_reasons,
     subset_episode_inputs,
 )
+from physical_ai_curation.release.encoding import EncodeOptions, EncodingWindow
 from physical_ai_curation.release.media import ReleasePlanError, SubsetEpisodeInput, build_subset_timeline
 from physical_ai_curation.release.models import FrozenInput, SavedResource
 
@@ -35,6 +38,77 @@ def _sources() -> dict[str, SubsetEpisodeInput]:
         EP0: SubsetEpisodeInput(episode_id=EP0, original_episode_index=0, length=6, fps=10.0),
         EP1: SubsetEpisodeInput(episode_id=EP1, original_episode_index=1, length=4, fps=10.0),
     }
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        [],
+        {},
+        {"annotations": {}},
+        {"annotations": [1]},
+        {"annotations": [{"nested": {"token": "test-only-private-value"}}]},
+    ],
+)
+def test_given_malformed_portable_annotation_when_materialized_then_no_projection_is_emitted(value: object) -> None:
+    from physical_ai_curation.release.projections import materialize_saved_projections
+
+    frozen = _frozen(_resource("annotation/episode_000000", value))
+
+    with pytest.raises(ReleasePlanError):
+        materialize_saved_projections(frozen, tuple(_sources().values()), release_dataset_id="released")
+
+
+@pytest.mark.parametrize("span", [[1], [False, 1], [-1, 1], [3, 1], [0, 6]])
+def test_given_invalid_annotation_frame_span_when_materialized_then_source_bounds_are_enforced(span: list[int]) -> None:
+    from physical_ai_curation.release.projections import materialize_saved_projections
+
+    frozen = _frozen(
+        _resource("annotation/episode_000000", {"annotations": [{"anomalies": {"anomalies": [{"frame_range": span}]}}]})
+    )
+
+    with pytest.raises(ReleasePlanError, match="frame range"):
+        materialize_saved_projections(frozen, tuple(_sources().values()), release_dataset_id="released")
+
+
+@pytest.mark.parametrize("index", [True, -1, 6])
+def test_given_invalid_detection_frame_when_materialized_then_index_cannot_escape_source_episode(index: int) -> None:
+    from physical_ai_curation.release.projections import materialize_saved_projections
+
+    frozen = _frozen(
+        _resource("annotation/episode_000000", {"annotations": [{"object_detections": [{"frame_index": index}]}]})
+    )
+
+    with pytest.raises(ReleasePlanError, match="frame index"):
+        materialize_saved_projections(frozen, tuple(_sources().values()), release_dataset_id="released")
+
+
+def test_given_different_projection_order_when_materialized_then_frozen_selection_is_authoritative() -> None:
+    from physical_ai_curation.release.projections import materialize_saved_projections
+
+    with pytest.raises(ReleasePlanError, match="selection order"):
+        materialize_saved_projections(
+            _frozen(), tuple(reversed(tuple(_sources().values()))), release_dataset_id="released"
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"dataset_id": "foreign-dataset", "episodes": {"0": ["SUCCESS"]}},
+        {"dataset_id": "dataset-a", "provenance": {"0": {"contributions": None}}},
+        {"dataset_id": "dataset-a", "provenance": {"0": None}},
+    ],
+)
+def test_given_foreign_or_malformed_saved_labels_when_materialized_then_portable_ownership_is_not_inferred(
+    value: dict[str, object],
+) -> None:
+    from physical_ai_curation.release.projections import materialize_saved_projections
+
+    frozen = _frozen(_resource("labels/episode_000000", value))
+
+    with pytest.raises(ValueError):
+        materialize_saved_projections(frozen, tuple(_sources().values()), release_dataset_id="released")
 
 
 def test_removed_frames_compose_into_subset_and_encoding_inputs() -> None:
@@ -171,6 +245,81 @@ def test_changed_saved_removal_changes_composition() -> None:
     second = compose_frame_removals(_frozen(_resource("edits/episode_000000", {"removedFrames": [2]})))
 
     assert first != second
+
+
+def test_given_unsupported_edit_resource_identity_when_composed_then_submission_is_blocked() -> None:
+    frozen = _frozen(_resource("edits/not-an-episode", {}))
+
+    composition = compose_frame_removals(frozen)
+
+    assert not composition.submittable
+    assert "unsupported identity" in composition.blocking[0]
+
+
+@pytest.mark.parametrize("damage", ["composition", "episode_id", "episode_index", "edited"])
+def test_given_inconsistent_episode_descriptor_when_subset_built_then_refused(damage: str) -> None:
+    frozen = _frozen(_resource("edits/episode_000000", {"removedFrames": [1]}))
+    composition = compose_frame_removals(frozen)
+    sources = _sources()
+    if damage == "composition":
+        composition = compose_frame_removals(_frozen())
+    else:
+        changes = {
+            "episode_id": {"episode_id": EP1},
+            "episode_index": {"original_episode_index": 1},
+            "edited": {"removed_frames": frozenset({2})},
+        }[damage]
+        sources[EP0] = replace(sources[EP0], **changes)
+
+    with pytest.raises(ReleasePlanError, match=r"frozen|identity|unedited"):
+        subset_episode_inputs(frozen, sources, composition)
+
+
+def test_given_all_source_frames_removed_when_encoding_window_built_then_refused() -> None:
+    episode = replace(_sources()[EP0], removed_frames=frozenset(range(6)))
+
+    with pytest.raises(ReleasePlanError, match="empty"):
+        encoding_window(episode, 0.0)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("episode_id", ""),
+        ("from_timestamp", True),
+        ("from_timestamp", -1),
+        ("from_timestamp", float("inf")),
+        ("source_frame_count", 0),
+        ("kept_frames", ()),
+        ("kept_frames", [0]),
+        ("kept_frames", (True,)),
+        ("kept_frames", (2,)),
+        ("kept_frames", (1, 0)),
+        ("color_filter", "sepia"),
+    ],
+)
+def test_given_invalid_encoding_window_when_constructed_then_refused(field: str, value: object) -> None:
+    window = EncodingWindow(EP0, 0.0, 2, (0, 1))
+
+    with pytest.raises(ReleasePlanError):
+        replace(window, **{field: value})
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("crf", -1),
+        ("crf", True),
+        ("gop", 0),
+        ("flip_horizontal", 1),
+        ("flip_vertical", None),
+        ("max_samples_per_window", 0),
+        ("max_samples_per_window", 257),
+    ],
+)
+def test_given_invalid_encode_options_when_constructed_then_refused(field: str, value: object) -> None:
+    with pytest.raises(ReleasePlanError):
+        replace(EncodeOptions(), **{field: value})
 
 
 def test_given_saved_viewer_descriptor_when_compose_then_identity_is_not_an_edit() -> None:
@@ -318,6 +467,28 @@ def test_given_frozen_removal_when_prepare_then_existing_object_plan_requires_en
     assert prepared.plan.objects[0].action == "transcode"
     assert prepared.episodes[0].removed_frames == frozenset({2})
     assert prepared.encoding_windows(prepared.plan.objects[0])[0].kept_frames == (0, 1, 3)
+
+
+def test_given_nontranscode_object_when_encoding_windows_requested_then_refused() -> None:
+    from physical_ai_curation.release.composition import prepare_saved_generation
+
+    frozen, request, sources = _generation_case()
+    prepared = prepare_saved_generation(frozen, request, sources)
+
+    with pytest.raises(ReleasePlanError, match="transcode object"):
+        prepared.encoding_windows(replace(prepared.plan.objects[0], action="copy"))
+
+
+@pytest.mark.parametrize("damage", ["unselected", "duration"])
+def test_given_inconsistent_camera_window_when_generation_prepared_then_refused(damage: str) -> None:
+    from physical_ai_curation.release.composition import prepare_saved_generation
+
+    frozen, request, sources = _generation_case()
+    changes = {"episode_id": EP0} if damage == "unselected" else {"to_timestamp": 0.3}
+    request = replace(request, windows=(replace(request.windows[0], **changes),))
+
+    with pytest.raises(ReleasePlanError, match=r"unselected|recorded episode length"):
+        prepare_saved_generation(frozen, request, sources)
 
 
 def test_given_reversed_selection_when_shared_video_then_encoding_uses_output_order() -> None:
