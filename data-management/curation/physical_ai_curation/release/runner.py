@@ -142,9 +142,7 @@ async def execute_job(
     if record is None:
         return None
     package_id, attempt_id = record["attempt_key"].split("/", 1)
-    attempt = PublicationAttempt(
-        package_id, attempt_id, record["attempt_prefix"], record["attempt_source_dataset_id"]
-    )
+    attempt = PublicationAttempt(package_id, attempt_id, record["attempt_prefix"], record["attempt_source_dataset_id"])
     destination = configured.destination
     actual = destination.as_text() if isinstance(destination, BlobLocation) else str(destination.resolve())
     if record["destination"] != actual:

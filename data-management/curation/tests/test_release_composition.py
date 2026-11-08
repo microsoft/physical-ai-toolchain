@@ -228,6 +228,60 @@ def test_given_saved_camera_filter_when_compose_then_filter_is_retained() -> Non
     assert composition.filter_for(EP1, "front") == "none"
 
 
+@pytest.mark.parametrize("payload", [None, ["invalid"], {"operations": None}, {"operations": ["invalid"]}])
+def test_given_malformed_saved_operations_when_composed_then_refused(payload: object) -> None:
+    frozen = _frozen(_resource("edits/episode_000000", payload))
+
+    with pytest.raises(ReleasePlanError, match="JSON object"):
+        compose_frame_removals(frozen)
+
+
+@pytest.mark.parametrize(
+    "operations",
+    [
+        {"cameraTransforms": ["front"]},
+        {"globalTransform": "invert"},
+        {"cameraTransforms": {"": {"colorFilter": "invert"}}},
+        {"cameraTransforms": {"front": "invert"}},
+    ],
+)
+def test_given_malformed_saved_camera_transform_when_composed_then_refused(operations: dict[str, object]) -> None:
+    frozen = _frozen(_resource("edits/episode_000000", {"operations": operations}))
+
+    with pytest.raises(ReleasePlanError, match=r"mapping|camera-keyed object"):
+        compose_frame_removals(frozen)
+
+
+@pytest.mark.parametrize(
+    "operations",
+    [
+        {"globalTransform": {"colorFilter": "sepia"}},
+        {"cameraTransforms": {"front": {"colorFilter": "sepia"}}},
+        {"globalTransform": {"futureTransform": True}},
+        {
+            "globalTransform": {"colorFilter": "invert"},
+            "cameraTransforms": {"front": {"colorFilter": "grayscale"}},
+        },
+    ],
+)
+def test_given_unsupported_saved_filter_when_composed_then_submission_is_blocked(operations: dict[str, object]) -> None:
+    frozen = _frozen(_resource("edits/episode_000000", {"operations": operations}))
+
+    composition = compose_frame_removals(frozen)
+
+    assert not composition.submittable
+    assert composition.filters == ()
+    with pytest.raises(ReleasePlanError, match="blocked"):
+        subset_episode_inputs(frozen, _sources(), composition)
+
+
+def test_given_ambiguous_episode_keys_when_composed_then_refused() -> None:
+    frozen = FrozenInput(selected_episode_ids=("first/episode_000000", "second/episode_000000"))
+
+    with pytest.raises(ReleasePlanError, match="unambiguous"):
+        compose_frame_removals(frozen)
+
+
 def _generation_case() -> tuple:
     from physical_ai_curation.release.canonical import serialize_model, sha256_hex
     from physical_ai_curation.release.media import MediaWindow, ObjectPlanRequest, StorageEndpoint

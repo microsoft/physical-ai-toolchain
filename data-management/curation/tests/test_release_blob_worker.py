@@ -186,11 +186,17 @@ def test_nested_upload_batch_does_not_destroy_outer_batch(publisher: SupervisedB
     publisher._flush_generated.assert_called_once()
 
 
-def test_upload_batch_failure_discards_pending_payloads(publisher: SupervisedBlobPublisher) -> None:
+@pytest.mark.parametrize("failure_type", [RuntimeError, KeyboardInterrupt])
+def test_upload_batch_failure_discards_pending_payloads(
+    publisher: SupervisedBlobPublisher, failure_type: type[BaseException]
+) -> None:
     publisher._flush_generated = Mock()
-    with pytest.raises(RuntimeError, match="caller failed"), publisher.write_batch():
+    caller = Mock(side_effect=failure_type("caller failed"))
+    with pytest.raises(failure_type, match="caller failed"), publisher.write_batch():
         publisher.write(PATH, (PAYLOAD,), length=len(PAYLOAD), sha256=sha256_hex(PAYLOAD))
-        raise RuntimeError("caller failed")
+        assert publisher._generated is not None and len(publisher._generated) == 1
+        assert publisher._generated_bytes > 0
+        caller()
 
     assert publisher._generated is None
     assert publisher._generated_bytes == 0
@@ -423,6 +429,80 @@ def test_batch_cleanup_of_already_absent_payload_is_repeat_safe() -> None:
     blob_worker._remove_blobs(publisher, jobs, spec)
 
     jobs.authorize_blob_writers.assert_called_once()
+
+
+@pytest.mark.parametrize("damage", ["length", "digest", "operation", "copy_id", "foreign_owner"])
+def test_given_single_cleanup_with_foreign_identity_when_removed_then_no_mutation(damage: str) -> None:
+    publisher, jobs, spec = _cleanup_case()
+    spec.update(spec.pop("items")[0], mode="blob_remove", blob_name=publisher.root + PATH)
+    if damage == "foreign_owner":
+        publisher.container.blobs[publisher.root + PATH].metadata["curation_attempt"] = "foreign"
+    else:
+        spec[{"digest": "sha256"}.get(damage, damage)] = 999 if damage == "length" else "foreign"
+    before = publisher.container.blobs[publisher.root + PATH].data
+
+    with pytest.raises(ReleaseVerificationError, match="ownership prevents cleanup"):
+        blob_worker._remove_blob(publisher, jobs, spec)
+
+    assert publisher.container.blobs[publisher.root + PATH].data == before
+    jobs.authorize_blob_writer.assert_not_called()
+
+
+@pytest.mark.parametrize("outcome", ["removed", "already_absent", "marked", "marker_race"])
+def test_given_single_cleanup_when_reauthorized_then_publication_marker_is_respected(outcome: str) -> None:
+    publisher, jobs, spec = _cleanup_case()
+    spec.update(spec.pop("items")[0], mode="blob_remove", blob_name=publisher.root + PATH)
+    if outcome == "already_absent":
+        del publisher.container.blobs[publisher.root + PATH]
+    elif outcome == "marked":
+        publisher.container.put(publisher.root + MARKER_PATH, b"published")
+    elif outcome == "marker_race":
+        jobs.authorize_blob_writer.side_effect = lambda *args, **kwargs: publisher.container.put(
+            publisher.root + MARKER_PATH, b"published"
+        )
+
+    if outcome in {"marked", "marker_race"}:
+        with pytest.raises(ReleaseVerificationError, match="marked package"):
+            blob_worker._remove_blob(publisher, jobs, spec)
+        assert publisher.root + PATH in publisher.container.blobs
+    else:
+        blob_worker._remove_blob(publisher, jobs, spec)
+        assert publisher.root + PATH not in publisher.container.blobs
+    assert jobs.authorize_blob_writer.call_count == (0 if outcome in {"already_absent", "marked"} else 1)
+
+
+@pytest.mark.parametrize("outcome", ["aborted", "already_complete", "gone", "still_pending", "provider_failure"])
+def test_given_single_pending_copy_when_cleanup_runs_then_abort_outcome_is_rechecked(
+    monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    publisher, jobs, spec = _cleanup_case(pending=True)
+    spec.update(spec.pop("items")[0], mode="blob_remove", blob_name=publisher.root + PATH)
+    original = _FakeBlobClient.abort_copy
+
+    def abort(client: _FakeBlobClient, copy_id: str, **kwargs: object) -> None:
+        if outcome == "gone":
+            del publisher.container.blobs[client.name]
+            return
+        if outcome in {"already_complete", "still_pending", "provider_failure"}:
+            if outcome == "already_complete":
+                publisher.container.finish_copy(client.name)
+            error = _azure_errors().HttpResponseError("copy abort response")
+            error.status_code = 503 if outcome == "provider_failure" else 409
+            raise error
+        original(client, copy_id, **kwargs)
+
+    monkeypatch.setattr(_FakeBlobClient, "abort_copy", abort)
+    if outcome in {"still_pending", "provider_failure"}:
+        with pytest.raises(
+            ReleaseVerificationError if outcome == "still_pending" else _azure_errors().HttpResponseError
+        ):
+            blob_worker._remove_blob(publisher, jobs, spec)
+        assert publisher.root + PATH in publisher.container.blobs
+        assert jobs.authorize_blob_writer.call_count == (1 if outcome == "still_pending" else 0)
+    else:
+        blob_worker._remove_blob(publisher, jobs, spec)
+        assert publisher.root + PATH not in publisher.container.blobs
+        jobs.authorize_blob_writer.assert_called_once()
 
 
 @pytest.mark.parametrize("outcome", ["removed", "already_absent", "payload_remains", "wrong_path"])
