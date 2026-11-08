@@ -187,7 +187,7 @@ class _EpisodeFrames:
         self._cache: dict[int, NDArray[np.uint8]] = {}
 
     def _decode(self) -> Iterator[NDArray[np.uint8]]:
-        if self._start > 0 and self._stream.time_base is not None:
+        if self._start > 0 and self._stream.time_base:
             self._container.seek(int(self._start / self._stream.time_base), stream=self._stream, backward=True)
         for frame in self._container.decode(self._stream):
             if frame.time is None or frame.time < self._start - self._tolerance:

@@ -8,6 +8,7 @@ from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 
+import av
 import pytest
 from PIL import Image
 
@@ -110,6 +111,8 @@ def test_given_non_rgb_image_when_encoding_then_returns_decodable_rgb_jpeg() -> 
     [
         (SimpleNamespace(duration=2, time_base=Fraction(1, 4)), SimpleNamespace(duration=2_000_000), 0.5),
         (SimpleNamespace(duration=None, time_base=None), SimpleNamespace(duration=2_000_000), 2.0),
+        (SimpleNamespace(duration=2, time_base=Fraction(0, 1)), SimpleNamespace(duration=2_000_000), 2.0),
+        (SimpleNamespace(duration=2, time_base=av.AVRational(0, 1)), SimpleNamespace(duration=2_000_000), 2.0),
     ],
 )
 def test_given_video_timing_metadata_when_reading_duration_then_prefers_stream_and_falls_back_to_container(
@@ -121,3 +124,44 @@ def test_given_video_timing_metadata_when_reading_duration_then_prefers_stream_a
 def test_given_no_timing_metadata_when_reading_duration_then_reports_unusable_video() -> None:
     with pytest.raises(RuntimeError, match="Unable to determine video duration"):
         _stream_duration_s(SimpleNamespace(), SimpleNamespace())
+
+
+def test_given_zero_division_when_extracting_frames_then_translates_to_media_input_error(
+    monkeypatch: pytest.MonkeyPatch, rollout_video: Path
+) -> None:
+    def fake_extract(*args, **kwargs):
+        raise ZeroDivisionError("division by zero")
+
+    monkeypatch.setattr("evaluation.vlm_judge.frames._extract_frames", fake_extract)
+    with pytest.raises(MediaInputError, match=r"^Invalid media input$") as error:
+        extract_frames(FrameWindow(rollout_video, None, None), n_frames=1)
+
+    assert isinstance(error.value.__cause__, ZeroDivisionError)
+
+
+def test_given_stream_with_unset_time_base_when_seeking_and_decoding_then_handles_gracefully() -> None:
+    import numpy as np
+
+    from evaluation.vlm_judge.frames import _seek_and_decode
+
+    class FakeFrame:
+        pts = 100
+
+        def to_ndarray(self, format="rgb24"):
+            return np.zeros((10, 10, 3), dtype=np.uint8)
+
+    class FakeContainer:
+        def __init__(self):
+            self.sought = False
+
+        def seek(self, *args, **kwargs):
+            self.sought = True
+
+        def decode(self, stream):
+            return [FakeFrame()]
+
+    container = FakeContainer()
+    stream = SimpleNamespace(time_base=av.AVRational(0, 1))
+    arr = _seek_and_decode(container, stream, 0.5)
+    assert not container.sought
+    assert arr.shape == (10, 10, 3)
