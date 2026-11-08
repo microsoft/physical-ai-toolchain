@@ -61,7 +61,7 @@ The `baseline` category is selected in every run, and the others by the Dependab
 | `workflows`      | uv `/workflows/azureml/scripts`, `/workflows/azureml/osmo-proxy`, `/workflows/osmo` | `aml-il-pipeline-register` (CPU steps)                      |
 | `gpu-offload`    | uv and docker under `gpu-offload`                                                   | None on Azure ML (uses a local NVIDIA host)                 |
 | `infrastructure` | terraform root, dns, vpn, automation; gomod `infrastructure/terraform/e2e`          | `terraform-plan-compare` (read-only, no GPU)                |
-| `avops`          | docker `/AVOPS/ODD`, `/AVOPS/carla-cosmos`                                          | None                                                        |
+| `avops`          | docker `/AVOPS/ODD`                                                                 | None                                                        |
 
 Environment checks run on GPU nodes unless marked otherwise. The IL pipeline steps use the compute's default instance type, which is CPU-only on Kubernetes computes.
 

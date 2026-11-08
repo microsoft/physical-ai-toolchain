@@ -1849,16 +1849,12 @@
     },
     {
       "id": "avops",
-      "title": "AVOPS ODD and CARLA images",
-      "summary": "Digest-pinned base images for the AVOPS ODD analysis container and the CARLA simulator image.",
+      "title": "AVOPS ODD image",
+      "summary": "The digest-pinned Python base of the AVOPS ODD analysis container.",
       "dependabot": [
         {
           "ecosystem": "docker",
           "directory": "/AVOPS/ODD"
-        },
-        {
-          "ecosystem": "docker",
-          "directory": "/AVOPS/carla-cosmos"
         }
       ],
       "paths": [
@@ -1867,7 +1863,7 @@
       "setup": [],
       "notes": [
         "No CI lane builds or tests AVOPS; the pinning check proves each external base stays digest-pinned.",
-        "CARLA stays on 0.9.15 because the maps URL and scenario-runner ref are tied to it; Dependabot ignores newer CARLA releases."
+        "The CARLA base is digest-pinned through its CARLA_IMAGE build-arg default, which Dependabot can't parse; CARLA stays on 0.9.15 because the maps URL and scenario-runner ref are tied to it."
       ],
       "checks": [
         {

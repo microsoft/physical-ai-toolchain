@@ -55,7 +55,7 @@ The [category manifest](pathname://../../tests/dependabot/categories.json) maps 
 | `workflows`      | uv `/workflows/azureml/scripts`, `/workflows/azureml/osmo-proxy`, `/workflows/osmo` | Import smokes, e2e helper tests                                          | Azure ML IL pipeline with the register component |
 | `gpu-offload`    | uv and docker under `gpu-offload`                                                   | Controller and runtime tests, wheel build                                | None on Azure ML                                 |
 | `infrastructure` | terraform root, dns, vpn, automation; gomod `infrastructure/terraform/e2e`          | Terraform validate, test, TFLint, Go contract tests                      | Read-only plan comparison against deployed state |
-| `avops`          | docker `/AVOPS/ODD`, `/AVOPS/carla-cosmos`                                          | Base-image pinning; compose config and ODD image build (optional)        | None                                             |
+| `avops`          | docker `/AVOPS/ODD`                                                                 | Base-image pinning; compose config and ODD image build (optional)        | None                                             |
 
 Run `npm run verify:dependabot -- --list` to see every check with its flags and notes, and add `--dry-run` to any selection to see the exact commands. The manifest holds each check's full definition.
 
@@ -168,17 +168,17 @@ The command exits 0 when every selected required check passed, 1 when any check 
 
 ## Known Gaps
 
-| Area                                   | Coverage today                                                                                                        |
-|----------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
-| OSMO replay mirror (`/workflows/osmo`) | CPU and runtime-image import smokes; it runs only inside OSMO, so there's no Azure ML check                           |
-| RL `rsl_rl` backend                    | Install and import only; the `rsl_rl` backend has no Azure ML path today                                              |
-| Azure ML-to-OSMO proxy                 | Opt-in check; it drives OSMO and fails where the OSMO control template requests more storage than its workflow does   |
-| GitHub Actions bumps                   | Syntax and contract checks locally; runtime behavior is proven only by CI on a pushed branch                          |
-| GPU offload                            | Local NVIDIA host through mise tasks; the SO-101 example needs the robot hardware                                     |
-| Dev container base                     | Dependabot entry only; no CI lane rebuilds the dev container, so rebuild it and smoke-test its tools locally          |
-| AVOPS images                           | Base-image pinning only; no CI lane builds the ODD or CARLA images or runs `AVOPS/tests`                              |
-| Dependency pinning                     | The scan runs as CI runs it, which currently doesn't enforce the compliance threshold                                 |
-| IL pipeline checks                     | Recover once from a pipeline that Azure ML creates but never starts; a second one fails the check, see the note below |
+| Area                                   | Coverage today                                                                                                                                      |
+|----------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| OSMO replay mirror (`/workflows/osmo`) | CPU and runtime-image import smokes; it runs only inside OSMO, so there's no Azure ML check                                                         |
+| RL `rsl_rl` backend                    | Install and import only; the `rsl_rl` backend has no Azure ML path today                                                                            |
+| Azure ML-to-OSMO proxy                 | Opt-in check; it drives OSMO and fails where the OSMO control template requests more storage than its workflow does                                 |
+| GitHub Actions bumps                   | Syntax and contract checks locally; runtime behavior is proven only by CI on a pushed branch                                                        |
+| GPU offload                            | Local NVIDIA host through mise tasks; the SO-101 example needs the robot hardware                                                                   |
+| Dev container base                     | Dependabot entry only; no CI lane rebuilds the dev container, so rebuild it and smoke-test its tools locally                                        |
+| AVOPS images                           | Base-image pinning only; no CI lane builds the ODD or CARLA images or runs `AVOPS/tests`, and Dependabot can't parse the CARLA base's build-arg pin |
+| Dependency pinning                     | The scan runs as CI runs it, which currently doesn't enforce the compliance threshold                                                               |
+| IL pipeline checks                     | Recover once from a pipeline that Azure ML creates but never starts; a second one fails the check, see the note below                               |
 
 A pipeline can be created without ever starting: it stays `NotStarted` with no child jobs, while the CLI reports it as submitted. The likely cause is Azure ML's 30-second gateway limit on job creation, which makes the CLI retry and return the stuck record.
 

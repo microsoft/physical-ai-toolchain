@@ -743,29 +743,3 @@ updates:
   commit-message:
     prefix: chore
     include: scope
-- package-ecosystem: docker
-  directory: /AVOPS/carla-cosmos
-  schedule:
-    interval: weekly
-    day: monday
-  cooldown:
-    default-days: 7
-  groups:
-    avops-carla-cosmos-docker-dependencies:
-      patterns:
-      - "*"
-      update-types:
-      - minor
-      - patch
-  open-pull-requests-limit: 5
-  # CARLA_MAPS_URL and the scenario-runner ref are tied to CARLA 0.9.15.
-  ignore:
-  - dependency-name: carlasim/carla
-    versions:
-    - ">0.9.15"
-  labels:
-  - dependencies
-  - docker
-  commit-message:
-    prefix: chore
-    include: scope
