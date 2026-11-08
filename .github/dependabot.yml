@@ -583,6 +583,16 @@ updates:
       - minor
       - patch
   open-pull-requests-limit: 5
+  # Python minor and major upgrades are deliberate runtime changes; take digest refreshes only.
+  ignore:
+  - dependency-name: python
+    update-types:
+    - version-update:semver-major
+    - version-update:semver-minor
+  - dependency-name: library/python
+    update-types:
+    - version-update:semver-major
+    - version-update:semver-minor
   labels:
   - dependencies
   - docker
@@ -605,6 +615,16 @@ updates:
       - minor
       - patch
   open-pull-requests-limit: 5
+  # Python minor and major upgrades are deliberate runtime changes; take digest refreshes only.
+  ignore:
+  - dependency-name: python
+    update-types:
+    - version-update:semver-major
+    - version-update:semver-minor
+  - dependency-name: library/python
+    update-types:
+    - version-update:semver-major
+    - version-update:semver-minor
   labels:
   - dependencies
   - docker
@@ -627,6 +647,16 @@ updates:
       - minor
       - patch
   open-pull-requests-limit: 5
+  # Python minor and major upgrades are deliberate runtime changes; take digest refreshes only.
+  ignore:
+  - dependency-name: python
+    update-types:
+    - version-update:semver-major
+    - version-update:semver-minor
+  - dependency-name: library/python
+    update-types:
+    - version-update:semver-major
+    - version-update:semver-minor
   labels:
   - dependencies
   - docker
@@ -649,10 +679,93 @@ updates:
       - minor
       - patch
   open-pull-requests-limit: 5
+  # Python minor and major upgrades are deliberate runtime changes; take digest refreshes only.
+  ignore:
+  - dependency-name: python
+    update-types:
+    - version-update:semver-major
+    - version-update:semver-minor
+  - dependency-name: library/python
+    update-types:
+    - version-update:semver-major
+    - version-update:semver-minor
   labels:
   - dependencies
   - docker
   - gpu-offload
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: docker
+  directory: /.devcontainer
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    devcontainer-docker-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  # The CUDA stage copies cuda-13.0 and pins cuda-cupti-13-0; stay on the 13.0 line.
+  ignore:
+  - dependency-name: nvidia/cuda
+    versions:
+    - ">=13.1"
+  labels:
+  - dependencies
+  - docker
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: docker
+  directory: /AVOPS/ODD
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    avops-odd-docker-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - docker
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: docker
+  directory: /AVOPS/carla-cosmos
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    avops-carla-cosmos-docker-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  # CARLA_MAPS_URL and the scenario-runner ref are tied to CARLA 0.9.15.
+  ignore:
+  - dependency-name: carlasim/carla
+    versions:
+    - ">0.9.15"
+  labels:
+  - dependencies
+  - docker
   commit-message:
     prefix: chore
     include: scope

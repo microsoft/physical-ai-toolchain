@@ -49,11 +49,11 @@ The `baseline` category is selected in every run, and the others by the Dependab
 | Category         | Dependabot entries                                                                  | Environment checks                                          |
 |------------------|-------------------------------------------------------------------------------------|-------------------------------------------------------------|
 | `baseline`       | Every update                                                                        | None                                                        |
-| `tooling`        | npm `/`, uv `/`, github-actions `/`                                                 | None                                                        |
+| `tooling`        | npm `/`, uv `/`, github-actions `/`, docker `/.devcontainer`                        | None                                                        |
 | `dataviewer`     | npm `/` workspace, uv and docker under `data-management/viewer`                     | None                                                        |
 | `docs`           | npm `/docs/docusaurus`                                                              | None                                                        |
 | `data-pipeline`  | uv `/data-pipeline`                                                                 | None                                                        |
-| `evaluation`     | uv `/evaluation`, `/evaluation/vlm_judge`                                           | None                                                        |
+| `evaluation`     | uv `/evaluation`, `/` (`vlm_judge` uses the root lock)                              | None                                                        |
 | `rl`             | uv `/training/rl`                                                                   | `aml-rl-lifecycle`                                          |
 | `il`             | uv `/training/il/lerobot`                                                           | `aml-il-lifecycle`, `aml-il-pipeline-diffusion` (CPU steps) |
 | `vla`            | uv `/training/vla/lerobot`                                                          | `aml-vla-pi0` (needs `HF_TOKEN`)                            |
@@ -61,6 +61,7 @@ The `baseline` category is selected in every run, and the others by the Dependab
 | `workflows`      | uv `/workflows/azureml/scripts`, `/workflows/azureml/osmo-proxy`, `/workflows/osmo` | `aml-il-pipeline-register` (CPU steps)                      |
 | `gpu-offload`    | uv and docker under `gpu-offload`                                                   | None on Azure ML (uses a local NVIDIA host)                 |
 | `infrastructure` | terraform root, dns, vpn, automation; gomod `infrastructure/terraform/e2e`          | `terraform-plan-compare` (read-only, no GPU)                |
+| `avops`          | docker `/AVOPS/ODD`, `/AVOPS/carla-cosmos`                                          | None                                                        |
 
 Environment checks run on GPU nodes unless marked otherwise. The IL pipeline steps use the compute's default instance type, which is CPU-only on Kubernetes computes.
 

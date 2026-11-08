@@ -43,11 +43,11 @@ The [category manifest](pathname://../../tests/dependabot/categories.json) maps 
 | Category         | Dependabot entries                                                                  | CPU checks                                                               | Environment checks                               |
 |------------------|-------------------------------------------------------------------------------------|--------------------------------------------------------------------------|--------------------------------------------------|
 | `baseline`       | Every update                                                                        | uv and npm lock consistency, public feeds, dependency pinning            | None                                             |
-| `tooling`        | npm `/`, uv `/`, github-actions `/`                                                 | Markdown, spelling, YAML, workflow contract, Python lint, root tests     | None                                             |
+| `tooling`        | npm `/`, uv `/`, github-actions `/`, docker `/.devcontainer`                        | Markdown, spelling, YAML, workflow contract, Python lint, root tests     | None                                             |
 | `dataviewer`     | npm `/` workspace, uv and docker under `data-management/viewer`                     | Frontend lint, type-check, format, tests, coverage, build; backend tests | None                                             |
 | `docs`           | npm `/docs/docusaurus`                                                              | Docs validation; production browser tests in a container (optional)      | None                                             |
 | `data-pipeline`  | uv `/data-pipeline`                                                                 | Capture tests in the project's own lock                                  | None                                             |
-| `evaluation`     | uv `/evaluation`, `/evaluation/vlm_judge`                                           | Evaluation tests, CPU import smokes                                      | None                                             |
+| `evaluation`     | uv `/evaluation`, `/` (`vlm_judge` uses the root lock)                              | Evaluation tests, CPU import smokes                                      | None                                             |
 | `rl`             | uv `/training/rl`                                                                   | Training tests, import smoke                                             | Azure ML RL lifecycle                            |
 | `il`             | uv `/training/il/lerobot`                                                           | Training and inference tests, import smoke                               | Azure ML IL lifecycle and IL pipeline            |
 | `vla`            | uv `/training/vla/lerobot`                                                          | Training tests, import smoke                                             | Azure ML pi0 lifecycle                           |
@@ -55,6 +55,7 @@ The [category manifest](pathname://../../tests/dependabot/categories.json) maps 
 | `workflows`      | uv `/workflows/azureml/scripts`, `/workflows/azureml/osmo-proxy`, `/workflows/osmo` | Import smokes, e2e helper tests                                          | Azure ML IL pipeline with the register component |
 | `gpu-offload`    | uv and docker under `gpu-offload`                                                   | Controller and runtime tests, wheel build                                | None on Azure ML                                 |
 | `infrastructure` | terraform root, dns, vpn, automation; gomod `infrastructure/terraform/e2e`          | Terraform validate, test, TFLint, Go contract tests                      | Read-only plan comparison against deployed state |
+| `avops`          | docker `/AVOPS/ODD`, `/AVOPS/carla-cosmos`                                          | Base-image pinning; compose config and ODD image build (optional)        | None                                             |
 
 Run `npm run verify:dependabot -- --list` to see every check with its flags and notes, and add `--dry-run` to any selection to see the exact commands. The manifest holds each check's full definition.
 
@@ -174,6 +175,8 @@ The command exits 0 when every selected required check passed, 1 when any check 
 | Azure ML-to-OSMO proxy                 | Opt-in check; it drives OSMO and fails where the OSMO control template requests more storage than its workflow does   |
 | GitHub Actions bumps                   | Syntax and contract checks locally; runtime behavior is proven only by CI on a pushed branch                          |
 | GPU offload                            | Local NVIDIA host through mise tasks; the SO-101 example needs the robot hardware                                     |
+| Dev container base                     | Dependabot entry only; no CI lane rebuilds the dev container, so rebuild it and smoke-test its tools locally          |
+| AVOPS images                           | Base-image pinning only; no CI lane builds the ODD or CARLA images or runs `AVOPS/tests`                              |
 | Dependency pinning                     | The scan runs as CI runs it, which currently doesn't enforce the compliance threshold                                 |
 | IL pipeline checks                     | Recover once from a pipeline that Azure ML creates but never starts; a second one fails the check, see the note below |
 
