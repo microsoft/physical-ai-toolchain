@@ -537,7 +537,8 @@ class TestControlTick:
 
         policy = QueuedPolicy()
         node._runner = PolicyRunner(policy, lambda obs: obs, lambda action: action, device="cpu")
-        node._action_mode = "delta"
+        # Absolute mode: fake policy already returns absolute targets (current + offset).
+        node._action_mode = "absolute"
         node._enable_control = True
         node._bridge.next_image = np.zeros((480, 848, 3), dtype=np.uint8)
         node._on_image(_Image())
@@ -594,20 +595,54 @@ class TestControlTick:
         node.publishers["/lerobot/joint_commands"].publish.assert_not_called()
         assert node._state.episode_step == 1
 
-    def test_absolute_mode_calls_as_absolute(self, node):
+    def test_given_delta_mode_when_control_tick_then_publishes_current_plus_delta(
+        self, node: ain_module.ACTInferenceNode
+    ) -> None:
+        current = np.full(6, 0.1, dtype=np.float32)
+        delta = np.full(6, 0.2, dtype=np.float32)
         node._state.observation = _RobotObservation(
-            joint_positions=np.full(6, 0.1, dtype=np.float32),
+            joint_positions=current,
+            color_image=np.zeros((480, 848, 3), dtype=np.uint8),
+        )
+        node._joints_ready = True
+        node._action_mode = "delta"
+        node._enable_control = True
+        node._runner.step.return_value = _JointPositionCommand(
+            positions=delta.copy(),
+            is_delta=True,
+        )
+        node._control_tick()
+        node.publishers["/lerobot/joint_commands"].publish.assert_called_once()
+        traj = node.publishers["/lerobot/joint_commands"].publish.call_args.args[0]
+        np.testing.assert_allclose(traj.points[0].positions, (current + delta).tolist())
+
+    def test_given_absolute_mode_when_control_tick_then_publishes_policy_positions_unchanged(
+        self, node: ain_module.ACTInferenceNode
+    ) -> None:
+        current = np.full(6, 0.1, dtype=np.float32)
+        absolute = np.full(6, 0.5, dtype=np.float32)
+        node._state.observation = _RobotObservation(
+            joint_positions=current,
             color_image=np.zeros((480, 848, 3), dtype=np.uint8),
         )
         node._joints_ready = True
         node._action_mode = "absolute"
         node._enable_control = True
         node._runner.step.return_value = _JointPositionCommand(
-            positions=np.full(6, 0.2, dtype=np.float32),
-            is_delta=True,
+            positions=absolute.copy(),
+            is_delta=False,
         )
         node._control_tick()
         node.publishers["/lerobot/joint_commands"].publish.assert_called_once()
+        traj = node.publishers["/lerobot/joint_commands"].publish.call_args.args[0]
+        np.testing.assert_allclose(traj.points[0].positions, absolute.tolist())
+
+    def test_given_unknown_action_mode_when_init_then_raises_value_error(self, local_policy_repo: str) -> None:
+        with (
+            _node_parameter_overrides(policy_repo=local_policy_repo, action_mode="invalid"),
+            pytest.raises(ValueError, match="action_mode must be 'delta' or 'absolute', got 'invalid'"),
+        ):
+            ain_module.ACTInferenceNode()
 
     def test_logs_at_30_step_boundary(self, node):
         node._state.observation = _RobotObservation(
