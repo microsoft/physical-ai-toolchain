@@ -26,7 +26,7 @@ from .auth import (
     issue_media_session,
     require_auth,
     require_principal_context,
-    validate_hosted_auth_configuration,
+    validate_auth_configuration,
 )
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token, require_csrf_token
 from .middleware import ContentSizeLimitMiddleware, EpisodeCompressionMiddleware, SecurityHeadersMiddleware
@@ -108,7 +108,7 @@ def _validate_local_storage_writable(data_path: str) -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Validate local storage and clean up blob sync directories."""
-    validate_hosted_auth_configuration()
+    validate_auth_configuration()
     if _config.storage_backend == "local":
         await asyncio.to_thread(_validate_local_storage_writable, _config.data_path)
 

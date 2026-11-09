@@ -257,13 +257,13 @@ class TestPrincipalBounds:
     def test_given_invalid_environment_limit_when_starting_hosted_auth_then_rejects_configuration(
         self, setting: str, value: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from src.api.auth import validate_hosted_auth_configuration
+        from src.api.auth import validate_auth_configuration
 
         set_hosted_environment(monkeypatch)
         monkeypatch.setenv(setting, value)
 
         with pytest.raises(ValueError, match=f"{setting} must be a positive integer"):
-            validate_hosted_auth_configuration()
+            validate_auth_configuration()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(("size", "accepted"), [(6144, True), (6145, False)], ids=["at-limit", "over-limit"])

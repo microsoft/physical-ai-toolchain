@@ -880,3 +880,76 @@ def test_hosted_startup_rejects_disabled_authentication(monkeypatch: pytest.Monk
 
     with pytest.raises(ValueError, match="Hosted authentication cannot be disabled"), TestClient(app):
         pass
+
+
+@pytest.mark.parametrize(
+    ("provider", "missing", "message"),
+    [
+        ("azure_ad", ("DATAVIEWER_AZURE_TENANT_ID", "DATAVIEWER_AZURE_CLIENT_ID"), "DATAVIEWER_AZURE_TENANT_ID"),
+        ("auth0", ("DATAVIEWER_AUTH0_DOMAIN", "DATAVIEWER_AUTH0_AUDIENCE"), "DATAVIEWER_AUTH0_DOMAIN"),
+    ],
+    ids=["azure_ad", "auth0"],
+)
+def test_jwt_startup_rejects_missing_provider_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    missing: Sequence[str],
+    message: str,
+) -> None:
+    monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
+    monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", provider)
+    for variable in missing:
+        monkeypatch.delenv(variable, raising=False)
+
+    with pytest.raises(ValueError, match=message), TestClient(app):
+        pass
+
+
+def test_startup_rejects_unknown_auth_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
+    monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "kerberos")
+
+    with pytest.raises(ValueError, match="Unsupported DATAVIEWER_AUTH_PROVIDER"), TestClient(app):
+        pass
+
+
+@pytest.mark.parametrize(
+    ("provider", "settings"),
+    [
+        (
+            "azure_ad",
+            {
+                "DATAVIEWER_AZURE_TENANT_ID": "00000000-0000-0000-0000-000000000001",
+                "DATAVIEWER_AZURE_CLIENT_ID": "00000000-0000-0000-0000-000000000002",
+            },
+        ),
+        ("auth0", {"DATAVIEWER_AUTH0_DOMAIN": "tenant.example.auth0.com", "DATAVIEWER_AUTH0_AUDIENCE": "dataviewer"}),
+    ],
+    ids=["azure_ad", "auth0"],
+)
+def test_jwt_startup_constructs_provider_before_first_request(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    settings: dict[str, str],
+) -> None:
+    from src.api import auth as auth_mod
+
+    monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
+    monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", provider)
+    for variable, value in settings.items():
+        monkeypatch.setenv(variable, value)
+
+    with TestClient(app):
+        assert isinstance(auth_mod._provider, auth_mod.JwtProvider)
+
+
+def test_startup_skips_provider_when_local_auth_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.api import auth as auth_mod
+
+    monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "true")
+    monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "azure_ad")
+    monkeypatch.delenv("DATAVIEWER_AZURE_TENANT_ID", raising=False)
+    monkeypatch.delenv("DATAVIEWER_AZURE_CLIENT_ID", raising=False)
+
+    with TestClient(app):
+        assert auth_mod._provider is None

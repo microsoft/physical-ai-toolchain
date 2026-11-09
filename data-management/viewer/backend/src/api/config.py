@@ -119,7 +119,6 @@ class AppConfig:
     """Common ownership scope for workers sharing the same inference device."""
 
 
-
 def _split_cors_origins(cors_raw: str) -> tuple[list[str], str | None]:
     """Split CORS_ORIGINS into literal origins and an optional wildcard regex.
 
