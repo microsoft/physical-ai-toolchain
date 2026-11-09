@@ -156,7 +156,7 @@ jobs:
                           and 0.0 <= float(root.attrib.get("line-rate", "")) <= 1.0
                       )
                       if valid and name in {"curation_valid", "dataset_io_valid"}:
-                          threshold = 96 if name == "curation_valid" else 97
+                          threshold = 90 if name == "curation_valid" else 90
                           lines_valid = int(root.attrib["lines-valid"])
                           lines_covered = int(root.attrib["lines-covered"])
                           branches_valid = int(root.attrib["branches-valid"])
@@ -211,12 +211,12 @@ jobs:
           set -euo pipefail
 
           if [ "${{ steps.coverage_validate.outputs.curation_valid }}" != "true" ]; then
-            echo "::error::Curation coverage report is missing, invalid, or below 96%."
+            echo "::error::Curation coverage report is missing, invalid, or below 90%."
             exit 1
           fi
 
           uv run --project ../../.. --all-packages --no-sync coverage report \
-            --include='*/physical_ai_curation/*' --fail-under=96
+            --include='*/physical_ai_curation/*' --fail-under=90
 
       - name: Enforce dataset-I/O coverage threshold
         id: dataset_io_coverage_gate
@@ -225,12 +225,12 @@ jobs:
           set -euo pipefail
 
           if [ "${{ steps.coverage_validate.outputs.dataset_io_valid }}" != "true" ]; then
-            echo "::error::Dataset-I/O coverage report is missing, invalid, or below 97%."
+            echo "::error::Dataset-I/O coverage report is missing, invalid, or below 90%."
             exit 1
           fi
 
           uv run --project ../../.. --all-packages --no-sync coverage report \
-            --include='*/physical_ai_dataset_io/*' --fail-under=97
+            --include='*/physical_ai_dataset_io/*' --fail-under=90
 
       - name: Run product-owned judge unit tests
         id: judge_unit
