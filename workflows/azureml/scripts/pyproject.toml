@@ -11,7 +11,7 @@ requires-python = ">=3.12"
 #   uv lock
 dependencies = [
     "azure-ai-ml==1.35.2",
-    "azure-identity==1.26.0",
+    "azure-identity==1.27.0",
 ]
 
 [tool.uv]
