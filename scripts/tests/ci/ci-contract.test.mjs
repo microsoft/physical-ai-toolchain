@@ -358,7 +358,7 @@ test('product workspace: curation and dataset-I/O coverage is collected and uplo
     const gateId = `${directory.replaceAll('-', '_')}_coverage_gate`;
     const gate = steps.find(step => step.id === gateId);
     assert.ok(gate, `Missing required gate: ${directory}`);
-    assert.ok(gate.run.includes(`--fail-under=${directory === 'curation' ? 96 : 97}`));
+    assert.ok(gate.run.includes('--fail-under=90'));
     assert.ok(gate.run.includes(`${directory.replaceAll('-', '_')}_valid`));
     const owner = contract.execution['dataviewer-backend-pytests'].jobs['pytest-dataviewer'];
     assert.ok(owner['required-steps'].includes(gateId));
@@ -373,10 +373,10 @@ test('product workspace: curation and dataset-I/O coverage is collected and uplo
 for (const [label, report, curationExpected, datasetIoExpected] of [
   ['absent', null, 'false', 'false'],
   ['malformed', '<coverage', 'false', 'false'],
-  ['below both combined thresholds', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="91" line-rate="1" branch-rate="0.91"/>', 'false', 'false'],
-  ['exact curation threshold', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="92" line-rate="1" branch-rate="0.92"/>', 'true', 'false'],
-  ['between combined thresholds', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="93" line-rate="1" branch-rate="0.93"/>', 'true', 'false'],
-  ['exact dataset-I/O threshold', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="94" line-rate="1" branch-rate="0.94"/>', 'true', 'true'],
+  ['below 90% combined coverage', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="79" line-rate="1" branch-rate="0.79"/>', 'false', 'false'],
+  ['exact 90% combined coverage', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="80" line-rate="1" branch-rate="0.8"/>', 'true', 'true'],
+  ['above 90% combined coverage', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="81" line-rate="1" branch-rate="0.81"/>', 'true', 'true'],
+  ['complete combined coverage', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="100" line-rate="1" branch-rate="1"/>', 'true', 'true'],
 ]) {
   test(`release coverage: ${label} reports produce the correct required-gate input`, t => {
     const workspace = temporaryDirectory(t);

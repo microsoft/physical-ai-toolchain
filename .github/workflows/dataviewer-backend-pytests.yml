@@ -156,7 +156,7 @@ jobs:
                           and 0.0 <= float(root.attrib.get("line-rate", "")) <= 1.0
                       )
                       if valid and name in {"curation_valid", "dataset_io_valid"}:
-                          threshold = 90 if name == "curation_valid" else 90
+                          threshold = 90
                           lines_valid = int(root.attrib["lines-valid"])
                           lines_covered = int(root.attrib["lines-covered"])
                           branches_valid = int(root.attrib["branches-valid"])

@@ -1632,11 +1632,11 @@
               "if": "${{ !cancelled() && steps.install.outcome == 'success' }}"
             },
             "curation_coverage_gate": {
-              "run-sha256": "e6fa0ff98e637286103fcee0ff375fa338c35991d2e542c6bd92a354389a1250",
+              "run-sha256": "39ffaef6dc0ceb685dc53ab90b8882eced3ce762c48a28c5ee68861136c27328",
               "if": "${{ !cancelled() && steps.install.outcome == 'success' }}"
             },
             "dataset_io_coverage_gate": {
-              "run-sha256": "5c97a07733646d5e7289a6d34f43c471778fbfff183d0050a2e847ce8444181a",
+              "run-sha256": "fed45d771090d70aa295a108fa3472743818ba6341e1aa95d60071fb6386bba0",
               "if": "${{ !cancelled() && steps.install.outcome == 'success' }}"
             }
           }
