@@ -23,7 +23,7 @@ api = [
 ]
 openai = [
     "azure-identity==1.26.0",
-    "openai==3.37.0",
+    "openai==3.42.1",
 ]
 qwen3-vl = [
     "accelerate==1.15.0",
