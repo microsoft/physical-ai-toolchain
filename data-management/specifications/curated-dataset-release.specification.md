@@ -64,19 +64,23 @@ authentication and saved-resource scope. Releases introduce no role or grant pol
 
 ## Preview and Admission
 
-Preview is advisory and quick. It describes the submitted selection and configured
-destination without reading source metadata or saved-resource contents. It does not freeze or verify
-source or saved revisions, hash payloads, enumerate the full inventory or repeat
-selected-object checks. Unknown estimates and completeness are reported as unknown,
-not inferred. Preview creates no job, reserves no capacity and writes no destination
-objects. Unsupported operations and known structural or capacity blockers are
-refusals. Missing or partial feature statistics are warnings and never block release.
+Preview is advisory and performs bounded preflight reads for the submitted selection
+and configured destination. It inventories source metadata, reads selected Parquet
+ranges and native episode/task metadata, and checks saved-input readiness. These
+checks may require provider I/O; latency depends on the selected inputs and provider,
+and unavailable, unauthorized or malformed inputs can fail preflight. Preview does
+not freeze source or saved revisions, hash payloads, download unchanged video or
+establish execution-time completeness. Unknown estimates and completeness are
+reported as unknown, not inferred. Preview creates no job, reserves no capacity and
+writes no destination objects. Unsupported operations and known structural or
+capacity blockers are refusals. Missing or partial feature statistics are warnings
+and never block release.
 
 Submission requires the selected intent, applicable acknowledgments and a scoped
 idempotency key. Acknowledgments include local source finalization, local disk use
 and video processing consent when processing is required. Required processing without
 consent fails before any video is processed. Acceptance durably records the selected
-intent before expensive source inspection. The submitted selection must match the
+intent before execution-time source capture. The submitted selection must match the
 intent confirmed in the dialog; a mismatched request is refused. A source revision
 changing after preview is not a stale-preview rejection. The worker captures the
 source and its actual revisions during execution. An admission-time capacity refusal

@@ -444,7 +444,7 @@ def _load_tasks_parquet(files: LeRobotFiles, relative: str) -> dict[int, str]:
     # "task_index" column, so ``to_dict(records)`` drops the text and a direct
     # ``row["task"]`` lookup raises KeyError. Restore index columns first.
     if "task" not in df.columns or "task_index" not in df.columns:
-        df = df.reset_index()
+        df = df.reset_index(drop=df.index.name is None and "task_index" in df.columns)
     text_col = "task" if "task" in df.columns else None
     if text_col is None:
         # Fall back to the first non-index text column (e.g. "task_description").

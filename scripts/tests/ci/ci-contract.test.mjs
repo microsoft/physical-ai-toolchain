@@ -240,6 +240,8 @@ test('backend coverage: invalid backend XML does not reject valid judge XML', t 
   assert.deepEqual(outputs, {
     backend_valid: 'false',
     judge_backend_valid: 'true',
+    curation_valid: 'false',
+    dataset_io_valid: 'false',
   });
 
   assert.match(result.stdout, /::warning::Coverage report unavailable or invalid/);
@@ -353,12 +355,54 @@ test('product workspace: curation and dataset-I/O coverage is collected and uplo
     assert.equal(upload.with.files, report);
     assert.equal(upload.with.disable_search, true);
     assert.equal(upload.with.use_oidc, true);
+    const gateId = `${directory.replaceAll('-', '_')}_coverage_gate`;
+    const gate = steps.find(step => step.id === gateId);
+    assert.ok(gate, `Missing required gate: ${directory}`);
+    assert.ok(gate.run.includes(`--fail-under=${directory === 'curation' ? 96 : 97}`));
+    assert.ok(gate.run.includes(`${directory.replaceAll('-', '_')}_valid`));
+    const owner = contract.execution['dataviewer-backend-pytests'].jobs['pytest-dataviewer'];
+    assert.ok(owner['required-steps'].includes(gateId));
+    assert.ok(owner.reports.some(candidate => candidate.path === report));
     assert.deepEqual(codecov.flags[flag].paths, [source]);
     const component = codecov.component_management.individual_components
       .find(candidate => candidate.component_id === `data-management-${directory}`);
     assert.deepEqual(component.paths, [`${source}**`]);
   }
 });
+
+for (const [label, report, curationExpected, datasetIoExpected] of [
+  ['absent', null, 'false', 'false'],
+  ['malformed', '<coverage', 'false', 'false'],
+  ['below both combined thresholds', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="91" line-rate="1" branch-rate="0.91"/>', 'false', 'false'],
+  ['exact curation threshold', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="92" line-rate="1" branch-rate="0.92"/>', 'true', 'false'],
+  ['between combined thresholds', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="93" line-rate="1" branch-rate="0.93"/>', 'true', 'false'],
+  ['exact dataset-I/O threshold', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="94" line-rate="1" branch-rate="0.94"/>', 'true', 'true'],
+]) {
+  test(`release coverage: ${label} reports produce the correct required-gate input`, t => {
+    const workspace = temporaryDirectory(t);
+    const cwd = join(workspace, 'data-management/viewer/backend');
+    mkdirSync(cwd, { recursive: true });
+    if (report !== null) {
+      for (const library of ['curation', 'dataset-io']) {
+        writeFixture(workspace, `logs/coverage-${library}.xml`, report);
+      }
+    }
+    const output = join(workspace, 'outputs');
+    const steps = graph['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer'].steps;
+    const validation = steps.find(step => step.id === 'coverage_validate');
+    const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', validation.run], {
+      cwd,
+      encoding: 'utf8',
+      timeout: 10_000,
+      env: { ...process.env, GITHUB_OUTPUT: output },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const outputs = Object.fromEntries(readFileSync(output, 'utf8').trim().split('\n').map(line => line.split('=')));
+    assert.equal(outputs.curation_valid, curationExpected);
+    assert.equal(outputs.dataset_io_valid, datasetIoExpected);
+  });
+}
 
 test('product workspace: independent evaluation keeps its own gate without judge coverage', () => {
   const steps = graph['.github/workflows/evaluation-pytests.yml'].jobs.pytest.steps;
@@ -745,10 +789,10 @@ test('range resolver: non-ancestor base selects full validation', t => {
   }), fullValidation);
 });
 
-test('range resolver: non-diffable pair selects full validation', t => {
+test('range resolver: pair without a computable diff selects full validation', t => {
   const repo = mergeFixture(t);
   const git = (args, cwd) => args[0] === 'diff'
-    ? { status: 1, stdout: '', stderr: 'not diffable' }
+    ? { status: 1, stdout: '', stderr: 'cannot compute diff' }
     : spawnSync('git', args, { cwd, encoding: 'utf8' });
   assert.deepEqual(resolveWorkflowChangeRange({
     eventName: 'merge_group', baseSha: repo.base, headSha: repo.head, cwd: repo.cwd, git,

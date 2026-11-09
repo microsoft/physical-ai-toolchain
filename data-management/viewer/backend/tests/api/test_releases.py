@@ -55,6 +55,42 @@ from tests.lerobot_sources import CAMERA, write_source
 BASE = "/api/releases/v1"
 
 
+def test_given_interleaved_dataset_jobs_when_paged_then_filter_precedes_limit(tmp_path: Path) -> None:
+    from physical_ai_curation.release.jobs import JobRequest
+    from physical_ai_curation.release.publication import PublicationAttempt
+
+    settings = ReleaseApiSettings(tmp_path / "jobs", destinations={"output": tmp_path / "output"})
+    store = ReleaseJobStore(settings.job_root)
+    selected = []
+    for index, dataset_id in enumerate(("other", "native", "other", "native", "other")):
+        request = JobRequest(
+            "localuser",
+            "localuser",
+            f"request-{index}",
+            PublicationAttempt(f"package-{index}", "attempt", source_dataset_id="sample"),
+            tmp_path / "output",
+            b"{}",
+            1,
+            execution_binding=canonical_json_bytes({"selection": {"dataset_id": dataset_id}}),
+        )
+        accepted = store.accept(request)
+        if dataset_id == "native":
+            selected.append(accepted.job_id)
+    service = ReleaseService(settings)
+
+    first = service.jobs("localuser", dataset_id="native", cursor=0, limit=1)
+
+    assert [item["job_id"] for item in first["items"]] == selected[:1]
+    assert first["next_cursor"] is not None
+    last = service.jobs("localuser", dataset_id="native", cursor=first["next_cursor"], limit=1)
+    assert [item["job_id"] for item in last["items"]] == selected[1:]
+    assert last["next_cursor"] is None
+    assert service.jobs("localuser", dataset_id="absent", cursor=0, limit=1) == {
+        "items": [],
+        "next_cursor": None,
+    }
+
+
 @pytest.mark.parametrize("outcome", ["registered", "failed", "conflict", "lease_lost"])
 def test_given_committed_release_when_registered_then_publication_and_authority_are_preserved(
     tmp_path: Path,

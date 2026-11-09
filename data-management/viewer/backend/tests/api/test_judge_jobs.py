@@ -16,6 +16,233 @@ from physical_ai_dataset_io.lerobot import EpisodeRecord
 ECHO_CONFIG = {"execution": {"backend": "echo", "model_id": "echo"}, "agent": {}, "prompt_version": "test"}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["preview_reset", "confirm_reset"])
+async def test_given_unconfigured_withdrawal_storage_when_requested_then_no_state_is_changed(
+    tmp_path: Path, operation: str
+) -> None:
+    jobs = manager(tmp_path)
+    before = await jobs.store.read()
+    arguments = ("dataset", "actor", "preview") if operation == "confirm_reset" else ("dataset", "actor")
+
+    with pytest.raises(ValueError, match="Contribution storage is unavailable"):
+        await getattr(jobs, operation)(*arguments)
+
+    assert await jobs.store.read() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("damage", ["missing-preview", "foreign-preview", "foreign-dataset", "running-reset"])
+async def test_given_unusable_withdrawal_preview_when_confirmed_then_refused_without_mutation(
+    tmp_path: Path, damage: str
+) -> None:
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+
+    storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
+    jobs = manager(tmp_path / "jobs", curation_storage=storage)
+    preview = await jobs.preview_reset("dataset", "actor")
+    if damage == "running-reset":
+        previous = await jobs.preview_reset("dataset", "actor")
+        await jobs.confirm_reset("dataset", "actor", previous["id"])
+    before = await jobs.store.read()
+    error_type = (
+        PermissionError if damage == "foreign-preview" else ValueError if damage == "running-reset" else KeyError
+    )
+
+    with pytest.raises(error_type):
+        await jobs.confirm_reset(
+            "other" if damage == "foreign-dataset" else "dataset",
+            "other" if damage == "foreign-preview" else "actor",
+            "missing" if damage == "missing-preview" else preview["id"],
+        )
+
+    assert await jobs.store.read() == before
+    assert (await storage.load_versioned("dataset")).etag is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("damage", ["missing", "foreign", "conflicted"])
+async def test_given_unavailable_withdrawal_when_retried_then_refused_without_mutation(
+    tmp_path: Path, damage: str
+) -> None:
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+
+    jobs = manager(tmp_path / "jobs", curation_storage=LocalCurationStorage({"dataset": tmp_path / "dataset"}))
+    if damage != "missing":
+        preview = await jobs.preview_reset("dataset", "actor")
+        await jobs.confirm_reset("dataset", "actor", preview["id"])
+        if damage == "conflicted":
+            async with jobs.store.transaction() as state:
+                state["resets"]["dataset"]["status"] = "conflicted"
+    before = await jobs.store.read()
+    error_type = KeyError if damage == "missing" else PermissionError if damage == "foreign" else ValueError
+
+    with pytest.raises(error_type):
+        await jobs.retry_reset("dataset", "other" if damage == "foreign" else "actor")
+
+    assert await jobs.store.read() == before
+
+
+@pytest.mark.asyncio
+async def test_given_full_withdrawal_preview_cache_when_previewed_then_oldest_is_evicted(tmp_path: Path) -> None:
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+
+    jobs = manager(tmp_path / "jobs", curation_storage=LocalCurationStorage({"dataset": tmp_path / "dataset"}))
+    async with jobs.store.transaction() as state:
+        state["reset_previews"] = {f"preview-{index}": {"id": f"preview-{index}"} for index in range(128)}
+
+    preview = await jobs.preview_reset("dataset", "actor")
+
+    previews = (await jobs.store.read())["reset_previews"]
+    assert len(previews) == 128
+    assert "preview-0" not in previews
+    assert previews[preview["id"]] == preview
+
+
+@pytest.mark.asyncio
+async def test_given_changed_withdrawal_projection_when_executed_then_partial_failure_keeps_labels(
+    tmp_path: Path,
+) -> None:
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+
+    storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
+    jobs = manager(tmp_path / "jobs", curation_storage=storage)
+    preview = await jobs.preview_reset("dataset", "actor")
+    await jobs.confirm_reset("dataset", "actor", preview["id"])
+    async with jobs.store.transaction() as state:
+        state["resets"]["dataset"]["resources"][0]["projected_hash"] = "changed"
+
+    assert await jobs.reset_once()
+
+    reset = await jobs.reset_status("dataset", "actor")
+    assert reset["status"] == "partial"
+    assert reset["error"] == "ValueError"
+    assert (await storage.load_versioned("dataset")).etag is None
+
+
+@pytest.mark.asyncio
+async def test_given_wrong_dataset_labels_when_loaded_then_identity_mismatch_is_rejected(tmp_path: Path) -> None:
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.models import DatasetLabelsFile
+
+    storage = LocalCurationStorage({"dataset": tmp_path})
+    path = tmp_path / "meta/episode_labels.json"
+    path.parent.mkdir()
+    path.write_text(DatasetLabelsFile(dataset_id="other").model_dump_json())
+    original = path.read_bytes()
+
+    with pytest.raises(ValueError, match="identity mismatch"):
+        await storage.load_versioned("dataset")
+
+    assert path.read_bytes() == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["list", "approvals"])
+@pytest.mark.parametrize(("offset", "limit"), [(-1, 25), (0, 0), (0, 101)])
+async def test_given_invalid_saved_job_page_when_requested_then_state_is_unchanged(
+    tmp_path: Path, method: str, offset: int, limit: int
+) -> None:
+    jobs = manager(tmp_path)
+    before = await jobs.store.read()
+
+    with pytest.raises(ValueError, match=r"Invalid .* page"):
+        await getattr(jobs, method)("dataset", "actor", offset=offset, limit=limit)
+
+    assert await jobs.store.read() == before
+
+
+@pytest.mark.asyncio
+async def test_given_replica_capacity_disagreement_when_submitted_then_existing_work_is_unchanged(
+    tmp_path: Path,
+) -> None:
+    first = manager(tmp_path, capacity=1)
+    await first.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="first")
+    second = manager(tmp_path, capacity=2)
+    before = await first.store.read()
+
+    with pytest.raises(ValueError, match="Replicas must agree"):
+        await second.submit("dataset", "actor", [1005], ECHO_CONFIG, idempotency_key="second")
+
+    assert await first.store.read() == before
+
+
+@pytest.mark.asyncio
+async def test_given_paused_or_expired_execution_when_heartbeat_then_capacity_is_not_revived(tmp_path: Path) -> None:
+    now = [100.0]
+    jobs = manager(tmp_path, clock=lambda: now[0], lease_seconds=10)
+    await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="first")
+    claim = await jobs.claim()
+    assert claim is not None
+    await jobs.cancel(claim["job_id"], "actor")
+
+    assert await jobs.heartbeat(claim)
+    now[0] += 11
+    assert not await jobs.heartbeat(claim)
+    await jobs.release(claim)
+    assert not await jobs.heartbeat(claim)
+    assert (await jobs.get(claim["job_id"], "actor"))["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("condition", ["other-result-kind", "old-generation", "busy-input"])
+async def test_given_ineligible_judge_target_when_claimed_then_no_second_execution_is_started(
+    tmp_path: Path, condition: str
+) -> None:
+    jobs = manager(tmp_path, capacity=2)
+    producer = manager(tmp_path, capacity=2, result_kind="task-findings") if condition == "other-result-kind" else jobs
+    await producer.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="first")
+    if condition == "old-generation":
+        async with jobs.store.transaction() as state:
+            state["generations"]["dataset"] = 1
+    elif condition == "busy-input":
+        assert await jobs.claim() is not None
+        await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="second")
+    before = await jobs.store.read()
+
+    assert await jobs.claim() is None
+
+    assert await jobs.store.read() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 403, 503])
+async def test_given_sample_revalidation_unavailable_when_approvals_listed_then_authority_is_preserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    from physical_ai_curation.saved_input import SavedInputError
+
+    jobs = manager(tmp_path)
+    sample = await jobs.submit(
+        "dataset",
+        "actor",
+        [3],
+        ECHO_CONFIG,
+        idempotency_key="sample",
+        mode="sample",
+        samples={
+            3: {"annotation_author_id": "human", "annotation_revision": "annotation", "snapshot_id": "snapshot-3"}
+        },
+    )
+    assert await jobs.run_once()
+    approval = await jobs.approve(sample["id"], "actor")
+    before = await jobs.store.read()
+
+    async def unavailable(*args: object) -> None:
+        raise SavedInputError("synthetic unavailable input", status)
+
+    monkeypatch.setattr(jobs, "_validate_approval", unavailable)
+    if status in {401, 403}:
+        with pytest.raises(SavedInputError) as failure:
+            await jobs.approvals("dataset", "actor")
+        assert failure.value.status_code == status
+    else:
+        result = await jobs.approvals("dataset", "actor")
+        assert result["items"][0]["id"] == approval["id"]
+        assert result["items"][0]["current"] is False
+    assert await jobs.store.read() == before
+
+
 @pytest.mark.parametrize(
     ("authority", "scheme"),
     [
@@ -1606,7 +1833,7 @@ def test_given_invalid_durable_state_when_decoded_then_no_schema_fallback(conten
 
 
 @pytest.mark.parametrize("status", [403, 503])
-async def test_given_noncontention_blob_lease_error_when_transaction_starts_then_no_state_is_written(
+async def test_given_other_blob_lease_error_when_transaction_starts_then_no_state_is_written(
     monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
     import json
@@ -1665,12 +1892,12 @@ async def test_given_missing_blob_state_revision_when_transaction_starts_then_le
     before = blob.content
     download = blob.download_blob
 
-    async def revisionless(**options: object) -> object:
+    async def download_without_revision(**options: object) -> object:
         response = await download(**options)
         response.properties.etag = None
         return response
 
-    monkeypatch.setattr(blob, "download_blob", revisionless)
+    monkeypatch.setattr(blob, "download_blob", download_without_revision)
 
     with pytest.raises(ValueError, match="Missing durable judge state revision"):
         async with BlobJobStore(blob).transaction():

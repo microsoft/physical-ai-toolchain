@@ -256,7 +256,7 @@ function describeJudge(judge: ReleaseJudge): string {
 }
 
 /**
- * Describes a row from loaded evidence. Undetailed rows report that details are loading rather than
+ * Describes a row from loaded evidence. Rows without details report that details are loading rather than
  * implying that annotation, edits, resources, provenance, or judge analysis are absent.
  *
  * @param item - Dialog row.
@@ -449,6 +449,9 @@ export function ReleaseDialog({
   const [reviewSelected, setReviewSelected] = useState(false)
   const [rowLimit, setRowLimit] = useState(ROW_PAGE_SIZE)
   const selectedOnlyRef = useRef<HTMLButtonElement>(null)
+  const releaseNameInput = useRef<HTMLInputElement>(null)
+  const retrySubmissionButton = useRef<HTMLButtonElement>(null)
+  const focusNameAfterDiscard = useRef(false)
   const episodeCheckboxes = useRef(new Map<number, HTMLButtonElement>())
   const [identity, setIdentity] = useState<DraftIdentity>(createDraftIdentity)
   const [review, setReview] = useState<ReviewState | null>(null)
@@ -457,6 +460,15 @@ export function ReleaseDialog({
   const [previewing, setPreviewing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [cancelling, setCancelling] = useState(false)
+
+  useEffect(() => {
+    if (!open || submitting) return
+    if (ambiguous) retrySubmissionButton.current?.focus()
+    else if (focusNameAfterDiscard.current) {
+      releaseNameInput.current?.focus()
+      focusNameAfterDiscard.current = false
+    }
+  }, [ambiguous, open, submitting])
 
   const itemByIndex = new Map(items.map((item) => [item.episodeIndex, item]))
   const availableRows = [...itemByIndex.values()]
@@ -473,7 +485,7 @@ export function ReleaseDialog({
   const pendingSelected = liveSelected.filter((index) => itemByIndex.get(index)?.detailed !== true)
   const detailsReady = pendingSelected.length === 0
   const detailFilterActive = hasDetailFilter(filters)
-  const undetailedCount = availableRows.filter((item) => item.detailed !== true).length
+  const pendingDetailsCount = availableRows.filter((item) => item.detailed !== true).length
   const shownSelectedCount = shownRows.filter((item) => orderByIndex.has(item.episodeIndex)).length
   const labelCounts = new Map<string, number>()
   for (const item of availableRows) {
@@ -731,6 +743,7 @@ export function ReleaseDialog({
   }
 
   function handleDiscardAmbiguous() {
+    focusNameAfterDiscard.current = true
     resetDraft()
     onDiscardSubmission?.()
   }
@@ -757,6 +770,7 @@ export function ReleaseDialog({
             <div className="grid gap-2">
               <Label htmlFor="release-name">Release name</Label>
               <Input
+                ref={releaseNameInput}
                 id="release-name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
@@ -996,15 +1010,15 @@ export function ReleaseDialog({
                       selected episode details loaded.
                     </span>
                   )}
-                  {detailFilterActive && undetailedCount > 0 && (
+                  {detailFilterActive && pendingDetailsCount > 0 && (
                     <span className="block">
-                      Details for {undetailedCount} episode(s) are not loaded. Filter results are
-                      incomplete.
+                      Details for {pendingDetailsCount} episode(s) are not loaded. Filter results
+                      are incomplete.
                     </span>
                   )}
                   {shownRows.length === 0 &&
                     inventoryReady &&
-                    !(detailFilterActive && undetailedCount > 0) && (
+                    !(detailFilterActive && pendingDetailsCount > 0) && (
                       <span className="block">
                         {reviewSelected
                           ? 'No selected episodes match these filters.'
@@ -1013,7 +1027,7 @@ export function ReleaseDialog({
                     )}
                 </p>
 
-                {detailFilterActive && undetailedCount > 0 && onRequestDetails && (
+                {detailFilterActive && pendingDetailsCount > 0 && onRequestDetails && (
                   <Button
                     type="button"
                     variant="outline"
@@ -1281,7 +1295,7 @@ export function ReleaseDialog({
               <Button variant="outline" onClick={handleDiscardAmbiguous} disabled={submitting}>
                 Discard and start over
               </Button>
-              <Button onClick={handleRetry} disabled={submitting}>
+              <Button ref={retrySubmissionButton} onClick={handleRetry} disabled={submitting}>
                 Retry submission
               </Button>
             </>

@@ -2443,3 +2443,148 @@ def test_given_resolved_episode_when_processing_then_validates_instruction_and_r
     assert result["duration_s"] == 1
     assert result["outcome_success"] is True
     assert result["video_paths"] == {"front": str(episode.video_paths["front"])}
+
+
+@pytest.mark.parametrize(
+    ("change", "error_type", "message"),
+    [
+        ("no-template", KeyError, "No videos_path template"),
+        ("no-metadata", FileNotFoundError, "No jsonl v3 episode metadata"),
+        ("no-features", ValueError, "No video features"),
+        ("unknown-view", ValueError, "Requested views not present"),
+    ],
+)
+def test_given_unreadable_shared_dataset_metadata_when_iterating_then_explicit_refusal(
+    jsonl_dataset: Path, change: str, error_type: type[Exception], message: str
+) -> None:
+    info_path = jsonl_dataset / "meta/info.json"
+    info = json.loads(info_path.read_text())
+    if change == "no-template":
+        del info["features"]["front"]["videos_path"]
+    elif change == "no-metadata":
+        shutil.rmtree(jsonl_dataset / "meta/episodes")
+    elif change == "no-features":
+        info["features"] = {}
+    info_path.write_text(json.dumps(info))
+
+    with pytest.raises(error_type, match=message):
+        list(dataset_module.iter_episodes(jsonl_dataset, views=("missing",) if change == "unknown-view" else None))
+
+
+@pytest.mark.parametrize("change", ["invalid-task-json", "missing-tasks", "flat-metadata"])
+def test_given_shared_jsonl_metadata_variant_when_reading_then_instruction_and_duration_are_preserved(
+    jsonl_dataset: Path, change: str
+) -> None:
+    metadata = jsonl_dataset / "meta/episodes/chunk-000/episode_000000.jsonl"
+    if change == "flat-metadata":
+        metadata.rename(jsonl_dataset / "meta/episodes.jsonl")
+        shutil.rmtree(jsonl_dataset / "meta/episodes")
+        expected = "Pick the block"
+    else:
+        payload = {"episode_index": 0, "length": 12}
+        if change == "invalid-task-json":
+            payload["tasks"] = "[invalid"
+        else:
+            payload["task_index"] = 3
+            (jsonl_dataset / "meta/tasks.jsonl").unlink()
+        metadata.write_text(json.dumps(payload) + "\n")
+        expected = ""
+
+    records = list(dataset_module.iter_episodes(jsonl_dataset, indices=[0], limit=1))
+
+    assert len(records) == 1
+    assert records[0].episode_index == 0
+    assert records[0].instruction == expected
+    assert records[0].duration_s == 1
+
+
+@pytest.mark.parametrize(
+    ("instruction_fields", "task_layout", "expected"),
+    [
+        ({"tasks": ["pick", "place"]}, "missing", "pick | place"),
+        ({"tasks": "embedded instruction"}, "standard", "embedded instruction"),
+        ({"task_index": 7}, "description", "global instruction"),
+        ({"task_index": 7}, "no-index", ""),
+        ({"task_index": 99}, "standard", ""),
+        ({}, "standard", ""),
+        ({"tasks": [], "task_index": 7}, "standard", "global instruction"),
+    ],
+)
+def test_given_shared_parquet_metadata_variant_when_reading_then_task_fallback_and_video_window_resolve(
+    tmp_path: Path, instruction_fields: dict[str, Any], task_layout: str, expected: str
+) -> None:
+    metadata = tmp_path / "meta/episodes/chunk-000"
+    metadata.mkdir(parents=True)
+    (tmp_path / "meta/info.json").write_text(
+        json.dumps(
+            {
+                "codebase_version": "v3.0",
+                "total_episodes": 1,
+                "fps": 10,
+                "data_path": "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet",
+                "video_path": "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4",
+                "features": {"front": {"dtype": "video"}},
+            }
+        )
+    )
+    row = {
+        "episode_index": 4,
+        "length": 20,
+        "videos/front/chunk_index": 2,
+        "videos/front/file_index": 3,
+        "videos/front/from_timestamp": 1.5,
+        "videos/front/to_timestamp": 3.5,
+        **instruction_fields,
+    }
+    pq.write_table(pa.Table.from_pylist([row]), metadata / "file-000.parquet")
+    if task_layout != "missing":
+        tasks = {"task_index": [7], "task": ["global instruction"]}
+        if task_layout == "description":
+            tasks["task_description"] = tasks.pop("task")
+        elif task_layout == "no-index":
+            del tasks["task_index"]
+        pq.write_table(pa.table(tasks), tmp_path / "meta/tasks.parquet")
+
+    records = list(dataset_module.iter_episodes(tmp_path))
+
+    assert len(records) == 1
+    assert records[0].instruction == expected
+    assert records[0].episode_index == 4
+    assert records[0].video_paths == {"front": tmp_path / "videos/front/chunk-002/file-003.mp4"}
+    assert records[0].video_windows == {"front": (1.5, 3.5)}
+    assert records[0].duration_s == 2
+
+
+@pytest.mark.parametrize("timestamp", [float("inf"), float("nan")])
+def test_given_nonfinite_language_change_when_remapping_then_refused(timestamp: float) -> None:
+    with pytest.raises(ValueError, match="timestamps must be finite"):
+        dataset_module.remap_persistent_language_rows(
+            [{"timestamp": timestamp}],
+            source_to_output={0: 0},
+            source_timestamps=[0],
+            output_timestamps=[0],
+        )
+
+
+def test_given_collapsed_language_changes_when_remapping_then_latest_time_and_ties_survive() -> None:
+    rows = [
+        {"timestamp": 1, "text": "latest"},
+        {"timestamp": 0, "text": "older"},
+        {"timestamp": 1, "text": "tie"},
+        {"timestamp": 2, "text": "past retained frames"},
+    ]
+
+    result = dataset_module.remap_persistent_language_rows(
+        rows, source_to_output={1: 0}, source_timestamps=[0, 1, 2], output_timestamps=[0.0]
+    )
+
+    assert result == [{"timestamp": 0.0, "text": "latest"}, {"timestamp": 0.0, "text": "tie"}]
+    assert rows[0]["timestamp"] == 1
+
+
+@pytest.mark.parametrize("root", [None, "", "  "])
+def test_given_absent_shared_media_root_when_validating_then_refused(root: str | None) -> None:
+    from physical_ai_dataset_io.media import validate_media_root
+
+    with pytest.raises(ValueError, match="A media root is required"):
+        validate_media_root(root)

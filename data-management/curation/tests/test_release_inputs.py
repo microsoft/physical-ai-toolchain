@@ -603,6 +603,89 @@ class _BoundJudgeAuthority:
         return self.bound
 
 
+@pytest.mark.parametrize("value", [[], {"dataset_id": "sample", "provenance": {"0": []}}])
+def test_given_malformed_local_ledger_when_selected_then_refused_without_rewriting(
+    tmp_path: Path, value: object
+) -> None:
+    path = tmp_path / "meta/episode_labels.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(value))
+    original = path.read_bytes()
+
+    with pytest.raises(SavedInputError, match="Invalid saved"):
+        asyncio.run(
+            LocalSavedInputReader(tmp_path).release_resource(
+                "sample", SavedSelection(kind="ledger", episode_index=0, expected_revision="ledger-v1")
+            )
+        )
+
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "bound", [{}, {"job": {}, "target": []}, {"job": {"dataset_id": "sample"}, "target": {"episode_index": 0}}]
+)
+def test_given_malformed_bound_evidence_when_selected_then_binding_is_refused(
+    tmp_path: Path, bound: dict[str, object]
+) -> None:
+    reader = LocalSavedInputReader(tmp_path, judge_evidence=_BoundJudgeAuthority(bound))
+
+    with pytest.raises(SavedInputError, match="binding"):
+        asyncio.run(
+            reader.release_resource(
+                "sample", SavedSelection(kind="evidence", episode_index=0, expected_revision="evidence-v1")
+            )
+        )
+
+    assert not list(tmp_path.iterdir())
+
+
+def test_given_no_source_metadata_when_revision_requested_then_unavailable_without_side_effects(tmp_path: Path) -> None:
+    with pytest.raises(SavedInputError, match="Source generation is unavailable"):
+        asyncio.run(LocalSavedInputReader(tmp_path).source_revision("sample", 0))
+
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("field", ["dataset_id", "source_revision"])
+def test_given_wrong_saved_edit_binding_when_read_then_refused_without_changing_content(
+    tmp_path: Path, field: str
+) -> None:
+    from hashlib import sha256
+
+    namespace = sha256(json.dumps(["source", "principal"], separators=(",", ":")).encode()).hexdigest()
+    path = tmp_path / "annotations/edits" / namespace / "episode_000000.json"
+    path.parent.mkdir(parents=True)
+    descriptor = {
+        "dataset_id": "sample",
+        "episode_index": 0,
+        "source_id": "source",
+        "source_revision": "revision",
+        "author_id": "principal",
+    }
+    descriptor[field] = "other"
+    path.write_text(json.dumps({"saved_edits": {"source": {"principal": descriptor}}}))
+    original = path.read_bytes()
+
+    with pytest.raises(SavedInputError, match="Saved edit"):
+        asyncio.run(LocalSavedInputReader(tmp_path).edits("sample", 0, "principal", ("source", "revision")))
+
+    assert path.read_bytes() == original
+
+
+def test_given_annotation_requested_as_release_resource_when_read_then_no_unsupported_payload_returned(
+    tmp_path: Path,
+) -> None:
+    result = asyncio.run(
+        LocalSavedInputReader(tmp_path).release_resource(
+            "sample", SavedSelection(kind="annotation", episode_index=0, expected_revision="annotation-v1")
+        )
+    )
+
+    assert result == SavedResource(None, None)
+    assert not list(tmp_path.iterdir())
+
+
 def _bound_judge_evidence(episode_index: int = 0) -> dict[str, object]:
     job = {
         "id": "run-1",

@@ -310,7 +310,7 @@ def test_given_retained_publication_when_worker_restarts_then_same_manifest_is_i
 
 
 @pytest.mark.parametrize("outcome", ["absent", "cancelled", "foreign_destination"])
-def test_given_unexecutable_restored_job_when_worker_runs_then_no_capture_or_publication(
+def test_given_restored_job_without_execution_when_worker_runs_then_no_capture_or_publication(
     tmp_path: Path, mocker: MockerFixture, outcome: str
 ) -> None:
     store = _store(tmp_path / "jobs", OffsetClock())
@@ -2030,6 +2030,199 @@ _process(Path(sys.argv[1]), container_factory=fs_factory(Path(sys.argv[2])))
 """
 
 
+def _native_plan(tmp_path: Path) -> tuple[Any, Any, Any]:
+    _source, _reader, _selection, _context, frozen, inputs, _video = _native_case(tmp_path)
+    prepared = prepare_saved_generation(
+        frozen.content, inputs.request, inputs.sources, camera_statistics=inputs.camera_statistics
+    )
+    return frozen, prepared, inputs
+
+
+def _native_claimed(tmp_path: Path) -> tuple[ReleaseJobStore, str, int, Any, Any, Any]:
+    frozen, prepared, inputs = _native_plan(tmp_path)
+    store = _store(tmp_path / "ledger", OffsetClock())
+    job = store.accept(
+        replace(
+            _request(tmp_path / "output"),
+            frozen_request=generation_request_bytes(frozen, inputs),
+            reserved_bytes=32 * 1024**2,
+        )
+    )
+    fence = store.claim(job.job_id, "worker")
+    return store, job.job_id, fence, frozen, prepared, inputs
+
+
+def _fake_child(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    payload: dict[str, Any] | None,
+    objects: dict[str, bytes] | None = None,
+    returncode: int = 0,
+    captured: list[bytes] | None = None,
+) -> None:
+    from physical_ai_curation.release import native_worker
+
+    def run(store: Any, job_id: str, fence: int, argv: list[str], **kwargs: Any) -> SimpleNamespace:
+        directory = Path(kwargs["cwd"])
+        if captured is not None:
+            captured.append((directory / "request.json").read_bytes())
+        for path, data in (objects or {}).items():
+            target = directory / "objects" / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        if payload is not None:
+            (directory / "result.json").write_bytes(json.dumps(payload).encode())
+        return SimpleNamespace(reason="exited", returncode=returncode)
+
+    monkeypatch.setattr(native_worker, "run_supervised", run)
+
+
+def test_given_tables_over_memory_bound_when_native_operation_starts_then_capacity_refused(tmp_path: Path) -> None:
+    from physical_ai_curation.release.jobs import MIN_MEMORY_BYTES, CapacityError
+
+    frozen, prepared, inputs = _native_plan(tmp_path)
+    store = ReleaseJobStore(
+        tmp_path / "ledger",
+        settings=ReleaseRuntimeSettings(memory_bytes=MIN_MEMORY_BYTES),
+        clock=OffsetClock(),
+        free_bytes=lambda _path: 10**12,
+    )
+    large = pa.table({"values": np.zeros(3 * 1024**2, dtype=np.int64)})
+    inputs = replace(inputs, source_tables={0: large})
+    with (
+        pytest.raises(CapacityError, match="memory bound"),
+        native_operation(store, "job", 1, frozen, prepared, inputs, mode="validate"),
+    ):
+        pass
+
+
+def test_given_scratch_below_request_and_result_bounds_when_native_operation_starts_then_capacity_refused(
+    tmp_path: Path,
+) -> None:
+    from physical_ai_curation.release.jobs import CapacityError
+
+    frozen, prepared, inputs = _native_plan(tmp_path)
+    store = _store(tmp_path / "ledger", OffsetClock())
+    with (
+        pytest.raises(CapacityError, match="scratch bound"),
+        native_operation(store, "job", 1, frozen, prepared, replace(inputs, scratch_bytes=1), mode="validate"),
+    ):
+        pass
+
+
+def test_given_result_over_protocol_bound_when_native_child_completes_then_capacity_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.release import native_worker
+    from physical_ai_curation.release.jobs import CapacityError
+
+    monkeypatch.setattr(native_worker, "MAX_RESULT_BYTES", 1)
+    store, job_id, fence, frozen, prepared, inputs = _native_claimed(tmp_path)
+    _fake_child(monkeypatch, payload={"state": "complete", "objects": [], "source_verified_bytes": 0})
+    with (
+        pytest.raises(CapacityError, match="protocol bound"),
+        native_operation(store, job_id, fence, frozen, prepared, inputs, mode="validate"),
+    ):
+        pass
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "source_metadata_invalid",
+        "source_object_reference_invalid",
+        "source_task_metadata_invalid",
+        "source_frame_schema_invalid",
+    ],
+)
+def test_given_source_metadata_refusal_when_native_child_reports_it_then_source_metadata_error_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
+) -> None:
+    store, job_id, fence, frozen, prepared, inputs = _native_claimed(tmp_path)
+    _fake_child(monkeypatch, payload={"state": "invalid_input", "objects": [], "reason": reason})
+    with (
+        pytest.raises(SourceMetadataError),
+        native_operation(store, job_id, fence, frozen, prepared, inputs, mode="validate"),
+    ):
+        pass
+
+
+def test_given_reported_object_length_mismatch_when_native_child_completes_then_capacity_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.release.jobs import CapacityError
+
+    store, job_id, fence, frozen, prepared, inputs = _native_claimed(tmp_path)
+    path = "data/chunk-000/file-000.parquet"
+    payload = {
+        "state": "complete",
+        "objects": [{"path": path, "length": 999, "sha256": "0" * 64}],
+        "source_verified_bytes": 0,
+    }
+    _fake_child(monkeypatch, payload=payload, objects={path: b"abc"})
+    with (
+        pytest.raises(CapacityError, match="admitted scratch bound"),
+        native_operation(store, job_id, fence, frozen, prepared, inputs, mode="assemble", media={}),
+    ):
+        pass
+
+
+def test_given_incomplete_restored_identities_when_restoring_inputs_then_release_input_error_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, job_id, fence, frozen, prepared, inputs = _native_claimed(tmp_path)
+    payload = {"state": "complete", "objects": [], "source_verified_bytes": 0, "restored": {"source_info": {}}}
+    _fake_child(monkeypatch, payload=payload)
+    with pytest.raises(ReleaseInputError, match="restoration result is incomplete"):
+        restore_inputs(store, job_id, fence, frozen, prepared, inputs)
+
+
+def _captured_restore_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> bytes:
+    store, job_id, fence, frozen, prepared, inputs = _native_claimed(tmp_path)
+    captured: list[bytes] = []
+    _fake_child(
+        monkeypatch,
+        payload={"state": "complete", "objects": [], "source_verified_bytes": 0, "restored": {}},
+        captured=captured,
+    )
+    with native_operation(store, job_id, fence, frozen, prepared, inputs, mode="restore"):
+        pass
+    return captured[0]
+
+
+def test_given_unsupported_source_kind_when_worker_processes_request_then_release_input_error_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.release import native_worker
+
+    spec = json.loads(_captured_restore_request(tmp_path, monkeypatch))
+    spec["source"] = {"kind": "remote"}
+    request = tmp_path / "unsupported-request.json"
+    request.write_text(json.dumps(spec))
+    with pytest.raises(ReleaseInputError, match="unsupported native source"):
+        native_worker._process(request)
+
+
+def test_given_result_over_protocol_bound_when_worker_processes_request_then_capacity_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.release import native_worker
+    from physical_ai_curation.release.jobs import CapacityError
+
+    request = tmp_path / "bounded-request.json"
+    request.write_bytes(_captured_restore_request(tmp_path / "capture", monkeypatch))
+    monkeypatch.setattr(native_worker, "MAX_RESULT_BYTES", 1)
+    with pytest.raises(CapacityError, match="protocol bound"):
+        native_worker._process(request)
+
+
+@pytest.mark.parametrize("argv", [[], ["request.json", "extra"]])
+def test_given_wrong_argument_count_when_native_worker_main_runs_then_usage_code_returned(argv: list[str]) -> None:
+    from physical_ai_curation.release.native_worker import main
+
+    assert main(argv) == 2
+
+
 def test_given_unrestored_native_inputs_when_generating_then_copy_precedes_one_assembly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2926,3 +3119,240 @@ def test_given_changed_execution_settings_when_request_accepted_then_refused_bef
             )
         )
     assert not destination.exists()
+
+
+@pytest.mark.parametrize(
+    ("episodes", "message"),
+    [
+        (("ds-a/episode_000000", "ds-b/episode_000001"), "one source dataset"),
+        (("ds-b/episode_000000",), "do not match the frozen source dataset"),
+    ],
+)
+def test_given_mixed_or_foreign_selected_episodes_when_trusted_dataset_derived_then_refused(
+    episodes: tuple[str, ...], message: str
+) -> None:
+    frozen = SimpleNamespace(content=SimpleNamespace(selected_episode_ids=episodes))
+
+    with pytest.raises(ReleaseInputError, match=message):
+        coordinator_module._trusted_source_dataset_id(frozen, SimpleNamespace(dataset_id="ds-a"))
+
+
+def test_given_matching_selected_episodes_when_trusted_dataset_derived_then_frozen_dataset_returned() -> None:
+    episodes = ("ds-a/episode_000000", "ds-a/episode_000001")
+    frozen = SimpleNamespace(content=SimpleNamespace(selected_episode_ids=episodes))
+
+    assert coordinator_module._trusted_source_dataset_id(frozen, SimpleNamespace(dataset_id="ds-a")) == "ds-a"
+
+
+def test_given_control_objects_listed_when_inventory_built_then_only_payload_is_hashed(mocker: MockerFixture) -> None:
+    def stat(path: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            path=path,
+            length=1,
+            source_revision=None,
+            uploaded_sha256=None,
+            revision=None,
+            copy_operation_sha256=None,
+        )
+
+    store = mocker.Mock()
+    store.list_objects.return_value = [stat(RECEIPT_PATH), stat("data/item")]
+    store.iter_bytes.return_value = [b"x"]
+
+    inventory = coordinator_module._inventory(store)
+
+    assert [entry.path for entry in inventory.entries] == ["data/item"]
+    store.iter_bytes.assert_called_once()
+    assert store.iter_bytes.call_args.args[0] == "data/item"
+
+
+@pytest.mark.parametrize(
+    ("rows", "indices"),
+    [
+        ([{"episode_index": 0}, {"episode_index": 0}], (0,)),
+        ([{"episode_index": 0}], ()),
+        ([{"episode_index": 0}], (1,)),
+    ],
+)
+def test_given_ambiguous_or_missing_episode_metadata_when_selected_then_refused_before_scoping(
+    mocker: MockerFixture, rows: list[dict[str, object]], indices: tuple[int, ...]
+) -> None:
+    source = mocker.Mock()
+    source.metadata_inventory.return_value = ()
+    mocker.patch.object(coordinator_module, "_planning_metadata", return_value=({"features": {}}, rows))
+
+    with pytest.raises(ReleaseInputError, match="missing or ambiguous"):
+        coordinator_module.select_blob_dependencies(source, indices)
+
+    source.scoped.assert_not_called()
+
+
+@pytest.mark.parametrize(("observed_length", "refused"), [(1, False), (2, True)])
+def test_given_metadata_inventory_when_selection_rechecked_then_only_unchanged_scope_is_returned(
+    mocker: MockerFixture, observed_length: int, refused: bool
+) -> None:
+    metadata = (SimpleNamespace(path=coordinator_module.INFO_PATH, length=1),)
+    selected = mocker.Mock()
+    selected.inventory.return_value = [SimpleNamespace(path=coordinator_module.INFO_PATH, length=observed_length)]
+    source = mocker.Mock()
+    source.metadata_inventory.return_value = metadata
+    source.scoped.return_value = selected
+    planning = ({"features": {}}, [{"episode_index": 0}])
+    mocker.patch.object(coordinator_module, "_planning_metadata", return_value=planning)
+    mocker.patch.object(coordinator_module, "control_paths", return_value=set())
+    mocker.patch.object(coordinator_module, "object_path", return_value="data/episode_000000.parquet")
+
+    if refused:
+        with pytest.raises(ReleaseInputError, match="changed during selection"):
+            coordinator_module.select_blob_dependencies(source, (0,))
+    else:
+        assert coordinator_module.select_blob_dependencies(source, (0,)) is selected
+    source.scoped.assert_called_once()
+
+
+def _plan_frozen(selected: str, identities: tuple[str, ...]) -> SimpleNamespace:
+    return SimpleNamespace(
+        content=SimpleNamespace(
+            source_objects=tuple(SimpleNamespace(path=path) for path in identities),
+            selected_episode_ids=(selected,),
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("selected", "identities", "errors", "message"),
+    [
+        ("frame_0", ("data/ep0", "videos/cam/ep0"), (ReleaseInputError,), "identity is invalid"),
+        ("ds/episode_000007", ("data/ep0", "videos/cam/ep0"), (ReleaseInputError,), "episode is missing"),
+        ("ds/episode_000000", ("videos/cam/ep0",), (ReleaseInputError, SourceMetadataError), "data object is missing"),
+        ("ds/episode_000000", ("data/ep0",), (ReleaseInputError,), "camera object is missing"),
+    ],
+)
+def test_given_invalid_selected_episode_when_generation_planned_then_refused_before_media_work(
+    mocker: MockerFixture,
+    selected: str,
+    identities: tuple[str, ...],
+    errors: tuple[type[Exception], ...],
+    message: str,
+) -> None:
+    info = {"features": {"cam": {"dtype": "video"}}, "fps": 30, "codebase_version": "v3.0"}
+    rows = [{"episode_index": 0, "length": 10, "videos/cam/to_timestamp": 1.0}]
+    mocker.patch.object(coordinator_module, "_planning_metadata", return_value=(info, rows))
+    mocker.patch.object(
+        coordinator_module,
+        "object_path",
+        side_effect=lambda _info, row, prefix: f"{prefix}/ep{row['episode_index']}",
+    )
+    source = mocker.Mock()
+
+    with pytest.raises(errors, match=message):
+        coordinator_module.plan_generation_inputs(
+            source,
+            _plan_frozen(selected, identities),
+            source_endpoint=None,
+            destination_endpoint=None,
+            scratch_endpoint=None,
+            producer=None,
+            tool=None,
+            scratch_bytes=0,
+            output_bytes=0,
+        )
+
+
+@pytest.mark.parametrize(
+    ("case", "message"),
+    [
+        ("local_overlap", "overlap"),
+        ("cross_account", "cross-account"),
+        ("blob_overlap", "overlap"),
+        ("unsupported_route", "route is unsupported"),
+    ],
+)
+def test_given_unsafe_route_when_generation_starts_then_refused_before_binding_effects(
+    tmp_path: Path, mocker: MockerFixture, case: str, message: str
+) -> None:
+    root = tmp_path / "source"
+    root.mkdir()
+    blob = BlobReleaseSource(SimpleNamespace(url="https://acct.blob.example/release"))
+    local = LocalReleaseSource(root, finalized=True)
+    other_account = BlobLocation(account_url="https://other.blob.example", container="out")
+    same_container = BlobLocation(account_url=blob.location.account_url, container=blob.location.container)
+    source, destination = {
+        "local_overlap": (local, root),
+        "cross_account": (blob, other_account),
+        "blob_overlap": (blob, same_container),
+        "unsupported_route": (local, same_container),
+    }[case]
+    store = mocker.Mock()
+
+    with pytest.raises(ReleaseInputError, match=message):
+        asyncio.run(
+            run_release_generation(
+                store=store,
+                job_id="job-1",
+                fence=1,
+                destination=destination,
+                attempt=SimpleNamespace(prefix="release-1"),
+                expected=None,
+                source=source,
+                reader=None,
+                selection=None,
+                context=None,
+                inputs=None,
+            )
+        )
+
+    store.validate_execution_binding.assert_called_once()
+    store.record_io.assert_not_called()
+
+
+def test_given_attempt_dataset_differs_from_frozen_selection_when_generation_starts_then_no_io_recorded(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    root = tmp_path / "source"
+    root.mkdir()
+    frozen = SimpleNamespace(content=SimpleNamespace(selected_episode_ids=("ds-a/episode_000000",)))
+    mocker.patch.object(coordinator_module, "revalidate_release_inputs", mocker.AsyncMock(return_value=frozen))
+    store = mocker.Mock()
+
+    with pytest.raises(ReleaseInputError, match="does not match the frozen selection"):
+        asyncio.run(
+            run_release_generation(
+                store=store,
+                job_id="job-1",
+                fence=1,
+                destination=tmp_path / "dest",
+                attempt=SimpleNamespace(prefix="release-1", source_dataset_id="ds-b"),
+                expected=SimpleNamespace(content=SimpleNamespace(source_objects=())),
+                source=LocalReleaseSource(root, finalized=True),
+                reader=None,
+                selection=SimpleNamespace(dataset_id="ds-a"),
+                context=None,
+                inputs=None,
+            )
+        )
+
+    store.record_io.assert_not_called()
+
+
+@pytest.mark.parametrize(("case", "message"), [("binding", "does not match"), ("associated", "requires its accepted")])
+def test_given_supplied_publisher_outside_accepted_binding_when_runtime_opened_then_refused(
+    tmp_path: Path, mocker: MockerFixture, case: str, message: str
+) -> None:
+    attempt = SimpleNamespace(prefix="release-1")
+    destination = tmp_path / "dest"
+    store = mocker.Mock()
+    store.source_association.return_value = object() if case == "associated" else None
+    supplied = SimpleNamespace(
+        destination=tmp_path / "other" if case == "binding" else destination,
+        attempt=attempt,
+        jobs=store,
+        job_id="job-1",
+        fence=1,
+    )
+
+    with (
+        pytest.raises(ReleaseInputError, match=message),
+        coordinator_module._publication_runtime(destination, attempt, store, "job-1", 1, supplied),
+    ):
+        pass

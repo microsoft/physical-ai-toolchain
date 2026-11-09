@@ -502,7 +502,9 @@ class ReleaseJobStore:
         row = self._owned(conn, job_id, scope, principal)
         return _status(conn, row)
 
-    def page(self, *, scope: str, principal: str, cursor: int = 0, limit: int = 50) -> JobPage:
+    def page(
+        self, *, scope: str, principal: str, cursor: int = 0, limit: int = 50, dataset_id: str | None = None
+    ) -> JobPage:
         """Return an initiator-scoped bounded page ordered by durable acceptance sequence."""
         _require_int(cursor, "job cursor", 0, (1 << 63) - 1)
         _require_int(limit, "job page size", 1, 100)
@@ -514,6 +516,13 @@ class ReleaseJobStore:
                 if job["scope"] == scope
                 and job["principal_digest"] == _digest(principal)
                 and job["events"][0]["seq"] > cursor
+                and (
+                    dataset_id is None
+                    or parse_strict_json(base64.b64decode(job["execution_binding"], validate=True) or b"{}")
+                    .get("selection", {})
+                    .get("dataset_id")
+                    == dataset_id
+                )
             ),
             key=lambda job: job["events"][0]["seq"],
         )

@@ -6,6 +6,7 @@ import http.client
 import io
 import json
 import urllib.error
+from argparse import Namespace
 from pathlib import Path
 from unittest.mock import MagicMock, Mock
 
@@ -181,3 +182,33 @@ def test_text_output_for_list_response_is_valid_json(capsys: pytest.CaptureFixtu
     output = capsys.readouterr().out
     assert output.startswith("command: list\nresult: ")
     assert json.loads(output.split("result: ", 1)[1]) == [{"job_id": "a" * 32}]
+
+
+@pytest.mark.parametrize("destination", ["directory", "missing-parent"])
+def test_given_unwritable_media_destination_when_saving_then_safe_error_preserves_existing_directory(
+    client: ReleaseApiClient, tmp_path: Path, destination: str
+) -> None:
+    output = tmp_path / "output"
+    if destination == "directory":
+        output.mkdir()
+    else:
+        output = output / "clip.mp4"
+    client.source_episode_media = Mock(return_value=b"media")
+    args = Namespace(dataset_id="sample", handle="a" * 64, episode_index=0, camera="front", output=output)
+    code = "output_exists" if destination == "directory" else "output_unwritable"
+
+    with pytest.raises(ReleaseClientError, match=code) as failure:
+        client_module._save_media(client, args)
+
+    assert failure.value.exit_code == EXIT_USAGE
+    assert str(tmp_path) not in str(failure.value)
+    assert output.is_dir() if destination == "directory" else not output.exists()
+
+
+def test_given_bearer_credential_when_loaded_then_header_is_correct_and_secret_is_not_represented() -> None:
+    credentials = client_module.load_credentials({"RELEASE_BEARER_TOKEN": "synthetic-token"})
+
+    assert credentials is not None
+    assert credentials.header_name == "Authorization"
+    assert credentials.header_value == "Bearer synthetic-token"
+    assert "synthetic-token" not in repr(credentials)

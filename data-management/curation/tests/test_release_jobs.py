@@ -26,6 +26,7 @@ from unittest.mock import patch
 from urllib.parse import urlsplit
 
 import physical_ai_curation
+import physical_ai_curation.release.jobs as release_jobs
 import physical_ai_curation.release.supervision as supervision
 import pytest
 from physical_ai_curation.release.blob_source_associations import BlobSourceAssociations
@@ -36,6 +37,7 @@ from physical_ai_curation.release.jobs import (
     BLOB_OWNER_CLEANUP_PATH,
     EVENTS_NAME,
     MAX_DIAGNOSTIC_DURATION_MS,
+    MAX_DIAGNOSTIC_OPERATIONS,
     AuthorityError,
     CancellationError,
     CapacityError,
@@ -47,6 +49,7 @@ from physical_ai_curation.release.jobs import (
     ReleaseJobControl,
     ReleaseJobError,
     ReleaseJobStore,
+    ReleaseRefusal,
     ReleaseRuntimeSettings,
 )
 from physical_ai_curation.release.local_worker import SourceAssociatedLocalPublisher, SupervisedLocalPublisher
@@ -1218,7 +1221,7 @@ def test_given_malformed_retained_commit_when_registration_started_then_provider
 
 
 @pytest.mark.parametrize("reason", ["absent", "foreign_token", "expired", "completed", "not_committed"])
-def test_given_nonlive_registration_authority_when_renewed_then_it_is_not_revived(tmp_path: Path, reason: str) -> None:
+def test_given_inactive_registration_authority_when_renewed_then_it_is_not_revived(tmp_path: Path, reason: str) -> None:
     clock = FakeClock()
     store = _store(tmp_path / "ledger", clock)
     job_id, _fence = _committed_job(store, tmp_path / "output")
@@ -6002,3 +6005,748 @@ def test_given_foreign_scratch_entry_when_cleanup_requested_then_not_deleted(tmp
     assert (workspace / "foreign.bin").read_bytes() == b"foreign"
     assert foreign.read_bytes() == b"foreign"
     assert store.get(job.job_id, scope=SCOPE, principal=OWNER).scratch_bytes == 256
+
+
+@pytest.mark.parametrize(
+    ("case", "error", "match"),
+    [
+        ("different_frozen", JobConflictError, "idempotency key is bound to a different request"),
+        ("different_client_digest", JobConflictError, "idempotency key is bound to a different request"),
+        ("same_identity_other_key", JobConflictError, "release identity is already claimed"),
+        ("attempt_bound_elsewhere", JobConflictError, "publication attempt is already bound"),
+        ("reserve_exceeds_free", CapacityError, "insufficient capacity"),
+    ],
+)
+def test_given_conflicting_admission_when_accepted_then_refused_without_new_job(
+    tmp_path: Path, case: str, error: type[Exception], match: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock(), free=1000 if case == "reserve_exceeds_free" else 10**12)
+    base = _request(tmp_path / "output")
+    if case == "reserve_exceeds_free":
+        request = _request(tmp_path / "output", reserved=1001)
+    else:
+        store.accept(base)
+        if case == "different_frozen":
+            request = _request(tmp_path / "output", frozen=b'{"request":2}')
+        elif case == "different_client_digest":
+            request = replace(base, client_request_digest="e" * 64)
+        elif case == "same_identity_other_key":
+            request = _request(
+                tmp_path / "output",
+                key="key-2",
+                attempt=PublicationAttempt("pkg-001", "attempt-9", source_dataset_id="sample"),
+                frozen=b'{"request":3}',
+            )
+        else:
+            request = _request(tmp_path / "other", key="key-2")
+    before = store.storage.snapshot()
+
+    with pytest.raises(error, match=match):
+        store.accept(request)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize("elapsed", [0, 29])
+def test_given_live_lease_when_second_worker_claims_then_refused_until_expiry(tmp_path: Path, elapsed: int) -> None:
+    clock = FakeClock()
+    store = _store(tmp_path / "ledger", clock)
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    store.claim(job_id, "worker-a")
+    clock.advance(elapsed)
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError, match="lease is held"):
+        store.claim(job_id, "worker-b")
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize("paused", ["cancelled", "needs_input"])
+def test_given_terminal_or_paused_job_when_claimed_then_refused(tmp_path: Path, paused: str) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.confirm_stopped(job_id, fence)
+    if paused == "cancelled":
+        store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+        store.settle_cancellation(job_id, fence, output_removed=True)
+    else:
+        store.require_input(job_id, fence, "source_unavailable")
+
+    with pytest.raises(AuthorityError, match="job cannot be claimed"):
+        store.claim(job_id, "worker-b")
+
+
+@pytest.mark.parametrize(
+    ("code", "error", "match"),
+    [
+        ("unknown_refusal", ReleaseJobError, "invalid refusal category"),
+        ("source_unavailable", CancellationError, "cancellation requested"),
+        ("source_unavailable", AuthorityError, "input refusal has unresolved work"),
+    ],
+)
+def test_given_invalid_or_unresolved_input_refusal_when_recorded_then_job_keeps_running(
+    tmp_path: Path, code: str, error: type[Exception], match: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    if error is CancellationError:
+        store.confirm_stopped(job_id, fence)
+        store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+    before = store.storage.snapshot()
+
+    with pytest.raises(error, match=match):
+        store.require_input(job_id, fence, code)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize(
+    ("category", "expected_fence", "worker_id"),
+    [
+        ("unknown_failure", 0, "worker-a"),
+        ("worker_failed", 0, ""),
+    ],
+)
+def test_given_invalid_dispatch_failure_when_recorded_then_refused(
+    tmp_path: Path, category: str, expected_fence: int, worker_id: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    before = store.storage.snapshot()
+
+    with pytest.raises(ReleaseJobError):
+        store.record_dispatch_failure(job_id, category, expected_fence=expected_fence, worker_id=worker_id)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize(
+    ("case", "error", "match"),
+    [
+        ("not_requested", CancellationError, "cancellation was not requested"),
+        ("stale_fence", AuthorityError, "stale worker fence"),
+        ("not_stopped", AuthorityError, "effects are not confirmed stopped"),
+        ("open_effect", AuthorityError, "effects are still dispatched or unresolved"),
+    ],
+)
+def test_given_unsafe_cancellation_settlement_when_settled_then_capacity_stays_reserved(
+    tmp_path: Path, case: str, error: type[Exception], match: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    if case == "open_effect":
+        store.begin_effect(job_id, fence, ATTEMPT, "data/a.bin", 1, DIGEST)
+    if case != "not_requested":
+        store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+    if case != "not_stopped":
+        store.confirm_stopped(job_id, fence)
+    settle_fence = fence + 1 if case == "stale_fence" else fence
+    before = store.storage.snapshot()
+
+    with pytest.raises(error, match=match):
+        store.settle_cancellation(job_id, settle_fence, output_removed=True)
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_unsettled_cancellation_when_purged_then_record_is_retained(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.confirm_stopped(job_id, fence)
+    store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError, match="cancellation is not settled"):
+        store.purge_cancelled(job_id, fence)
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_cancellation_before_seal_when_sealed_then_refused_and_ledger_open(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+    before = store.storage.snapshot()
+
+    with pytest.raises(CancellationError, match="cancellation was requested before seal"):
+        store.seal(job_id, fence, CONTROLS)
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_sealed_ledger_when_resealed_with_different_controls_then_refused(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, fence = _sealed_job(store, tmp_path / "output")
+    altered = {**CONTROLS, RECEIPT_PATH: (11, "b" * 64)}
+    before = store.storage.snapshot()
+
+    with pytest.raises(JobConflictError, match="ledger is sealed with different controls"):
+        store.seal(job_id, fence, altered)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize(
+    ("case", "attempt", "digest", "length", "error", "match"),
+    [
+        ("uppercase_digest", ATTEMPT, "D" * 64, 1, ReleaseJobError, "marker digest must be lowercase SHA-256"),
+        ("not_committing", ATTEMPT, COMMIT_DIGEST, 1, AuthorityError, "marker requires a committing publication"),
+        ("foreign_attempt", OTHER_ATTEMPT, COMMIT_DIGEST, 1, AuthorityError, "attempt is not owned by this job"),
+    ],
+)
+def test_given_marker_intent_outside_commit_when_begun_then_refused(
+    tmp_path: Path,
+    case: str,
+    attempt: PublicationAttempt,
+    digest: str,
+    length: int,
+    error: type[Exception],
+    match: str,
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, fence = _sealed_job(store, tmp_path / "output")
+    before = store.storage.snapshot()
+
+    with pytest.raises(error, match=match):
+        store.begin_marker_effect(job_id, fence, attempt, COMMIT_DIGEST, length, digest)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize(
+    ("case", "error", "match"),
+    [
+        ("foreign_principal", JobNotFoundError, "job not found"),
+        ("committed", CancellationError, "commit was already chosen"),
+    ],
+)
+def test_given_cancellation_request_when_job_is_foreign_or_committed_then_refused(
+    tmp_path: Path, case: str, error: type[Exception], match: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    if case == "committed":
+        job_id, _fence = _committed_job(store, tmp_path / "output")
+        principal = OWNER
+    else:
+        job_id = store.accept(_request(tmp_path / "output")).job_id
+        principal = "user-b"
+    before = store.storage.snapshot()
+
+    with pytest.raises(error, match=match):
+        store.request_cancel(job_id, scope=SCOPE, principal=principal)
+
+    assert store.storage.snapshot() == before
+
+
+_WRITER_TEMP = ".curation-copy-" + "a" * 32 + ".partial"
+
+
+class _SequencedMonotonic:
+    """Deterministic monotonic source injected into the release jobs module; the last value repeats."""
+
+    def __init__(self, values: list[float]) -> None:
+        self._values = values
+
+    def monotonic(self) -> float:
+        return self._values.pop(0) if len(self._values) > 1 else self._values[0]
+
+    def time(self) -> float:
+        return time.time()
+
+
+def _registered_writer(store: ReleaseJobStore, job_id: str, fence: int, effect_path: str | None) -> None:
+    identity = ProcessIdentity.of(os.getpid())
+    proof = store.runtime_proof_path(job_id, fence, effect_path=effect_path)
+    store.register_runtime(job_id, fence, SupervisedRuntime(identity, identity, proof), effect_path=effect_path)
+
+
+def test_given_unsupported_refusal_code_when_constructed_then_refused() -> None:
+    with pytest.raises(ValueError, match="unsupported release refusal"):
+        ReleaseRefusal("not-a-code")
+
+
+@pytest.mark.parametrize("worker", ["", "bad worker"])
+def test_given_malformed_worker_identity_when_claimed_then_lease_is_not_granted(tmp_path: Path, worker: str) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    before = store.storage.snapshot()
+
+    with pytest.raises(ReleaseJobError, match="invalid worker identity"):
+        store.claim(job_id, worker)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize(
+    ("effect_path", "effect_paths", "match"),
+    [
+        ("data/a.bin", ["data/a.bin"], "invalid effect scope"),
+        (None, [], "effect set is empty"),
+    ],
+)
+def test_given_ambiguous_runtime_scope_when_proof_requested_then_no_proof_directory_is_created(
+    tmp_path: Path, effect_path: str | None, effect_paths: list[str], match: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+
+    with pytest.raises(AuthorityError, match=match):
+        store.runtime_proof_path(job_id, fence, effect_path=effect_path, effect_paths=effect_paths)
+
+    assert not (store.root / "runtimes" / job_id).exists()
+
+
+def test_given_duplicate_runtime_effect_scope_when_proof_requested_then_refused(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.begin_effect(job_id, fence, ATTEMPT, "data/a.bin", 3, DIGEST)
+
+    with pytest.raises(AuthorityError, match="effect set is invalid"):
+        store.runtime_proof_path(job_id, fence, effect_paths=["data/a.bin", "data/a.bin"])
+
+
+@pytest.mark.parametrize(
+    ("paths", "match"),
+    [
+        (["data/a.bin"], "lacks a journaled cancellation reconciliation"),
+        (["data/a.bin", "data/a.bin"], "reconciliation set is invalid"),
+        ([f"data/{index}.bin" for index in range(17)], "reconciliation set is invalid"),
+    ],
+)
+def test_given_unjournaled_or_oversized_reconciliation_scope_when_proof_requested_then_refused(
+    tmp_path: Path, paths: list[str], match: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+
+    with pytest.raises(AuthorityError, match=match):
+        store.runtime_proof_path(job_id, fence, effect_paths=paths, reconciliation=True)
+
+    assert not (store.root / "runtimes" / job_id).exists()
+
+
+def test_given_cancellation_requested_when_runtime_registered_then_start_is_refused(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    identity = ProcessIdentity.of(os.getpid())
+    runtime = SupervisedRuntime(identity, identity, store.runtime_proof_path(job_id, fence))
+    store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError, match="not authorized"):
+        store.register_runtime(job_id, fence, runtime)
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_stopped_runtime_identity_when_registered_again_then_single_record_is_kept(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    identity = ProcessIdentity.of(os.getpid())
+    runtime = SupervisedRuntime(identity, identity, store.runtime_proof_path(job_id, fence))
+    store.register_runtime(job_id, fence, runtime)
+    with store._transaction() as records:
+        (record,) = records[job_id]["runtimes"].values()
+        record["stopped"] = True
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError, match="already registered"):
+        store.register_runtime(job_id, fence, runtime)
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_no_registered_runtime_when_stop_confirmed_then_refused(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    identity = ProcessIdentity.of(os.getpid())
+
+    with pytest.raises(AuthorityError, match="not registered"):
+        store.confirm_runtime_stopped(job_id, fence, supervision.StopProof(identity, identity, 0, 0))
+
+
+@pytest.mark.parametrize("mismatch", ["fence", "unassociated"])
+def test_given_source_association_identity_when_validated_then_mismatch_is_refused(
+    tmp_path: Path, mismatch: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    destination = tmp_path / "output"
+    job_id = store.accept(_request(destination)).job_id
+    fence = store.claim(job_id, "worker-a")
+    scope = store.storage.snapshot()[job_id]["principal_digest"]
+    checked_fence = fence + 1 if mismatch == "fence" else fence
+
+    with pytest.raises(AuthorityError, match="source association does not match"):
+        store.validate_source_association(job_id, checked_fence, destination, ATTEMPT, b"binding", scope)
+
+
+def test_given_foreign_attempt_when_effect_begins_then_no_effect_is_journaled(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError, match="not owned"):
+        store.begin_effect(job_id, fence, OTHER_ATTEMPT, "data/a.bin", 3, DIGEST)
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_sealed_ledger_when_sealed_again_with_identical_controls_then_state_is_unchanged(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, fence = _sealed_job(store, tmp_path / "output")
+    before = store.storage.snapshot()
+
+    store.seal(job_id, fence, CONTROLS)
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_sealed_ledger_when_sealed_with_other_controls_then_conflict_is_refused(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, fence = _sealed_job(store, tmp_path / "output")
+    before = store.storage.snapshot()
+    conflicting = {RECEIPT_PATH: (11, "b" * 64), CHECKSUMS_PATH: (20, "c" * 64)}
+
+    with pytest.raises(JobConflictError, match="different controls"):
+        store.seal(job_id, fence, conflicting)
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize("state", ["committing", "committed"])
+def test_given_publication_started_when_seal_requested_then_sealing_is_refused(tmp_path: Path, state: str) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    if state == "committed":
+        job_id, fence = _committed_job(store, tmp_path / "output")
+    else:
+        job_id, fence = _sealed_job(store, tmp_path / "output")
+        store._begin_publication(job_id, fence, ATTEMPT, COMMIT_DIGEST)
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError, match="not sealable"):
+        store.seal(job_id, fence, CONTROLS)
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_recorded_temporary_when_same_name_registered_again_then_ownership_is_refused(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    destination = tmp_path / "output"
+    job_id = store.accept(_request(destination)).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.begin_effect(job_id, fence, ATTEMPT, "data/a.bin", 0, DIGEST)
+    _registered_writer(store, job_id, fence, "data/a.bin")
+    partial = destination / ATTEMPT.prefix / "data" / _WRITER_TEMP
+    partial.parent.mkdir(parents=True)
+    partial.touch()
+    store.register_local_temporary(job_id, fence, "data/a.bin", _WRITER_TEMP, partial.stat())
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError, match="already recorded"):
+        store.register_local_temporary(job_id, fence, "data/a.bin", _WRITER_TEMP, partial.stat())
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_published_marker_when_uncertain_output_reconciled_then_immutable_output_is_refused(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    destination = tmp_path / "destination"
+    job_id = store.accept(_request(destination)).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.begin_effect(job_id, fence, ATTEMPT, "data/a.bin", 3, DIGEST)
+    store.finish_effect(job_id, fence, "data/a.bin", ok=False)
+    marker = destination / ATTEMPT.prefix / MARKER_PATH
+    marker.parent.mkdir(parents=True)
+    marker.write_bytes(b"{}")
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError, match="immutable"):
+        store.reconcile_local_outputs(job_id, fence)
+
+    assert store.storage.snapshot() == before
+    assert marker.read_bytes() == b"{}"
+
+
+def test_given_zero_recovery_budget_when_local_outputs_reconciled_then_no_observation_is_taken(tmp_path: Path) -> None:
+    store = ReleaseJobStore(
+        tmp_path / "ledger",
+        settings=replace(SETTINGS, recovery_seconds=0),
+        clock=FakeClock(),
+        free_bytes=lambda _path: 10**12,
+    )
+    destination = tmp_path / "destination"
+    job_id = store.accept(_request(destination)).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.begin_effect(job_id, fence, ATTEMPT, "data/a.bin", 3, DIGEST)
+    store.finish_effect(job_id, fence, "data/a.bin", ok=False)
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError, match="budget"):
+        store.reconcile_local_outputs(job_id, fence)
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_deadline_passes_during_read_when_local_output_reconciled_then_effect_stays_unresolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    destination = tmp_path / "destination"
+    job_id = store.accept(_request(destination)).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.begin_effect(job_id, fence, ATTEMPT, "data/a.bin", 3, DIGEST)
+    store.finish_effect(job_id, fence, "data/a.bin", ok=False)
+    output = destination / ATTEMPT.prefix / "data" / "a.bin"
+    output.parent.mkdir(parents=True)
+    output.write_bytes(b"abc")
+    before = store.storage.snapshot()
+    # Deadline is read first, then one effect check (still in budget), then the first chunk check (expired).
+    monkeypatch.setattr(release_jobs, "time", _SequencedMonotonic([0.0, 0.0, 1000.0]))
+
+    with pytest.raises(AuthorityError, match="budget"):
+        store.reconcile_local_outputs(job_id, fence)
+
+    assert store.storage.snapshot() == before
+    assert output.read_bytes() == b"abc"
+
+
+@pytest.mark.parametrize("damage", ["entry_present", "pending_temporary"])
+def test_given_marker_cleanup_deadline_passes_when_residue_scanned_then_cleanup_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str
+) -> None:
+    store = ReleaseJobStore(
+        tmp_path / "ledger",
+        settings=replace(SETTINGS, cleanup_seconds=1),
+        clock=FakeClock(),
+        free_bytes=lambda _path: 10**12,
+    )
+    destination = tmp_path / "destination"
+    job_id, fence = _sealed_job(store, destination)
+    store._begin_publication(job_id, fence, ATTEMPT, COMMIT_DIGEST)
+    root = destination / ATTEMPT.prefix
+    root.mkdir(parents=True)
+    if damage == "entry_present":
+        (root / "keep.bin").write_bytes(b"entry")
+    else:
+        with store._transaction() as records:
+            records[job_id]["temporaries"].append(
+                {"path": MARKER_PATH, "name": _WRITER_TEMP, "fence": fence, "device": 1, "inode": 1, "removed": False}
+            )
+    before = store.storage.snapshot()
+    monkeypatch.setattr(release_jobs, "time", _SequencedMonotonic([0.0, 1000.0]))
+
+    with pytest.raises(AuthorityError, match="marker cleanup budget exhausted"):
+        store.remove_marker_temporaries(job_id, fence, root)
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_replaced_marker_partial_when_cleanup_runs_then_foreign_inode_is_retained(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    destination = tmp_path / "destination"
+    job_id, fence = _sealed_job(store, destination)
+    store._begin_publication(job_id, fence, ATTEMPT, COMMIT_DIGEST)
+    store.begin_marker_effect(job_id, fence, ATTEMPT, COMMIT_DIGEST, 3, DIGEST)
+    _registered_writer(store, job_id, fence, MARKER_PATH)
+    root = destination / ATTEMPT.prefix
+    root.mkdir(parents=True)
+    partial = root / _WRITER_TEMP
+    partial.touch()
+    store.register_local_temporary(job_id, fence, MARKER_PATH, _WRITER_TEMP, partial.stat())
+    with store._transaction() as records:
+        for runtime in records[job_id]["runtimes"].values():
+            runtime["stopped"] = True
+    # Keep the original inode alive so the replacement cannot reuse its number.
+    partial.rename(root / "held.partial")
+    partial.write_bytes(b"foreign")
+
+    with pytest.raises(AuthorityError, match="ownership is unresolved"):
+        store.remove_marker_temporaries(job_id, fence, root)
+
+    assert partial.read_bytes() == b"foreign"
+
+
+def test_given_marker_runtime_unresolved_when_marker_resolved_then_intent_is_not_settled(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, fence = _sealed_job(store, tmp_path / "destination")
+    store._begin_publication(job_id, fence, ATTEMPT, COMMIT_DIGEST)
+    store.begin_marker_effect(job_id, fence, ATTEMPT, COMMIT_DIGEST, 3, DIGEST)
+    _registered_writer(store, job_id, fence, MARKER_PATH)
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError, match="runtime stop proof is unresolved"):
+        store.resolve_marker_effect(job_id, fence, observed="absent", length=3, digest=DIGEST)
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_unresolved_runtime_when_binding_recovered_then_execution_is_not_authorized(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    destination = tmp_path / "destination"
+    job_id = store.accept(_request(destination)).job_id
+    fence = store.claim(job_id, "worker-a")
+    _registered_writer(store, job_id, fence, None)
+
+    with pytest.raises(AuthorityError, match="runtime stop proof is unresolved"):
+        store.validate_execution_binding(job_id, fence, destination, ATTEMPT, route="local", recovery=True)
+
+
+@pytest.mark.parametrize("damage", ["oversized_line", "unknown_identity"])
+def test_given_corrupt_event_journal_when_flushed_then_refused_without_truncation(tmp_path: Path, damage: str) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    store.accept(_request(tmp_path / "output"))
+    payloads = {
+        "oversized_line": b"x" * 5000 + b"\n",
+        "unknown_identity": json.dumps({"seq": 1, "event_id": "untrusted"}).encode() + b"\n",
+    }
+    payload = payloads[damage]
+    store.events_path.parent.mkdir(parents=True, exist_ok=True)
+    store.events_path.write_bytes(payload)
+
+    with pytest.raises(ReleaseJobError, match="corrupt"):
+        store.flush_events()
+
+    assert store.events_path.read_bytes() == payload
+
+
+def test_given_diagnostic_budget_exhausted_when_new_operation_recorded_then_only_replay_is_accepted(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    operations = [f"{index:032x}" for index in range(MAX_DIAGNOSTIC_OPERATIONS)]
+    for operation in operations:
+        store.record_diagnostic(job_id, fence, operation, "encode", "succeeded", duration_ms=1)
+    before = store.storage.snapshot()
+
+    with pytest.raises(ReleaseJobError, match="budget"):
+        store.record_diagnostic(job_id, fence, "f" * 32, "encode", "succeeded", duration_ms=1)
+    assert store.storage.snapshot() == before
+
+    store.record_diagnostic(job_id, fence, operations[0], "encode", "succeeded", duration_ms=1)
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize("operation", ["A" * 32, "a" * 31])
+def test_given_malformed_diagnostic_operation_identity_when_recorded_then_refused(
+    tmp_path: Path, operation: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    before = store.storage.snapshot()
+
+    with pytest.raises(ReleaseJobError, match="identity is invalid"):
+        store.record_diagnostic(job_id, fence, operation, "copy", "failed")
+
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize(("category", "duration"), [("copy", 7), ("encode", 8)])
+def test_given_recorded_diagnostic_identity_when_observation_changes_then_conflict_is_refused(
+    tmp_path: Path, category: str, duration: int
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    operation = "e" * 32
+    store.record_diagnostic(job_id, fence, operation, "encode", "succeeded", duration_ms=7)
+    before = store.storage.snapshot()
+
+    with pytest.raises(JobConflictError):
+        store.record_diagnostic(job_id, fence, operation, category, "succeeded", duration_ms=duration)
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_no_scratch_workspace_when_cleanup_requested_then_ledger_is_unchanged(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    before = store.storage.snapshot()
+
+    store.cleanup_scratch_workspace(job_id, fence)
+
+    assert store.storage.snapshot() == before
+
+
+def test_given_reserved_workspace_name_already_exists_when_created_then_foreign_directory_is_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(release_jobs, "uuid4", lambda: SimpleNamespace(hex="e" * 32))
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    foreign = store.root.resolve() / "scratch" / job_id / ("e" * 32)
+    foreign.mkdir(parents=True)
+    (foreign / "foreign.bin").write_bytes(b"foreign")
+
+    with pytest.raises(AuthorityError, match="collided"):
+        store.create_scratch_workspace(job_id, fence, 100)
+
+    assert (foreign / "foreign.bin").read_bytes() == b"foreign"
+
+
+def test_given_workspace_directory_already_removed_when_cleaned_then_removal_is_recorded(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    workspace = store.create_scratch_workspace(job_id, fence, 100)
+    workspace.rmdir()
+
+    store.cleanup_scratch_workspace(job_id, fence)
+
+    assert store.storage.snapshot()[job_id]["workspace"]["status"] == "removed"
+
+
+def test_given_workspace_directory_replaced_when_cleaned_then_replacement_is_retained(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    workspace = store.create_scratch_workspace(job_id, fence, 100)
+    # Keep the original inode alive so the replacement cannot reuse its number.
+    workspace.rename(workspace.parent / "held-original")
+    workspace.mkdir()
+    (workspace / "replacement.bin").write_bytes(b"replacement")
+
+    with pytest.raises(AuthorityError, match="identity"):
+        store.cleanup_scratch_workspace(job_id, fence)
+
+    assert (workspace / "replacement.bin").read_bytes() == b"replacement"
+
+
+@pytest.mark.parametrize(("observation", "expected"), [("conflict", "invalid"), ("unknown", "invalid")])
+def test_given_invalid_reconciliation_observation_when_reported_then_effect_stays_unresolved(
+    tmp_path: Path, observation: str, expected: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "destination")).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.begin_effect(job_id, fence, ATTEMPT, "data/a.bin", 3, DIGEST)
+    store.finish_effect(job_id, fence, "data/a.bin", ok=False)
+
+    with (
+        pytest.raises(ReleaseJobError, match=f"observation is {expected}"),
+        ReleaseJobControl(store, job_id, fence).reconciliation(
+            ATTEMPT, "data/a.bin", 3, DIGEST, copy_id=None, cancel=False
+        ) as observed,
+    ):
+        observed(observation)
+
+    assert store.storage.snapshot()[job_id]["effects"]["data/a.bin"]["status"] == "uncertain"

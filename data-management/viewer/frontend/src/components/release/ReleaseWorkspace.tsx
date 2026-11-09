@@ -248,34 +248,49 @@ function EpisodeMedia({
     }
   }, [datasetId, handle, episodeIndex, camera])
 
-  if (failed) return <p className="text-sm">Media unavailable for this camera.</p>
-  if (!url) return <p className="text-muted-foreground text-sm">Loading media...</p>
   return (
-    <video
-      aria-label={`Camera ${camera} for episode ${episodeIndex}`}
-      src={url}
-      controls
-      muted
-      onLoadedMetadata={(event) => {
-        if (window) event.currentTarget.currentTime = window[0]
-      }}
-      onSeeking={(event) => {
-        if (!window) return
-        const video = event.currentTarget
-        if (video.currentTime < window[0]) video.currentTime = window[0]
-        else if (video.currentTime > window[1]) video.currentTime = window[1]
-      }}
-      onTimeUpdate={(event) => {
-        if (!window) return
-        const video = event.currentTarget
-        if (video.currentTime < window[0]) video.currentTime = window[0]
-        if (video.currentTime >= window[1]) {
-          video.pause()
-          if (video.currentTime > window[1]) video.currentTime = window[1]
-        }
-      }}
-      className="bg-muted w-full max-w-2xl rounded-md"
-    />
+    <div>
+      <p
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="text-muted-foreground text-sm"
+      >
+        {!url && !failed ? 'Loading media...' : ''}
+      </p>
+      {failed && (
+        <p role="alert" className="text-sm">
+          Media unavailable for this camera.
+        </p>
+      )}
+      {url && (
+        <video
+          aria-label={`Camera ${camera} for episode ${episodeIndex}`}
+          src={url}
+          controls
+          muted
+          onLoadedMetadata={(event) => {
+            if (window) event.currentTarget.currentTime = window[0]
+          }}
+          onSeeking={(event) => {
+            if (!window) return
+            const video = event.currentTarget
+            if (video.currentTime < window[0]) video.currentTime = window[0]
+            else if (video.currentTime > window[1]) video.currentTime = window[1]
+          }}
+          onTimeUpdate={(event) => {
+            if (!window) return
+            const video = event.currentTarget
+            if (video.currentTime < window[0]) video.currentTime = window[0]
+            if (video.currentTime >= window[1]) {
+              video.pause()
+              if (video.currentTime > window[1]) video.currentTime = window[1]
+            }
+          }}
+          className="bg-muted w-full max-w-2xl rounded-md"
+        />
+      )}
+    </div>
   )
 }
 
@@ -352,7 +367,11 @@ function ReleaseDetail({
 
       <div className="grid gap-2">
         <p className="text-sm font-medium">Episodes in release</p>
-        {episodes.isError && <p className="text-sm">Episodes could not be loaded.</p>}
+        {episodes.isError && (
+          <p role="alert" className="text-sm">
+            Episodes could not be loaded.
+          </p>
+        )}
         <ul
           aria-label="Release episodes"
           className="divide-border max-h-64 divide-y overflow-y-auto rounded-md border"
@@ -478,8 +497,17 @@ function ReleaseWorkspaceContent({
   const [selectedHandle, setSelectedHandle] = useState<string | null>(null)
   const [collapsedJobId, setCollapsedJobId] = useState<string | null>(null)
   const jobButton = useRef<HTMLButtonElement>(null)
+  const jobHeading = useRef<HTMLHeadingElement>(null)
+  const focusJobOnExpand = useRef(false)
   const releaseButton = useRef<HTMLButtonElement>(null)
   const jobExpanded = release.activeJobId !== null && collapsedJobId !== release.activeJobId
+
+  useEffect(() => {
+    if (jobExpanded && focusJobOnExpand.current) {
+      jobHeading.current?.focus()
+      focusJobOnExpand.current = false
+    }
+  }, [jobExpanded, release.activeJobId])
 
   const capabilities = release.capabilities.data
   const capabilityError = release.capabilities.error
@@ -649,7 +677,12 @@ function ReleaseWorkspaceContent({
           className="grid gap-3 rounded-md border p-3"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 id="release-job-heading" className="text-sm font-medium">
+            <h3
+              ref={jobHeading}
+              tabIndex={-1}
+              id="release-job-heading"
+              className="text-sm font-medium"
+            >
               Job{' '}
               <span className="font-mono" title={release.activeJobId ?? undefined}>
                 {release.activeJobId?.slice(0, 8)}
@@ -794,7 +827,9 @@ function ReleaseWorkspaceContent({
             Release jobs for this source
           </h3>
           {release.jobs.isError ? (
-            <p className="text-sm">Release jobs could not be loaded.</p>
+            <p role="alert" className="text-sm">
+              Release jobs could not be loaded.
+            </p>
           ) : (
             <>
               <ul aria-label="Release jobs" className="divide-border divide-y rounded-md border">
@@ -816,6 +851,9 @@ function ReleaseWorkspaceContent({
                       aria-expanded={jobExpanded && release.activeJobId === job.jobId}
                       aria-controls="release-job-panel"
                       onClick={() => {
+                        focusJobOnExpand.current = !(
+                          jobExpanded && release.activeJobId === job.jobId
+                        )
                         setCollapsedJobId(
                           jobExpanded && release.activeJobId === job.jobId ? job.jobId : null,
                         )
@@ -850,9 +888,14 @@ function ReleaseWorkspaceContent({
         <h3 id="release-collection-heading" className="text-sm font-medium">
           Source releases
         </h3>
-        {sourceReleases.isLoading && (
-          <p className="text-muted-foreground text-sm">Loading releases...</p>
-        )}
+        <p
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="text-muted-foreground text-sm"
+        >
+          {sourceReleases.isLoading ? 'Loading releases...' : ''}
+        </p>
         {sourceReleases.isError && (
           <Alert variant="destructive">
             <AlertDescription>Source releases could not be loaded.</AlertDescription>

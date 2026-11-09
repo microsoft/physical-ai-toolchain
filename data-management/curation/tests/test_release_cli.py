@@ -552,11 +552,15 @@ def test_given_committed_job_when_wait_then_polls_until_terminal(
     assert json.loads(capsys.readouterr().out)["result"]["state"] == "committed"
 
 
-def test_given_cancelled_job_when_wait_then_not_committed(
-    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(
+    ("state", "error_code"),
+    [("cancelled", "job_not_committed"), ("needs_input", "job_needs_input_cancel_and_resubmit")],
+)
+def test_given_stopped_job_when_wait_then_not_committed(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str], state: str, error_code: str
 ) -> None:
     # Arrange
-    api.states = ["cancelled"]
+    api.states = [state]
     clock = FakeClock()
 
     # Act
@@ -570,7 +574,7 @@ def test_given_cancelled_job_when_wait_then_not_committed(
     # Assert
     assert code == EXIT_JOB_NOT_COMMITTED
     error = _stderr_error(capsys)
-    assert error == {"code": "job_not_committed", "state": "cancelled"}
+    assert error == {"code": error_code, "state": state}
     assert clock.pauses == []
 
 

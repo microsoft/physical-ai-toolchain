@@ -411,6 +411,121 @@ def test_judge_profiles_install_from_root_lock_without_checkout_imports() -> Non
     assert "dockerfile: data-management/viewer/backend/Dockerfile" in compose
 
 
+def test_given_production_staging_when_wheels_start_outside_checkout_then_release_health_works(
+    first_party_wheels: Path, tmp_path: Path
+) -> None:
+    repository = Path(__file__).resolve().parents[4]
+    context = tmp_path / "context"
+    context.mkdir()
+    deploy = (repository / "data-management/setup/deploy-dataviewer.sh").read_text()
+    staging = (
+        'mkdir -p "$backend_context'
+        + deploy.split('mkdir -p "$backend_context', 1)[1].split('    info "Building $backend_image', 1)[0]
+    )
+    stage = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", staging],
+        env={
+            **os.environ,
+            "REPO_ROOT": str(repository),
+            "SRC_DIR": str(repository / "data-management/viewer"),
+            "backend_context": str(context),
+            "backend_dockerfile": str(repository / "data-management/viewer/backend/Dockerfile"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert stage.returncode == 0, stage.stderr
+    wheels = tmp_path / "wheels"
+    shutil.copytree(first_party_wheels, wheels)
+    for project in ("data-management/curation", "data-management/viewer/backend"):
+        build = subprocess.run(
+            ["uv", "build", "--offline", "--wheel", "--out-dir", str(wheels), str(context / project)],
+            cwd=context,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert build.returncode == 0, build.stderr
+    installed = tmp_path / "installed"
+    restore = subprocess.run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            sys.executable,
+            "--target",
+            str(installed),
+            "--no-deps",
+            "--no-index",
+            *map(str, sorted(wheels.glob("*.whl"))),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert restore.returncode == 0, restore.stderr
+    script = """
+import sys
+from pathlib import Path
+sys.path[:0] = sys.argv[1:3]
+from physical_ai_curation.release import jobs
+from fastapi.testclient import TestClient
+from src.api.main import app
+assert Path(jobs.__file__).is_relative_to(sys.argv[1])
+assert Path(sys.modules['src.api.main'].__file__).is_relative_to(sys.argv[1])
+with TestClient(app) as client:
+    assert client.get('/health').status_code == 200
+"""
+    (tmp_path / "datasets").mkdir()
+    runtime = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", script, str(installed), sysconfig.get_path("purelib")],
+        cwd=tmp_path,
+        env={
+            "PATH": os.environ["PATH"],
+            "STORAGE_BACKEND": "local",
+            "DATA_DIR": str(tmp_path / "datasets"),
+            "VLM_JUDGE_ENABLED": "false",
+            "CURATION_RELEASE_AZUREML_ENABLED": "false",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert runtime.returncode == 0, runtime.stderr
+
+
+@pytest.mark.parametrize(
+    ("enabled", "extras", "expected"),
+    [("true", "azure,auth", "azure,auth,azureml"), ("TRUE", "azureml", "azureml"), ("false", "auth", "auth")],
+)
+def test_given_registration_flag_when_selecting_image_extras_then_azureml_is_available(
+    enabled: str, extras: str, expected: str
+) -> None:
+    backend = Path(__file__).resolve().parents[1]
+    dockerfile = (backend / "Dockerfile").read_text()
+    deploy = (backend.parents[1] / "setup" / "deploy-dataviewer.sh").read_text()
+    selection = "backend_extras=" + deploy.split("backend_extras=", 1)[1].split("buildkit_images=()", 1)[0]
+    result = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", selection + '\nprintf "%s" "$backend_extras"'],
+        env={
+            **os.environ,
+            "DATAVIEWER_BACKEND_EXTRAS": extras,
+            "DATAVIEWER_JUDGE_EXTRAS": "",
+            "CURATION_RELEASE_AZUREML_ENABLED": enabled,
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == expected
+    assert "azure|azureml|analysis|export|auth|yolo)" in dockerfile
+
+
 def test_build_upload_is_allowlisted_and_compose_keeps_jobs_durable() -> None:
     backend = Path(__file__).resolve().parents[1]
     ignore = backend / "Dockerfile.dockerignore"
@@ -424,6 +539,8 @@ def test_build_upload_is_allowlisted_and_compose_keeps_jobs_durable() -> None:
     assert "!data-management/curation/pyproject.toml" in patterns
     assert "!data-management/curation/physical_ai_curation/*.py" in patterns
     assert "!data-management/curation/physical_ai_curation/adapters/*.py" in patterns
+    assert "!data-management/curation/physical_ai_curation/release/" in patterns
+    assert "!data-management/curation/physical_ai_curation/release/**" in patterns
     assert "!data-management/dataset-io/pyproject.toml" in patterns
     assert "!data-management/dataset-io/physical_ai_dataset_io/*.py" in patterns
     assert not any(line.startswith("!") and ".env" in line for line in patterns)
@@ -444,6 +561,7 @@ def test_build_upload_is_allowlisted_and_compose_keeps_jobs_durable() -> None:
     )
     assert 'cp "$REPO_ROOT/data-management/curation/physical_ai_curation/"*.py' in deploy
     assert 'cp "$REPO_ROOT/data-management/curation/physical_ai_curation/adapters/"*.py' in deploy
+    assert "-cf - release" in deploy
     assert 'cp "$REPO_ROOT/data-management/dataset-io/pyproject.toml"' in deploy
     assert 'cp "$REPO_ROOT/data-management/dataset-io/physical_ai_dataset_io/"*.py' in deploy
 
@@ -1480,7 +1598,8 @@ if sys.argv[3] == 'v2.1':
     os.environ['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] = '1'
     os.environ.pop('PYTEST_ADDOPTS', None)
     import pytest
-    assert pytest.main([str(Path(sys.argv[1]) / 'test_job_cli.py'), '-q', '-p', 'no:cacheprovider']) == 0
+    assert pytest.main([str(Path(sys.argv[1]) / 'test_job_cli.py'), '-q',
+                        '-p', 'no:cacheprovider', '-p', 'pytest_mock.plugin']) == 0
 """
     result = subprocess.run(
         [sys.executable, "-I", "-S", "-B", "-c", script, str(tmp_path), sysconfig.get_path("purelib"), layout],

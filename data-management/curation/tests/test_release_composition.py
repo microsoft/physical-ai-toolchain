@@ -469,7 +469,7 @@ def test_given_frozen_removal_when_prepare_then_existing_object_plan_requires_en
     assert prepared.encoding_windows(prepared.plan.objects[0])[0].kept_frames == (0, 1, 3)
 
 
-def test_given_nontranscode_object_when_encoding_windows_requested_then_refused() -> None:
+def test_given_object_without_transcoding_when_encoding_windows_requested_then_refused() -> None:
     from physical_ai_curation.release.composition import prepare_saved_generation
 
     frozen, request, sources = _generation_case()

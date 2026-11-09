@@ -424,13 +424,15 @@ def wait_for_job(
     clock: Callable[[], float] = time.monotonic,
     pause: Callable[[float], object] = _NEVER_SET.wait,
 ) -> dict[str, Any]:
-    """Poll until the job reaches a terminal state. Returns status only for ``committed``."""
+    """Poll until committed or stopped; refuse immediately when corrected input is required."""
     deadline = clock() + timeout
     while True:
         status = client.status(job_id)
         if not isinstance(status, dict):
             raise ReleaseClientError("invalid_response", EXIT_TRANSPORT)
         state = status.get("state")
+        if state == "needs_input":
+            raise ReleaseClientError("job_needs_input_cancel_and_resubmit", EXIT_JOB_NOT_COMMITTED, state=state)
         if isinstance(state, str) and state in TERMINAL_JOB_STATES:
             if state != SUCCESS_JOB_STATE:
                 raise ReleaseClientError("job_not_committed", EXIT_JOB_NOT_COMMITTED, state=state)

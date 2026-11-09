@@ -228,7 +228,7 @@ class TestContributionLedger:
         else:
             entry["derived_from"] = ["future"]
 
-        with pytest.raises(ValueError, match="identit"):
+        with pytest.raises(ValueError, match=r"identity|identities"):
             ContributionLedger.model_validate(payload)
 
     @pytest.mark.parametrize(

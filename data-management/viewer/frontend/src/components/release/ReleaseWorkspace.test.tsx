@@ -261,9 +261,11 @@ describe('ReleaseWorkspace', () => {
     })
     vi.mocked(useRelease).mockReturnValue(release)
     renderWorkspace()
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'Stalled. Recovery required. Cancel job to remove partial output, or Recover job to retry.',
-    )
+    expect(
+      screen.getByText(
+        'Stalled. Recovery required. Cancel job to remove partial output, or Recover job to retry.',
+      ),
+    ).toHaveAttribute('role', 'status')
     expect(
       within(screen.getByRole('list', { name: 'Release jobs' })).getByText('Stalled'),
     ).toBeVisible()
@@ -380,7 +382,9 @@ describe('ReleaseWorkspace', () => {
       makeRelease({ inventoryReady: false, inventoryProgress: { loaded: 20, total: 296 } }),
     )
     const { rerender } = renderWithQuery(<ReleaseWorkspace datasetId="dataset-1" />)
-    expect(screen.getByRole('status')).toHaveTextContent('20 of 296 episodes loaded')
+    expect(
+      screen.getByText('Loading source inventory: 20 of 296 episodes loaded.'),
+    ).toHaveAttribute('role', 'status')
     expect(dialogSpy.props?.inventoryMessage).toContain('20 of 296')
 
     vi.mocked(useRelease).mockReturnValue(
@@ -588,6 +592,9 @@ describe('ReleaseWorkspace', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open job aaaaaaaa' }))
     expect(screen.getByRole('button', { name: 'Download manifest' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Job aaaaaaaa' })).toHaveFocus()
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'Clear saved job' })).toHaveFocus()
     await user.click(screen.getByRole('button', { name: 'Close job details' }))
     expect(screen.getByRole('button', { name: 'Open job aaaaaaaa' })).toHaveFocus()
     expect(release.cancel).not.toHaveBeenCalled()
@@ -681,7 +688,7 @@ describe('ReleaseWorkspace', () => {
       })
       vi.mocked(useRelease).mockReturnValue(hook)
       renderWorkspace()
-      expect(screen.getByRole('status')).toHaveTextContent('Cancellation requested.')
+      expect(screen.getByText(/Cancellation requested\./)).toHaveAttribute('role', 'status')
       expect(screen.getByText('2.0 KiB')).toBeVisible()
       expect(screen.getAllByText('Unknown')).toHaveLength(2)
       expect(screen.getByText('Yes')).toBeVisible()
@@ -787,7 +794,7 @@ describe('ReleaseWorkspace', () => {
 
     const result = screen.getByRole('region', { name: 'Verified result' })
     expect(result).toHaveTextContent('Source dataset IDorg--dataset')
-    expect(result).toHaveTextContent('Release namerelease-a')
+    expect(result).toHaveTextContent(/Release name\s*release-a/)
     expect(result).toHaveTextContent('Checksums covered12')
     expect(result).toHaveTextContent('Checksums omitted2')
   })
@@ -874,7 +881,7 @@ describe('ReleaseWorkspace', () => {
     vi.mocked(useRelease).mockReturnValue(hook)
     vi.mocked(listSourceReleases).mockRejectedValueOnce(new Error('private'))
     renderWorkspace()
-    expect(screen.getByRole('status')).toHaveTextContent('Job status could not be loaded.')
+    expect(screen.getByText('Job status could not be loaded.')).toHaveAttribute('role', 'status')
     expect(screen.getByText('Release jobs could not be loaded.')).toBeVisible()
     expect(screen.getByText(/Source inventory could not be loaded/)).toBeVisible()
     expect(await screen.findByText('Source releases could not be loaded.')).toBeVisible()
@@ -1023,12 +1030,24 @@ describe('ReleaseWorkspace', () => {
     })
 
     it('reports media failure without displaying provider details', async () => {
-      vi.mocked(fetchSourceEpisodeMedia).mockRejectedValue(new Error('private media failure'))
+      let rejectMedia!: (reason: Error) => void
+      vi.mocked(fetchSourceEpisodeMedia).mockReturnValue(
+        new Promise((_resolve, reject) => {
+          rejectMedia = reject
+        }),
+      )
       renderWorkspace()
       const user = userEvent.setup()
       await user.click(await screen.findByRole('button', { name: /Release A/ }))
       await user.click(await screen.findByRole('button', { name: /Episode 0/ }))
-      expect(await screen.findByText('Media unavailable for this camera.')).toBeVisible()
+      const loading = screen.getByText('Loading media...')
+      expect(loading).toHaveAttribute('role', 'status')
+      expect(loading).toHaveAttribute('aria-live', 'polite')
+      rejectMedia(new Error('private media failure'))
+      const failure = await screen.findByText('Media unavailable for this camera.')
+      expect(failure).toHaveAttribute('role', 'alert')
+      expect(loading).toBeInTheDocument()
+      expect(loading).toBeEmptyDOMElement()
       expect(screen.queryByText(/private media failure/)).not.toBeInTheDocument()
     })
 

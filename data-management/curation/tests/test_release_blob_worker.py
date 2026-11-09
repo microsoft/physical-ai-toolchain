@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 from physical_ai_curation.release import blob_worker
@@ -19,7 +19,7 @@ from physical_ai_curation.release.canonical import sha256_hex
 from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.jobs import BLOB_OWNER_CLEANUP_PATH, ReleaseRuntimeSettings
 from physical_ai_curation.release.models import MARKER_PATH, SourceObject
-from physical_ai_curation.release.publication import ownership_bytes, ownership_path
+from physical_ai_curation.release.publication import PublicationAttempt, ownership_bytes, ownership_path
 from physical_ai_curation.release.record_storage import BlobLocation, LocalRecordStorage
 from test_release_publishers import (
     ATTEMPT,
@@ -696,3 +696,301 @@ def test_companion_cleanup_removes_only_matching_empty_release_root(outcome: str
     else:
         blob_worker._remove_blob(publisher, jobs, spec)
         assert companion not in publisher.container.blobs
+
+
+OTHER_ATTEMPT = PublicationAttempt("pkg-other", "attempt-other", source_dataset_id="org-dataset")
+
+
+def _put_owned(publisher: SupervisedBlobPublisher, *, owner: PublicationAttempt = ATTEMPT) -> str:
+    digest = sha256_hex(PAYLOAD)
+    operation = _operation_id(ATTEMPT, PATH, len(PAYLOAD), digest)
+    publisher.container.put(publisher.root + PATH, PAYLOAD, _ownership(owner, len(PAYLOAD), digest, operation))
+    publisher.container.put(publisher.parent_prefix + ownership_path(ATTEMPT.prefix), ownership_bytes(ATTEMPT))
+    return digest
+
+
+def _spec(
+    publisher: SupervisedBlobPublisher, operation: dict[str, Any], *, digest: str | None = None
+) -> dict[str, Any]:
+    return json.loads(publisher._protocol(PATH, len(PAYLOAD), digest or sha256_hex(PAYLOAD), operation))
+
+
+def _patch_process(mocker: Any, publisher: SupervisedBlobPublisher) -> None:
+    mocker.patch.object(blob_worker, "ReleaseJobStore", return_value=publisher.jobs)
+    mocker.patch.object(blob_worker, "storage_from_configuration", return_value=publisher.jobs.storage)
+
+
+def _run_process(content: bytes, publisher: SupervisedBlobPublisher) -> None:
+    source_fd = os.memfd_create("blob-protocol", os.MFD_CLOEXEC)
+    try:
+        os.write(source_fd, content)
+        os.lseek(source_fd, 0, os.SEEK_SET)
+        blob_worker._process(os.dup(source_fd), container_factory=Mock(return_value=publisher.container))
+    finally:
+        os.close(source_fd)
+
+
+@pytest.mark.parametrize("damage", ["missing", "size", "foreign_owner"])
+def test_given_uploaded_output_when_ownership_fails_then_create_refuses(
+    publisher: SupervisedBlobPublisher, mocker: Any, damage: str
+) -> None:
+    # Arrange
+    digest = sha256_hex(PAYLOAD)
+    operation = _operation_id(ATTEMPT, PATH, len(PAYLOAD), digest)
+    if damage == "size":
+        publisher.container.put(
+            publisher.root + PATH, PAYLOAD + b"x", _ownership(ATTEMPT, len(PAYLOAD), digest, operation)
+        )
+    elif damage == "foreign_owner":
+        publisher.container.put(
+            publisher.root + PATH, PAYLOAD, _ownership(ATTEMPT, len(PAYLOAD), digest, "foreign-operation")
+        )
+    publisher._active_write = {"mode": "inline", "content": ""}
+    mocker.patch.object(publisher, "_execute")
+
+    # Act / Assert
+    with pytest.raises(ReleaseVerificationError, match="uploaded output ownership conflict"):
+        publisher._create(None, PATH, iter([PAYLOAD]), len(PAYLOAD), digest, operation)
+    publisher.jobs.record_io.assert_not_called()
+
+
+def test_given_cancelled_copy_residue_when_reconciled_then_refuses(
+    publisher: SupervisedBlobPublisher, mocker: Any
+) -> None:
+    _put_owned(publisher)
+    publisher.control = MagicMock()
+    mocker.patch.object(publisher, "_execute")
+
+    with pytest.raises(ReleaseVerificationError, match="cancelled copy residue remains unresolved"):
+        publisher.reconcile_copy(_source(), "etag", cancel=True)
+
+
+def test_given_cleanup_budget_exhausted_when_cancelled_then_refuses_and_marks_failed(
+    publisher: SupervisedBlobPublisher, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _put_owned(publisher)
+    publisher.jobs.cancellation_effects.return_value = [
+        {"path": PATH, "length": len(PAYLOAD), "digest": sha256_hex(PAYLOAD), "copy_id": None}
+    ]
+    ticks = iter([0, 10**9])
+    monkeypatch.setattr(blob_worker, "time", SimpleNamespace(monotonic=lambda: next(ticks, 10**9)))
+
+    with pytest.raises(ReleaseVerificationError, match="blob cleanup budget exhausted"):
+        publisher.cleanup_cancelled()
+    publisher.jobs.blob_cleanup_status.assert_called_with("a" * 32, 1, failed=True)
+
+
+@pytest.mark.parametrize("damage", ["length", "digest", "foreign_owner"])
+def test_given_cancelled_output_identity_differs_when_cleaning_then_refuses(
+    publisher: SupervisedBlobPublisher, damage: str
+) -> None:
+    digest = _put_owned(publisher, owner=OTHER_ATTEMPT if damage == "foreign_owner" else ATTEMPT)
+    effect = {"path": PATH, "length": len(PAYLOAD), "digest": digest, "copy_id": None}
+    if damage == "length":
+        effect["length"] += 1
+    if damage == "digest":
+        effect["digest"] = "b" * 64
+    publisher.jobs.cancellation_effects.return_value = [effect]
+
+    with pytest.raises(ReleaseVerificationError, match="output ownership prevents cleanup"):
+        publisher.cleanup_cancelled()
+    publisher.jobs.settle_cancellation.assert_not_called()
+
+
+def test_given_cleanup_outcome_unresolved_when_batch_finishes_then_refuses(
+    publisher: SupervisedBlobPublisher, mocker: Any
+) -> None:
+    digest = _put_owned(publisher)
+    publisher.jobs.cancellation_effects.return_value = [
+        {"path": PATH, "length": len(PAYLOAD), "digest": digest, "copy_id": None}
+    ]
+    mocker.patch.object(publisher, "_execute")
+
+    with pytest.raises(ReleaseVerificationError, match="blob cleanup outcome remains unresolved"):
+        publisher.cleanup_cancelled()
+    publisher.jobs.finish_blob_removals.assert_not_called()
+
+
+@pytest.mark.parametrize("residue", ["companion", "stray_blob"])
+def test_given_cleanup_closure_residue_when_owner_removed_then_refuses(
+    publisher: SupervisedBlobPublisher, mocker: Any, residue: str
+) -> None:
+    publisher.jobs.cancellation_effects.return_value = []
+    publisher.jobs.begin_blob_owner_cleanup.return_value = (1, "d" * 64)
+    if residue == "companion":
+        publisher.container.put(publisher.parent_prefix + ownership_path(ATTEMPT.prefix), ownership_bytes(ATTEMPT))
+        mocker.patch.object(publisher, "_execute")
+    else:
+        mocker.patch.object(
+            publisher,
+            "_execute",
+            side_effect=lambda *_: publisher.container.put(publisher.root + "stray.bin", b"x"),
+        )
+
+    with pytest.raises(ReleaseVerificationError, match="blob cleanup closure remains unresolved"):
+        publisher.cleanup_cancelled()
+    publisher.jobs.reconcile_effect.assert_not_called()
+
+
+def test_given_marker_replay_recorded_when_published_then_marker_is_not_written(
+    publisher: SupervisedBlobPublisher, mocker: Any
+) -> None:
+    publisher.control = MagicMock()
+    publisher.jobs.begin_marker_effect.return_value = True
+    execute = mocker.patch.object(publisher, "_execute")
+
+    publisher._publish_marker(b"marker", expected_manifest_sha256="c" * 64)
+
+    execute.assert_not_called()
+    publisher.jobs.finish_effect.assert_not_called()
+
+
+def test_given_marker_readback_differs_when_published_then_effect_fails(
+    publisher: SupervisedBlobPublisher, mocker: Any
+) -> None:
+    marker = b"m" * 6
+    publisher.control = MagicMock()
+    publisher.jobs.begin_marker_effect.return_value = False
+    publisher.container.put(publisher.root + MARKER_PATH, b"x" * 6)
+    mocker.patch.object(publisher, "_execute")
+
+    with pytest.raises(ReleaseVerificationError, match="commit decision"):
+        publisher._publish_marker(marker, expected_manifest_sha256="c" * 64)
+    publisher.jobs.finish_effect.assert_called_once_with("a" * 32, 1, MARKER_PATH, ok=False)
+
+
+@pytest.mark.parametrize(
+    ("stored", "verify", "observed"),
+    [
+        (None, None, "absent"),
+        (b"marker-bytes", None, "complete"),
+        (b"x" * 12, None, "conflict"),
+        (b"marker-bytes", ReleaseVerificationError("unverified"), "conflict"),
+    ],
+)
+def test_given_pending_marker_intent_when_published_then_resolves_observed_state(
+    publisher: SupervisedBlobPublisher, mocker: Any, stored: bytes | None, verify: Any, observed: str
+) -> None:
+    marker = b"marker-bytes"
+    publisher.jobs.marker_intent.return_value = {
+        "status": "pending",
+        "length": len(marker),
+        "digest": sha256_hex(marker),
+    }
+    if stored is not None:
+        publisher.container.put(publisher.root + MARKER_PATH, stored)
+    mocker.patch.object(blob_worker, "verify_published", side_effect=verify)
+    mocker.patch.object(BlobPublisher, "publish", return_value="published")
+
+    assert publisher.publish("c" * 64) == "published"
+    publisher.jobs.resolve_marker_effect.assert_called_once_with(
+        "a" * 32, 1, observed=observed, length=len(marker), digest=sha256_hex(marker)
+    )
+
+
+@pytest.mark.parametrize(
+    ("mode", "copy_id", "request_copy_id", "cancel"),
+    [
+        ("blob_cleanup", "expected", "other", True),
+        ("blob_copy", None, None, True),
+        ("blob_cleanup", None, None, False),
+    ],
+)
+def test_given_copy_cleanup_identity_differs_when_reconciled_then_refuses(
+    mode: str, copy_id: str | None, request_copy_id: str | None, cancel: bool
+) -> None:
+    jobs = Mock()
+    control = blob_worker._RegisteredCopyControl(
+        jobs, {"mode": mode, "copy_id": copy_id, "job_id": "a" * 32, "fence": 1, "destination": "dest"}
+    )
+
+    with (
+        pytest.raises(ReleaseVerificationError, match="copy cleanup identity differs"),
+        control.reconciliation(
+            ATTEMPT, PATH, len(PAYLOAD), sha256_hex(PAYLOAD), copy_id=request_copy_id, cancel=cancel
+        ),
+    ):
+        pass
+    jobs.authorize_blob_writer.assert_not_called()
+
+
+@pytest.mark.parametrize("spec", [{}, {"marker": False}])
+def test_given_marker_without_commit_binding_when_published_then_refuses(spec: dict[str, Any]) -> None:
+    jobs = Mock()
+    control = blob_worker._RegisteredCopyControl(
+        jobs, {**spec, "copy_id": None, "job_id": "a" * 32, "fence": 1, "destination": "dest"}
+    )
+
+    with pytest.raises(ReleaseVerificationError, match="commit-bound"), control.publication(ATTEMPT, "c" * 64):
+        pass
+    jobs.authorize_marker_writer.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", ["blob_remove_batch", "blob_remove"])
+def test_given_marker_present_when_removing_outputs_then_refuses(publisher: SupervisedBlobPublisher, mode: str) -> None:
+    digest = _put_owned(publisher)
+    publisher.container.put(publisher.root + MARKER_PATH, b"marker")
+    item = {
+        "path": PATH,
+        "length": len(PAYLOAD),
+        "sha256": digest,
+        "copy_id": None,
+        "operation": _operation_id(ATTEMPT, PATH, len(PAYLOAD), digest),
+    }
+    if mode == "blob_remove_batch":
+        spec = _spec(publisher, {"mode": mode, "items": [item]}, digest=digest)
+        remover = blob_worker._remove_blobs
+    else:
+        spec = _spec(publisher, {"mode": mode, **item}, digest=digest)
+        remover = blob_worker._remove_blob
+
+    with pytest.raises(ReleaseVerificationError):
+        remover(publisher, publisher.jobs, spec)
+    assert publisher.root + PATH in publisher.container.blobs
+    publisher.jobs.authorize_blob_writer.assert_not_called()
+
+
+@pytest.mark.parametrize("field", ["path", "length", "digest"])
+def test_given_cleanup_source_identity_differs_when_processed_then_refuses(
+    publisher: SupervisedBlobPublisher, mocker: Any, field: str
+) -> None:
+    source = _source().model_dump(mode="json")
+    if field == "path":
+        source["path"] = "other/file.bin"
+    if field == "length":
+        source["length"] += 1
+    if field == "digest":
+        source["sha256"] = "b" * 64
+    content = publisher._protocol(
+        PATH,
+        len(PAYLOAD),
+        blob_worker.source_effect_digest(_source()),
+        {"mode": "blob_cleanup", "source": source, "source_etag": "etag", "copy_id": None},
+    )
+    _patch_process(mocker, publisher)
+
+    with pytest.raises(ReleaseVerificationError, match="cleanup identity does not match"):
+        _run_process(content, publisher)
+
+
+def test_given_marker_differs_from_verified_candidate_when_processed_then_refuses(
+    publisher: SupervisedBlobPublisher, mocker: Any
+) -> None:
+    marker = b"published-marker"
+    content = publisher._protocol(
+        MARKER_PATH,
+        len(marker),
+        sha256_hex(marker),
+        {
+            "mode": "inline",
+            "content": base64.b64encode(marker).decode("ascii"),
+            "marker": True,
+            "manifest_digest": "c" * 64,
+        },
+    )
+    _patch_process(mocker, publisher)
+    mocker.patch.object(blob_worker, "verify_candidate", return_value=object())
+    mocker.patch.object(blob_worker, "build_marker", return_value=b"different-marker")
+
+    with pytest.raises(ReleaseVerificationError, match="differs from the verified candidate"):
+        _run_process(content, publisher)

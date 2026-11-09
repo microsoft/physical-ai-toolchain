@@ -287,7 +287,9 @@ def test_given_changed_withdrawal_scope_when_confirmed_then_no_new_reset_is_pers
     lifecycle: tuple[JudgeJobs, dict[str, Any]], reason: str
 ) -> None:
     jobs, _config = lifecycle
-    _code, _accepted = _command(lifecycle, ["--single", "--detach"], [0])
+    code, accepted = _command(lifecycle, ["--single", "--detach"], [0])
+    assert code == 0
+    assert accepted["status"] == "queued"
     preview = asyncio.run(jobs.preview_reset("dataset", "local-test"))
     if reason == "no_storage":
         jobs.curation_storage = None

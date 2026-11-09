@@ -1585,7 +1585,9 @@
             "test",
             "judge_unit",
             "backend_coverage_gate",
-            "judge_backend_coverage_gate"
+            "judge_backend_coverage_gate",
+            "curation_coverage_gate",
+            "dataset_io_coverage_gate"
           ],
           "reports": [
             {
@@ -1595,6 +1597,14 @@
             {
               "path": "logs/pytest-vlm-judge-results.xml",
               "kind": "junit"
+            },
+            {
+              "path": "logs/coverage-curation.xml",
+              "kind": "file"
+            },
+            {
+              "path": "logs/coverage-dataset-io.xml",
+              "kind": "file"
             }
           ],
           "shards": [
@@ -1619,6 +1629,14 @@
             },
             "judge_backend_coverage_gate": {
               "run-sha256": "715aaff67148e4a88206e6de14295780b82d07e9587fdcc32fc33d5991b5d547",
+              "if": "${{ !cancelled() && steps.install.outcome == 'success' }}"
+            },
+            "curation_coverage_gate": {
+              "run-sha256": "e6fa0ff98e637286103fcee0ff375fa338c35991d2e542c6bd92a354389a1250",
+              "if": "${{ !cancelled() && steps.install.outcome == 'success' }}"
+            },
+            "dataset_io_coverage_gate": {
+              "run-sha256": "5c97a07733646d5e7289a6d34f43c471778fbfff183d0050a2e847ce8444181a",
               "if": "${{ !cancelled() && steps.install.outcome == 'success' }}"
             }
           }

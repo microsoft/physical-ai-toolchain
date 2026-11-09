@@ -49,7 +49,7 @@ def test_given_invalid_encoder_windows_when_admitted_then_source_and_sink_remain
 
 
 @pytest.mark.parametrize("source_kind", ["invalid", "audio_only", "high_depth"])
-def test_given_unadmitted_media_stream_when_encoder_opens_source_then_output_is_not_created(source_kind: str) -> None:
+def test_given_media_without_admission_when_encoder_opens_source_then_output_is_not_created(source_kind: str) -> None:
     import io
     import wave
 

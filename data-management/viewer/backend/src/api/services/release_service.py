@@ -737,7 +737,7 @@ class ReleaseService:
     def jobs(self, scope: str, *, cursor: int, limit: int, dataset_id: str | None = None) -> dict[str, Any]:
         store = self._store()
         try:
-            page = store.page(scope=scope, principal=scope, cursor=cursor, limit=limit)
+            page = store.page(scope=scope, principal=scope, cursor=cursor, limit=limit, dataset_id=dataset_id)
         except ReleaseJobError as error:
             raise _map_job_error(error) from error
         items = []

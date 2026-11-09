@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import itertools
 import json
 import os
@@ -10,13 +11,17 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from physical_ai_curation.release import local_worker
 from physical_ai_curation.release.azure_publication import BlobPublisher, BlobReleaseStore
 from physical_ai_curation.release.canonical import canonical_json_bytes, sha256_hex
 from physical_ai_curation.release.errors import ReleaseVerificationError
-from physical_ai_curation.release.models import MARKER_PATH, SourceObject
+from physical_ai_curation.release.jobs import ReleaseJobStore
+from physical_ai_curation.release.local_worker import SourceAssociatedLocalPublisher, SupervisedLocalPublisher, _process
+from physical_ai_curation.release.models import MANIFEST_PATH, MARKER_PATH, SourceObject
 from physical_ai_curation.release.publication import (
     LocalPublisher,
     PublicationAttempt,
@@ -1882,3 +1887,193 @@ def test_blob_discovery_ignores_non_owner_control_residue(destination: _FakeCont
         destination.put(publisher.parent_prefix + "_releases/" + path, b"x" * (4097 if path == "oversized.json" else 1))
 
     assert publisher.discover() == []
+
+
+def _claimed_job(tmp_path: Path) -> tuple[ReleaseJobStore, Any, str, int]:
+    from test_release_jobs import FakeClock, _request, _store
+
+    store = _store(tmp_path / "ledger", FakeClock())
+    request = _request(tmp_path)
+    job = store.accept(request)
+    return store, request, job.job_id, store.claim(job.job_id, "worker")
+
+
+def _local_publisher(tmp_path: Path) -> SupervisedLocalPublisher:
+    from test_release_jobs import ATTEMPT
+
+    store, request, job_id, fence = _claimed_job(tmp_path)
+    return SupervisedLocalPublisher(request.destination, ATTEMPT, store, job_id, fence)
+
+
+def test_given_protocol_over_bound_when_copied_then_refused_before_child(tmp_path: Path, monkeypatch: Any) -> None:
+    publisher = _local_publisher(tmp_path)
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"x")
+    monkeypatch.setattr(local_worker, "MAX_PROTOCOL_BYTES", 1)
+
+    with pytest.raises(ReleaseVerificationError, match="protocol exceeds"):
+        publisher.write_from_path("payload.bin", source, length=1, sha256=sha256_hex(b"x"))
+
+
+@pytest.mark.parametrize(("reason", "returncode"), [("exited", 1), ("timeout", 0)])
+def test_given_child_outcome_incomplete_when_executed_then_effect_refused(
+    tmp_path: Path, monkeypatch: Any, reason: str, returncode: int
+) -> None:
+    publisher = _local_publisher(tmp_path)
+    monkeypatch.setattr(
+        local_worker,
+        "run_supervised",
+        lambda *args, **kwargs: SimpleNamespace(reason=reason, returncode=returncode),
+    )
+
+    with pytest.raises(ReleaseVerificationError, match="did not complete"):
+        publisher._execute("payload.bin", 1, b"x")
+
+
+def test_given_acknowledged_payload_when_replayed_without_listing_then_refused(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    publisher = _local_publisher(tmp_path)
+    payload = b"payload"
+    digest = sha256_hex(payload)
+    publisher.write("payload.bin", (payload,), length=len(payload), sha256=digest)
+    monkeypatch.setattr(publisher.store, "list_objects", lambda: [])
+
+    with pytest.raises(ReleaseVerificationError, match="acknowledged output is missing"):
+        publisher.write("payload.bin", (payload,), length=len(payload), sha256=digest)
+
+
+def test_given_marker_intent_already_acknowledged_when_written_then_no_effect_runs(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    publisher = _local_publisher(tmp_path)
+    monkeypatch.setattr(publisher.jobs, "begin_marker_effect", lambda *args: True)
+    monkeypatch.setattr(publisher, "_execute", lambda *args: pytest.fail("marker effect must not run"))
+
+    publisher._write_marker(b"marker", "a" * 64)
+
+    assert not (publisher.root / MARKER_PATH).exists()
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [("execute_error", OSError), ("marker_mismatch", ReleaseVerificationError)],
+)
+def test_given_marker_write_failure_when_finished_then_effect_recorded_failed(
+    tmp_path: Path, monkeypatch: Any, failure: str, expected: type[BaseException]
+) -> None:
+    publisher = _local_publisher(tmp_path)
+    finished: list[bool] = []
+    monkeypatch.setattr(publisher.jobs, "begin_marker_effect", lambda *args: False)
+    monkeypatch.setattr(publisher.jobs, "finish_effect", lambda *args, **kwargs: finished.append(kwargs["ok"]))
+    if failure == "execute_error":
+
+        def _fail(*args: Any) -> None:
+            raise OSError("child lost")
+
+        monkeypatch.setattr(publisher, "_execute", _fail)
+    else:
+        monkeypatch.setattr(publisher, "_execute", lambda *args: None)
+        monkeypatch.setattr(publisher.store, "read_control_bytes", lambda path, *, max_bytes: b"other")
+
+    with pytest.raises(expected):
+        publisher._write_marker(b"marker", "a" * 64)
+
+    assert finished == [False]
+
+
+@pytest.mark.parametrize(
+    ("stored", "length", "digest"),
+    [(b"abc", 3, sha256_hex(b"xyz")), (b"abcdef", 2, sha256_hex(b"ab"))],
+    ids=["content-mismatch", "unreadable-over-bound"],
+)
+def test_given_marker_observation_mismatch_when_observed_then_conflict(
+    tmp_path: Path, stored: bytes, length: int, digest: str
+) -> None:
+    publisher = _local_publisher(tmp_path)
+    marker = publisher.root / MARKER_PATH
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_bytes(stored)
+
+    assert publisher._observe_marker(length, digest, "a" * 64) == "conflict"
+
+
+def test_given_marker_present_when_local_protocol_processed_then_immutable_refused(tmp_path: Path) -> None:
+    publisher = _local_publisher(tmp_path)
+    payload = b"payload"
+    protocol = publisher._protocol(
+        "payload.bin",
+        len(payload),
+        sha256_hex(payload),
+        {"mode": "inline", "content": base64.b64encode(payload).decode("ascii")},
+    )
+    marker = publisher.root / MARKER_PATH
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_bytes(b"marker")
+    spec_file = tmp_path / "protocol.json"
+    spec_file.write_bytes(protocol)
+    descriptor = os.open(spec_file, os.O_RDONLY)
+
+    with pytest.raises(ReleaseVerificationError, match="immutable"):
+        _process(descriptor)
+
+
+def test_given_marker_path_when_written_then_arbitration_required(tmp_path: Path) -> None:
+    publisher = _local_publisher(tmp_path)
+
+    with pytest.raises(ReleaseVerificationError, match="arbitration"):
+        publisher.write(MARKER_PATH, (b"m",), length=1, sha256=sha256_hex(b"m"))
+
+
+@pytest.mark.parametrize(
+    ("chunk_bytes", "protocol_bytes", "chunks"),
+    [(2, 4 * 1024**2, (b"abc",)), (4, 4, (b"ab", b"c"))],
+    ids=["single-chunk-over-bound", "accumulated-over-half-bound"],
+)
+def test_given_inline_chunks_over_bound_when_written_then_refused(
+    tmp_path: Path, monkeypatch: Any, chunk_bytes: int, protocol_bytes: int, chunks: tuple[bytes, ...]
+) -> None:
+    publisher = _local_publisher(tmp_path)
+    monkeypatch.setattr(local_worker, "CHUNK_BYTES", chunk_bytes)
+    monkeypatch.setattr(local_worker, "MAX_PROTOCOL_BYTES", protocol_bytes)
+    length = sum(len(chunk) for chunk in chunks)
+
+    with pytest.raises(ReleaseVerificationError, match="inline local payload exceeds its protocol bound"):
+        publisher.write("payload.bin", chunks, length=length, sha256=sha256_hex(b"".join(chunks)))
+
+
+@pytest.mark.parametrize("relation", ["same", "ancestor", "descendant"])
+def test_given_overlapping_copy_root_when_copied_then_refused(tmp_path: Path, relation: str) -> None:
+    publisher = _local_publisher(tmp_path)
+    source_roots = {
+        "same": publisher.root,
+        "ancestor": publisher.root.parent,
+        "descendant": publisher.root / "inner",
+    }
+    source = SimpleNamespace(path="payload.bin", length=1, sha256=sha256_hex(b"x"))
+
+    with pytest.raises(ReleaseVerificationError, match="overlap"):
+        publisher.copy(source_roots[relation], source)
+
+
+def test_given_other_attempt_when_associated_publisher_constructed_then_conflict_refused(tmp_path: Path) -> None:
+    store, _, job_id, fence = _claimed_job(tmp_path)
+    destination = tmp_path / "output"
+    other = PublicationAttempt("pkg-002", "attempt-1", "release-a", source_dataset_id="org--dataset")
+
+    with pytest.raises(ReleaseVerificationError, match="attempt conflict"):
+        SourceAssociatedLocalPublisher(destination, other, store, job_id, fence, _association_intent(destination))
+
+
+def test_given_manifest_digest_mismatch_when_associated_publish_then_refused(tmp_path: Path, monkeypatch: Any) -> None:
+    store, _, job_id, fence = _claimed_job(tmp_path)
+    destination = tmp_path / "output"
+    intent = _association_intent(destination)
+    monkeypatch.setattr(SourceAssociatedLocalPublisher, "_validate_association", lambda self: None)
+    publisher = SourceAssociatedLocalPublisher(destination, intent.attempt, store, job_id, fence, intent)
+    manifest = publisher.root / MANIFEST_PATH
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_bytes(b"{}")
+
+    with pytest.raises(ReleaseVerificationError, match="digest conflict"):
+        publisher.publish("0" * 64)

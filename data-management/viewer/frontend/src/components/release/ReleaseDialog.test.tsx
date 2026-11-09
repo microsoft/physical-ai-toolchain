@@ -583,6 +583,7 @@ describe('ReleaseDialog', () => {
     expect(screen.getByLabelText('Release name')).toHaveValue('release-a')
     await user.click(discard)
     expect(props.onDiscardSubmission).toHaveBeenCalledOnce()
+    expect(screen.getByLabelText('Release name')).toHaveFocus()
     expect(screen.getByLabelText('Release name')).toHaveValue('')
     expect(screen.queryByRole('button', { name: /retry submission/i })).toBeNull()
   })
@@ -770,6 +771,7 @@ describe('ReleaseDialog', () => {
     await user.click(screen.getByRole('button', { name: /submit release/i }))
 
     const retry = await screen.findByRole('button', { name: /retry submission/i })
+    expect(retry).toHaveFocus()
     expect(screen.getByRole('button', { name: /discard and start over/i })).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Submission not confirmed.')
     expect(screen.getByRole('alert')).toHaveTextContent(
@@ -781,7 +783,7 @@ describe('ReleaseDialog', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Discarding does not cancel an accepted release; starting over could create a duplicate.',
     )
-    await user.click(retry)
+    await user.keyboard('{Enter}')
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2))
     const [firstRequest, firstSubmission] = onSubmit.mock.calls[0]

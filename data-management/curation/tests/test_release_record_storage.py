@@ -252,7 +252,7 @@ def test_given_concurrent_blob_record_create_when_replayed_then_only_exact_bytes
 
 
 @pytest.mark.parametrize("status", [403, 409, 503])
-def test_given_blob_lease_failure_when_acquired_then_noncontention_errors_propagate(mocker: Any, status: int) -> None:
+def test_given_blob_lease_failure_when_acquired_then_other_errors_propagate(mocker: Any, status: int) -> None:
     from azure.core.exceptions import HttpResponseError
 
     storage = _blob_record_store(_RecordContainer())
