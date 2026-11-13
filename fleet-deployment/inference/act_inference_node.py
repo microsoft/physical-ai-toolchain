@@ -77,6 +77,8 @@ class ACTInferenceNode(Node):
         device = self.get_parameter("device").value
         self._control_hz = self.get_parameter("control_hz").value
         self._action_mode = self.get_parameter("action_mode").value
+        if self._action_mode not in ("delta", "absolute"):
+            raise ValueError(f"action_mode must be 'delta' or 'absolute', got {self._action_mode!r}")
         self._enable_control = self.get_parameter("enable_control").value
         camera_topic = self.get_parameter("camera_topic").value
         joint_states_topic = self.get_parameter("joint_states_topic").value
@@ -202,7 +204,8 @@ class ACTInferenceNode(Node):
 
         cmd = self._runner.step(obs)
 
-        if self._action_mode == "absolute":
+        # Docs: delta = add policy deltas to current joints; absolute = use as-is.
+        if self._action_mode == "delta":
             cmd = cmd.as_absolute(obs.joint_positions)
 
         self._state.episode_step += 1
