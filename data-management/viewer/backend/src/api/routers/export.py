@@ -31,7 +31,7 @@ from ..services.episode_edits import (
     parse_edit_operations,
 )
 from ..services.hdf5_exporter import HDF5Exporter
-from ..services.lerobot_exporter import LeRobotExporter, admits_export
+from ..services.lerobot_exporter import LOCK_FILE, LeRobotExporter, admits_export
 from ..services.lerobot_language import LanguageInstruction
 from ..validation import (
     SAFE_DATASET_ID_PATTERN,
@@ -171,23 +171,29 @@ def _resolve_output_path(service: DatasetService, requested: str) -> Path:
 def _prepare_output(service: DatasetService, dataset_id: str, dataset_path: Path, output_path: Path) -> bool:
     """Validate the output path for the source's format and return whether the source is a LeRobot dataset.
 
-    A LeRobot export writes a new dataset, so its path must be new or empty and must neither sit inside
-    nor contain the source. What a stopped export left, a lock file or a claim, goes on to the exporter,
-    which recovers or refuses it. These checks run before anything is created; an HDF5 export creates its
-    directory.
+    Every export writes a new dataset, so its path must be new or empty and must neither sit inside nor
+    contain the source. For LeRobot, what a stopped export left, a lock file or a claim, goes on to the
+    exporter, which recovers or refuses it. These checks run before anything is created; an HDF5 export
+    creates its directory.
     """
+    if output_path.is_relative_to(dataset_path) or dataset_path.is_relative_to(output_path):
+        raise HTTPException(
+            status_code=400,
+            detail="Output path must be outside the source dataset and must not contain it",
+        )
     if service.dataset_is_lerobot(dataset_id):
-        if output_path.is_relative_to(dataset_path) or dataset_path.is_relative_to(output_path):
-            raise HTTPException(
-                status_code=400,
-                detail="Output path must be outside the source dataset and must not contain it",
-            )
         if not admits_export(output_path):
             raise HTTPException(
                 status_code=400,
                 detail="Output path must be a new or empty directory for a LeRobot export",
             )
         return True
+    # A lone lock file is left to the exporter, which refuses it while another export holds the lock.
+    if output_path.is_dir() and any(entry.name != LOCK_FILE for entry in output_path.iterdir()):
+        raise HTTPException(
+            status_code=400,
+            detail="Output path must be a new or empty directory for an HDF5 export",
+        )
     try:
         output_path.mkdir(parents=True, exist_ok=True)
     except Exception as e:
