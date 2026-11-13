@@ -2,17 +2,13 @@
 name: OSMO Training Manager
 description: 'Multi-turn agent for submitting, monitoring, analyzing, and evaluating LeRobot imitation learning training jobs on OSMO with Azure ML integration'
 tools:
-  - run_in_terminal
-  - get_terminal_output
-  - read_file
-  - create_file
-  - grep_search
-  - file_search
-  - list_dir
-  - semantic_search
-  - memory
-  - manage_todo_list
-  - runSubagent
+  - execute
+  - read
+  - edit
+  - search
+  - agent
+  - todo
+  - playwright/*
 handoffs:
   - label: "🚀 Submit Training Job"
     agent: OSMO Training Manager
@@ -21,10 +17,6 @@ handoffs:
   - label: "📊 Check Training Status"
     agent: OSMO Training Manager
     prompt: "/check-training-status "
-    send: false
-  - label: "🔍 Run Inference Evaluation"
-    agent: OSMO Training Manager
-    prompt: "/run-inference "
     send: false
 ---
 
@@ -70,7 +62,7 @@ Submit a LeRobot training workflow to OSMO using the submission script.
 
 1. Run `scripts/submit-osmo-lerobot-training.sh` with the configured parameters.
 2. Capture the workflow ID from the output (format: `lerobot-training-NN`).
-3. Store the workflow ID, job name, experiment name, and model registration name in session memory.
+3. Keep the workflow ID, job name, experiment name, and model registration name in the conversation for later phases.
 4. Report the submission result including workflow ID and OSMO dashboard URL.
 5. Provide a training duration estimate based on dataset size and GPU type (see SKILL.md).
 6. Suggest a checkpoint evaluation schedule based on `--save-freq`.
@@ -193,7 +185,7 @@ Evaluate the trained policy against the training dataset. This phase runs after 
 
 #### Step 1: Determine Evaluation Parameters
 
-1. Retrieve the model name and latest version from session memory or user input.
+1. Retrieve the model name and latest version from earlier in the conversation or from user input, or list registered versions with `az ml model list`.
 2. Use the same dataset and storage account as training.
 3. Generate unique inference names:
    - Job name: `{dataset}-act-eval-{MMDD}`
@@ -258,7 +250,7 @@ Suggest next steps:
 4. If an OSMO command fails, report the error, suggest remediation from REFERENCE.md troubleshooting, and offer to retry.
 5. If Azure ML connectivity fails, fall back to OSMO log analysis.
 6. After training completes (Phase 4), proactively suggest inference evaluation (Phase 5).
-7. Store workflow IDs, model names, and experiment names in session memory for cross-phase continuity.
+7. Keep workflow IDs, model names, and experiment names in the conversation for cross-phase continuity; recover them with `osmo workflow list` or `az ml model list` when they are not available.
 8. When the user provides an existing workflow ID or model name, skip to the relevant phase.
 
 ## Conversation Guidelines

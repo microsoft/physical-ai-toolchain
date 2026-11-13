@@ -1,8 +1,7 @@
 ---
 description: when working with mise for tasks in the mise.toml file, follow these instructions to ensure proper usage and organization. Mise should be used for all additional tool installs
+applyTo: '**/mise.toml'
 ---
-
-<!-- applyTo: '**/*.toml' -->
 
 # Use Mise.jdx.dev for all additional tool installs
 
