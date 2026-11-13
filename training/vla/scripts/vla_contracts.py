@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
 import sys
 import tempfile
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = 1
-CALIBRATION_WORKLOAD_SCHEMA_VERSION = 1
+CALIBRATION_WORKLOAD_SCHEMA_VERSION = 2
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 EXIT_ERROR = 2
@@ -28,6 +29,7 @@ _AZUREML_JOB_OUTPUT_PATTERN = re.compile(
     r"^azureml://jobs/[A-Za-z0-9][A-Za-z0-9_.-]*/outputs/[A-Za-z0-9][A-Za-z0-9_.-]*$"
 )
 _SECRET_KEY_PATTERN = re.compile(r"(?:authorization|password|secret|token)", re.IGNORECASE)
+_CODE_CONTENT_SUFFIXES = frozenset({".cfg", ".ini", ".json", ".lock", ".py", ".sh", ".toml", ".yaml", ".yml"})
 
 
 class ContractError(ValueError):
@@ -125,6 +127,29 @@ def dataset_identity_fingerprint(record: Mapping[str, Any]) -> str:
     return sha256_bytes(canonical_json(identity).encode("utf-8"))
 
 
+def code_content_fingerprint(code_root: Path) -> str:
+    """Fingerprint the source and configuration files of an uploaded code snapshot.
+
+    Hidden entries, Python bytecode caches, and symbolic links are skipped because
+    jobs create them at runtime; documentation files do not affect execution.
+    """
+    root = code_root.resolve()
+    if not root.is_dir():
+        raise ContractError(f"Code root is not a directory: {code_root}")
+    entries: list[dict[str, str]] = []
+    for directory, directory_names, file_names in os.walk(root):
+        directory_names[:] = [name for name in directory_names if not name.startswith(".") and name != "__pycache__"]
+        for name in file_names:
+            path = Path(directory) / name
+            if name.startswith(".") or path.suffix not in _CODE_CONTENT_SUFFIXES or path.is_symlink():
+                continue
+            entries.append({"path": path.relative_to(root).as_posix(), "sha256": sha256_file(path)})
+    if not entries:
+        raise ContractError(f"Code root contains no source or configuration files: {code_root}")
+    entries.sort(key=lambda entry: entry["path"])
+    return sha256_bytes(canonical_json(entries).encode("utf-8"))
+
+
 def validate_calibration_workload(workload: Mapping[str, Any]) -> None:
     """Validate the immutable inputs that determine calibration compatibility."""
     _reject_secret_fields(workload, "workload")
@@ -152,6 +177,7 @@ def validate_calibration_workload(workload: Mapping[str, Any]) -> None:
     code_revision = _require_string(code, "revision")
     if not _FULL_COMMIT_PATTERN.fullmatch(code_revision):
         raise ContractError("workload.code.revision must be a full lowercase 40-character Git commit")
+    _require_sha256(code, "content_sha256")
 
     runtime = _require_mapping(workload, "runtime")
     image = _require_string(runtime, "image")
@@ -541,7 +567,7 @@ def _run_self_check() -> None:
             "metadata_sha256": digest,
             "total_episodes": 1,
         },
-        "code": {"repository": "org/repo", "revision": commit},
+        "code": {"repository": "org/repo", "revision": commit, "content_sha256": digest},
         "runtime": {"image": f"image@sha256:{digest}", "lock_sha256": digest},
         "adapter": {"name": "lerobot-pi", "version": "1", "config_sha256": digest},
         "compute": {"target": "arc-gpu", "gpu_type": "test-gpu", "gpu_count": 1},
@@ -659,6 +685,14 @@ def _run_self_check() -> None:
             pass
         else:
             raise ContractError("Changed effective inputs matched the calibration workload")
+        changed_code = json.loads(canonical_json(workload))
+        changed_code["code"]["content_sha256"] = "c" * 64
+        try:
+            resolve_recommended_batch_size(report_path, workload_path, changed_code)
+        except ContractError:
+            pass
+        else:
+            raise ContractError("Changed code content matched the calibration workload")
         approval = dict(records[7], calibration_report_sha256=report_digest)
         verify_approval(report_path, approval)
         report_path.write_text(report_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")

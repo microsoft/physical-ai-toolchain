@@ -52,7 +52,7 @@
     "dm_tools": { "patterns": ["^data-management/tools/"], "groups": ["python"] },
     "data_pipeline": { "patterns": ["^data-pipeline/"], "groups": ["python"] },
     "inference": { "patterns": ["^fleet-deployment/inference/", "^training/il/lerobot/"], "groups": ["python"] },
-    "gpu_offload": { "patterns": ["^gpu-offload/(controller|runtime)/"], "groups": ["python", "gpu"] },
+    "gpu_offload": { "patterns": ["^gpu-offload/(controller|runtime|examples/ur10e-single)/"], "groups": ["python", "gpu"] },
     "gpu_offload_e2e": { "patterns": ["^gpu-offload/(controller|runtime|helm|scripts|registry|examples)/"], "groups": ["python", "gpu"] },
     "shared_ci": { "patterns": ["^shared/ci/", "^scripts/security/zap-to-sarif\\.py$"], "groups": ["python"] },
     "dv_backend": { "patterns": ["^data-management/viewer/backend/", "^data-management/viewer/specifications/language-tag-corpus\\.json$", "^evaluation/vlm_judge/"], "groups": ["python", "images", "viewer"] },

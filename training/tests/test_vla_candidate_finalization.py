@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
+from conftest import load_training_module
 
 from training.vla.scripts.finalize_candidate import finalize_candidate, resolve_policy_root, verify_candidate
 from training.vla.scripts.preflight_dataset import build_dataset_record
@@ -109,3 +111,34 @@ def test_given_tampered_candidate_when_verified_then_it_is_rejected(tmp_path: Pa
 
     with pytest.raises(ContractError, match="does not match"):
         verify_candidate(candidate, manifest_dir / "candidate-manifest.json")
+
+
+def test_given_finalized_pi05_candidate_when_staged_for_ur10e_then_the_runtime_verifier_accepts_it(
+    tmp_path: Path,
+) -> None:
+    """The UR10e image carries no training code, so its GPU stage re-implements this contract."""
+    pytest.importorskip("torch")
+    ur10e_offload = load_training_module("ur10e_offload_contract", "gpu-offload/examples/ur10e-single/ur10e_offload.py")
+    checkpoints = tmp_path / "checkpoints"
+    _write_policy(checkpoints / "last/pretrained_model")
+    training_record, dataset_manifest = _write_evidence(tmp_path)
+    candidate = tmp_path / "candidate"
+    manifest_dir = tmp_path / "candidate-manifest"
+    record = finalize_candidate(
+        checkpoints,
+        training_record,
+        dataset_manifest,
+        candidate,
+        manifest_dir,
+        "lerobot-pi",
+        "pi05",
+        "evidence-job",
+    )
+    shutil.copy2(manifest_dir / ur10e_offload.CANDIDATE_MANIFEST_NAME, candidate)
+
+    lineage = ur10e_offload.verify_candidate_manifest(str(candidate))
+
+    assert lineage["artifact_manifest_sha256"] == record["artifact_manifest_sha256"]
+    (candidate / "model.safetensors").write_bytes(b"other weights")
+    with pytest.raises(ur10e_offload.CheckpointVerificationError, match=r"changed: model\.safetensors"):
+        ur10e_offload.verify_candidate_manifest(str(candidate))

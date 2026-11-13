@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Azure ML Arc VLA Setup and Operations
 description: Prepare an Ubuntu K3s GPU host, connect it through Azure Arc, attach it to Azure ML, and run PI 0.5 VLA training
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-01
+ms.date: 2026-10-22
 ms.topic: how-to
 keywords:
   - vla
@@ -575,7 +575,9 @@ az ml job create \
 
 Training regenerates the dataset manifest and validates that the selected
 calibration workload matches the current dataset, model, code, and runtime.
-The run-scoped datastore paths avoid unsupported cross-job
+Code identity is a SHA-256 fingerprint of the source and configuration files in
+the uploaded `training/` directory, so submit the sweep and the pipeline from
+the same clean checkout. The run-scoped datastore paths avoid unsupported cross-job
 `azureml://jobs/...` input materialization on Arc pipeline children. Workload
 validation prevents stale sweep outputs from controlling a changed training
 job.

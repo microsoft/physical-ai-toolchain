@@ -18,12 +18,15 @@ from typing import Any
 
 try:
     from .model_adapters import AdapterError, AdapterRequest, get_adapter
+    from .pretrained_load import require_complete_pretrained_load
     from .vla_contracts import (
+        CALIBRATION_WORKLOAD_SCHEMA_VERSION,
         SCHEMA_VERSION,
         ContractError,
         RecordKind,
         calibration_workload_fingerprint,
         canonical_json,
+        code_content_fingerprint,
         dataset_identity_fingerprint,
         load_record,
         resolve_recommended_batch_size,
@@ -35,12 +38,15 @@ try:
     )
 except ImportError:
     from model_adapters import AdapterError, AdapterRequest, get_adapter
+    from pretrained_load import require_complete_pretrained_load
     from vla_contracts import (
+        CALIBRATION_WORKLOAD_SCHEMA_VERSION,
         SCHEMA_VERSION,
         ContractError,
         RecordKind,
         calibration_workload_fingerprint,
         canonical_json,
+        code_content_fingerprint,
         dataset_identity_fingerprint,
         load_record,
         resolve_recommended_batch_size,
@@ -56,6 +62,13 @@ EXIT_FAILURE = 1
 EXIT_ERROR = 2
 EXIT_OOM = 10
 SWEEP_OBJECTIVE_METRIC = "safe_micro_batch_size"
+
+# The uploaded Azure ML code snapshot root; scripts live under <root>/vla/scripts.
+_CODE_ROOT = Path(__file__).resolve().parents[2]
+_VISUAL_DTYPES = frozenset({"image", "video"})
+_PROCESS_GROUP_TERM_GRACE_SECONDS = 10.0
+_PROCESS_GROUP_KILL_GRACE_SECONDS = 10.0
+_PROCESS_GROUP_POLL_SECONDS = 0.1
 
 _OWNED_TRAINING_ARGUMENTS = (
     "--batch_size",
@@ -178,10 +191,13 @@ def _dataset_contract(
         raise CalibrationError("Dataset metadata must contain a non-empty features object")
     input_shapes: dict[str, list[int]] = {}
     for source_name, feature in features.items():
-        if not isinstance(source_name, str) or not source_name.startswith("observation.images."):
-            continue
         if not isinstance(feature, Mapping):
             raise CalibrationError(f"Dataset feature {source_name} must be an object")
+        # Classify cameras by dtype, as LeRobot does, so rename_map applies to keys such as observation.image.
+        if feature.get("dtype") not in _VISUAL_DTYPES:
+            continue
+        if not isinstance(source_name, str) or not source_name:
+            raise CalibrationError("Dataset image feature names must be non-empty strings")
         shape = feature.get("shape")
         if (
             not isinstance(shape, Sequence)
@@ -276,10 +292,14 @@ def _build_workload(training_arguments: Sequence[str]) -> dict[str, Any]:
     train_expert_only = resolution.environment.get("TRAIN_EXPERT_ONLY") == "true"
     gradient_checkpointing = resolution.environment.get("GRADIENT_CHECKPOINTING") == "true"
     workload = {
-        "schema_version": 1,
+        "schema_version": CALIBRATION_WORKLOAD_SCHEMA_VERSION,
         "source_model": {"repository": source_repository, "revision": source_revision},
         "dataset": dataset,
-        "code": {"repository": code_repository, "revision": code_revision},
+        "code": {
+            "repository": code_repository,
+            "revision": code_revision,
+            "content_sha256": code_content_fingerprint(_CODE_ROOT),
+        },
         "runtime": {"image": runtime_image, "lock_sha256": sha256_file(lock_path)},
         "adapter": {
             "name": resolution.adapter_name,
@@ -411,7 +431,8 @@ def _run_probe(args: argparse.Namespace) -> int:
     lerobot_train.update_policy = measured_update_policy
     sys.argv = ["lerobot-train", *_training_arguments(args.training_arguments)]
     try:
-        lerobot_train.main()
+        with require_complete_pretrained_load(lerobot_train):
+            lerobot_train.main()
     except Exception as exc:
         if _is_cuda_oom(exc) or isinstance(exc, torch.cuda.OutOfMemoryError):
             _write_json(
@@ -433,14 +454,53 @@ def _run_probe(args: argparse.Namespace) -> int:
     return EXIT_SUCCESS
 
 
+def _live_process_group_members(process_group_id: int) -> list[int]:
+    """Return running members of a process group, ignoring exited zombies."""
+    proc_root = Path("/proc")
+    if not proc_root.is_dir():
+        try:
+            os.killpg(process_group_id, 0)
+        except ProcessLookupError:
+            return []
+        return [process_group_id]
+    members: list[int] = []
+    for entry in proc_root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = (entry / "stat").read_bytes().decode(errors="replace").rsplit(")", 1)[1].split()
+            state, group = fields[0], int(fields[2])
+        except (OSError, IndexError, ValueError):
+            continue
+        if group == process_group_id and state not in {"Z", "X"}:
+            members.append(int(entry.name))
+    return members
+
+
+def _wait_for_process_group_exit(process: subprocess.Popen[bytes], timeout_seconds: float) -> bool:
+    """Reap the launcher and wait until no member of its process group is running."""
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if process.poll() is not None and not _live_process_group_members(process.pid):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_PROCESS_GROUP_POLL_SECONDS)
+
+
 def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-        process.wait(timeout=10)
-    except (ProcessLookupError, subprocess.TimeoutExpired):
+    """Stop every process in the probe's group, including workers that outlive the launcher."""
+    if _wait_for_process_group_exit(process, 0):
+        return
+    for stop_signal, grace_seconds in (
+        (signal.SIGTERM, _PROCESS_GROUP_TERM_GRACE_SECONDS),
+        (signal.SIGKILL, _PROCESS_GROUP_KILL_GRACE_SECONDS),
+    ):
         with contextlib.suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
-        process.wait()
+            os.killpg(process.pid, stop_signal)
+        if _wait_for_process_group_exit(process, grace_seconds):
+            return
+    raise CalibrationError(f"Calibration probe process group {process.pid} is still running after SIGKILL")
 
 
 def _run_candidate(
@@ -472,10 +532,15 @@ def _run_candidate(
         *probe_arguments,
     ]
     process = subprocess.Popen(command, start_new_session=True)
+    return_code: int | None = None
     try:
         return_code = process.wait(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
+        pass
+    finally:
+        # Workers can outlive the launcher, so stop the whole group before the next candidate starts.
         _terminate_process_group(process)
+    if return_code is None:
         return {
             "micro_batch_size": batch_size,
             "outcome": "timeout",
@@ -602,7 +667,7 @@ def _sample_workload() -> dict[str, Any]:
     digest = "a" * 64
     revision = "b" * 40
     return {
-        "schema_version": 1,
+        "schema_version": CALIBRATION_WORKLOAD_SCHEMA_VERSION,
         "source_model": {"repository": "org/model", "revision": revision},
         "dataset": {
             "asset_id": "azureml:data:1",
@@ -611,7 +676,7 @@ def _sample_workload() -> dict[str, Any]:
             "metadata_sha256": digest,
             "total_episodes": 1,
         },
-        "code": {"repository": "org/repo", "revision": revision},
+        "code": {"repository": "org/repo", "revision": revision, "content_sha256": digest},
         "runtime": {"image": f"image@sha256:{digest}", "lock_sha256": digest},
         "adapter": {"name": "lerobot-pi", "version": "1", "config_sha256": digest},
         "compute": {"target": "arc-gpu", "gpu_type": "test-gpu", "gpu_count": 1},
@@ -653,6 +718,23 @@ def _run_self_check() -> None:
         raise CalibrationError("Dataset feature hashing changed")
     if input_shapes != {"observation.images.base_0_rgb": [3, 480, 640]}:
         raise CalibrationError("Dataset image shape normalization changed")
+    single_camera = {"observation.image": {"dtype": "video", "shape": [96, 96, 3]}}
+    _, single_camera_shapes = _dataset_contract(
+        {"features": single_camera},
+        {
+            "schema_version": SCHEMA_VERSION,
+            "kind": RecordKind.DATASET.value,
+            "created_at": "2026-01-01T00:00:00Z",
+            "asset_id": "azureml:data:1",
+            "dataset_repo_id": "org/dataset",
+            "features_sha256": sha256_bytes(canonical_json(single_camera).encode("utf-8")),
+            "metadata_sha256": "a" * 64,
+            "total_episodes": 1,
+        },
+        {"observation.image": "observation.images.camera1"},
+    )
+    if single_camera_shapes != {"observation.images.camera1": [3, 96, 96]}:
+        raise CalibrationError("Single-camera rename mapping changed")
     previous_dataset_revision = os.environ.get("DATASET_REVISION")
     os.environ["DATASET_REVISION"] = "b" * 40
     try:

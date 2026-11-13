@@ -6,8 +6,10 @@ standalone calibration sweep with SmolVLA, binds the selected trial's outputs to
 the training pipeline, and verifies that training used the recommended
 micro-batch and produced a SmolVLA candidate.
 
-Calibration and training check out the current ``HEAD`` commit, so push it
-before running the test.
+Calibration and training upload the local ``training/`` directory and bind the
+calibration workload to a fingerprint of that uploaded code. The test records
+the current ``HEAD`` as ``code_revision`` and requires a clean ``training/``
+tree so the declared revision describes the uploaded code.
 
 ```shell
 uv run pytest -o addopts='' -vv -s -m e2e tests/e2e/test_e2e_aml_vla_training.py
@@ -49,6 +51,9 @@ def _repository_revision(repo_root: Path) -> str:
     revision = result.stdout.strip()
     if result.returncode != 0 or len(revision) != 40:
         raise AssertionError("Unable to resolve the repository commit for VLA training")
+    status = run_command(["git", "status", "--porcelain", "--", "training"], cwd=repo_root)
+    if status.returncode != 0 or status.stdout.strip():
+        raise AssertionError("Commit or stash training/ changes so code_revision describes the uploaded code")
     return revision
 
 

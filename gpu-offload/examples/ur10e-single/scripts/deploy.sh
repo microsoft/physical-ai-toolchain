@@ -15,16 +15,27 @@ registry_host="${GPU_OFFLOAD_REGISTRY_HOST:-localhost:5000}"
 namespace="${UR10E_NAMESPACE:-gpu-offload-ur10e}"
 release="ur10e"
 
-# The checkpoint and the tokenizer cache stay on the node; both paths are machine
-# local, so they come from .env or from these defaults.
-model_path="${UR10E_MODEL_HOST_PATH:-$HOME/pi05_ur10e_ik_20k/pretrained_model}"
+# The checkpoint and the tokenizer cache stay on the node, so both paths are machine
+# local. The checkpoint has no default because the GPU stage loads only a training
+# candidate, and its path must be absolute because this script runs from gpu-offload.
+model_path="${UR10E_MODEL_HOST_PATH:-}"
 cache_path="${UR10E_HF_CACHE_HOST_PATH:-$HOME/.cache/huggingface}"
+[[ "$model_path" == /* ]] || {
+  echo "Set UR10E_MODEL_HOST_PATH in .env to the absolute path of a pi05 training candidate directory" >&2
+  exit 1
+}
 test -f "$model_path/config.json" || {
   echo "No pi05 checkpoint at $model_path; set UR10E_MODEL_HOST_PATH in .env" >&2
   exit 1
 }
 test -f "$model_path/model.safetensors" || {
-  echo "No model.safetensors at $model_path; join split weights with: cat $model_path/model.safetensors.part.* > $model_path/model.safetensors" >&2
+  echo "No model.safetensors at $model_path; if the weights were split for transfer, join the parts into model.safetensors and remove the part files" >&2
+  exit 1
+}
+# The GPU stage refuses to load weights that do not match the training candidate's
+# manifest; checking for it here fails before the chart is installed.
+test -f "$model_path/candidate-manifest.json" || {
+  echo "No candidate-manifest.json at $model_path; deploy a VLA training candidate with its manifest copied beside the weights" >&2
   exit 1
 }
 test -d "$cache_path" || {

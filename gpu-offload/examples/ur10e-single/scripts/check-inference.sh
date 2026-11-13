@@ -13,14 +13,21 @@ server="$release-control-remote-server-gpu"
 
 # Reading roughly 7 GB of weights and warming CUDA takes a while on first start.
 loaded=""
+failed=""
 i=0
 while [ "$i" -lt 120 ]; do
-  loaded="$(kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" logs "deployment/$release-control" \
-    --namespace "$namespace" 2> /dev/null | grep '"event": "loaded"' | tail -n 1 || true)"
-  [ -n "$loaded" ] && break
+  logs="$(kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" logs "deployment/$release-control" \
+    --namespace "$namespace" 2> /dev/null || true)"
+  loaded="$(printf '%s\n' "$logs" | grep '"event": "loaded"' | tail -n 1 || true)"
+  failed="$(printf '%s\n' "$logs" | grep '"event": "load_failed"' | tail -n 1 || true)"
+  [ -n "$loaded" ] || [ -n "$failed" ] && break
   sleep 10
   i=$((i + 1))
 done
+if [ -z "$loaded" ] && [ -n "$failed" ]; then
+  echo "The GPU stage refused the checkpoint: $failed" >&2
+  exit 1
+fi
 test -n "$loaded"
 
 action=""
@@ -58,6 +65,7 @@ print(json.dumps(loaded, indent=2, sort_keys=True))
 
 assert loaded["executed_by"].startswith(server + "-"), loaded["executed_by"]
 assert loaded["policy_class"] == "PI05Policy", loaded["policy_class"]
+assert len(loaded["candidate_manifest_sha256"]) == 64, "the stage did not report a verified candidate"
 assert loaded["cuda_available"] is True, "CUDA was not available on the server stage"
 assert loaded["device"] == "cuda", loaded["device"]
 assert loaded["client_host"] != loaded["executed_by"], "client and server are the same pod"
@@ -70,6 +78,7 @@ print()
 print("ur10e-single offload verified")
 print("  loaded on   :", loaded["executed_by"], "/", loaded["cuda_device_name"])
 print("  policy      :", loaded["policy_class"])
+print("  candidate   :", loaded["candidate_manifest_sha256"], "from", loaded["evidence_job"])
 print("  load time   :", loaded["load_seconds"], "s")
 print("  client host :", action["client_host"], "(GPU limits: none)")
 print("  action      :", action["action"])
