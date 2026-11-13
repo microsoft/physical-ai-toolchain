@@ -10,9 +10,9 @@ GPU-offload port.
 
 ## Upstream Snapshot
 
-| Field         | Value                                    |
-|---------------|------------------------------------------|
-| Repository    | `microsoft/xavier`                       |
+| Field         | Value                                      |
+|---------------|--------------------------------------------|
+| Repository    | `microsoft/xavier`                         |
 | Pinned commit | `c914e88c4d65d5d99e9546c01a3c4def0ead39c5` |
 
 Key upstream files referenced during the port and their recorded disposition:
@@ -39,22 +39,22 @@ Implementation teams must confirm and retain:
 2. Any required attribution obligations.
 3. The storage location in internal compliance records.
 
-The permission statement does not replace the underlying licence or permission
-documentation. Do not rely on this file as licence text.
+The permission statement does not replace the underlying license or permission
+documentation. Do not rely on this file as license text.
 
 ## Repository and Third-Party Licensing
 
 The repository's root `LICENSE` file contains the MIT License. Repository-authored
-GPU-offload material is covered by that licence unless a file or applicable third-party
+GPU-offload material is covered by that license unless a file or applicable third-party
 notice specifies otherwise.
 
 The SO-101 example at `examples/so101-real-hardware/` pins the LeRobot Python package
 to version `0.6.1`, as recorded in its `.lerobot-version`, `pyproject.toml`, and
 `uv.lock` files.
 
-LeRobot is a third-party dependency. Its applicable licence and attribution obligations
-must be determined from the LeRobot distribution and its licence notices. The
-repository's MIT licence does not replace or relicense third-party dependencies.
+LeRobot is a third-party dependency. Its applicable license and attribution obligations
+must be determined from the LeRobot distribution and its license notices. The
+repository's MIT license does not replace or relicense third-party dependencies.
 
 There is no separate `ros2_bridge/` directory in the tracked SO-101 example. Therefore,
 this provenance record does not identify a ROS 2 bridge there as an Apache-2.0
