@@ -662,6 +662,8 @@ printf 'HTTP/1.1 200 OK\nDocker-Content-Digest: %s\n\n' "`$digest"
         New-Item -ItemType Directory -Path $fixtureDirectory -Force | Out-Null
         $excludedFiles = @{
             'Dockerfile'                         = "FROM $staleReference`n"
+            'Containerfile'                      = "FROM $staleReference`n"
+            'controller/Containerfile.local'     = "FROM $staleReference`n"
             'docker-compose.yml'                 = "image: $staleReference`n"
             'scripts/tests/Fixtures/sample.yaml' = "image: $staleReference`n"
             'scripts/tests/sample.Tests.ps1'     = "`$image = '$staleReference'`n"

@@ -177,7 +177,7 @@
     {
       "id": "tooling",
       "title": "Repository tooling and GitHub Actions",
-      "summary": "Root npm dev tools, the root uv dev group (pytest, ruff, and the e2e harness's Azure SDK), and GitHub Actions pins.",
+      "summary": "Root npm dev tools, the root uv dev group (pytest, ruff, and the e2e harness's Azure SDK), GitHub Actions pins, and the dev container base image.",
       "dependabot": [
         {
           "ecosystem": "npm",
@@ -190,9 +190,15 @@
         {
           "ecosystem": "github-actions",
           "directory": "/"
+        },
+        {
+          "ecosystem": "docker",
+          "directory": "/.devcontainer"
         }
       ],
-      "paths": [],
+      "paths": [
+        ".devcontainer/"
+      ],
       "setup": [
         {
           "command": [
@@ -206,7 +212,8 @@
       ],
       "notes": [
         "A GitHub Actions bump is only fully proven by a CI run on a pushed branch; these checks prove syntax, references, and the workflow contract.",
-        "Root uv runtime pins (azure-ai-ml, pyjwt, urllib3) are exercised live by any environment check, because the e2e harness runs in the root environment."
+        "Root uv runtime pins (azure-ai-ml, pyjwt, urllib3) are exercised live by any environment check, because the e2e harness runs in the root environment.",
+        "A dev container base bump is only fully proven by rebuilding the dev container and smoke-testing its tools; no CI lane builds it."
       ],
       "checks": [
         {
@@ -1837,6 +1844,92 @@
           "not_run_exit_codes": [
             3
           ]
+        }
+      ]
+    },
+    {
+      "id": "avops",
+      "title": "AVOPS ODD image",
+      "summary": "The digest-pinned Python base of the AVOPS ODD analysis container.",
+      "dependabot": [
+        {
+          "ecosystem": "docker",
+          "directory": "/AVOPS/ODD"
+        }
+      ],
+      "paths": [
+        "AVOPS/"
+      ],
+      "setup": [],
+      "notes": [
+        "No CI lane builds or tests AVOPS; the pinning check proves each external base stays digest-pinned.",
+        "The CARLA base is digest-pinned through its CARLA_IMAGE build-arg default, which Dependabot can't parse; CARLA stays on 0.9.15 because the maps URL and scenario-runner ref are tied to it."
+      ],
+      "checks": [
+        {
+          "id": "avops-base-image-pinning",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Dockerfile base-image pinning scan of AVOPS; fails on any unpinned external FROM.",
+          "command": [
+            "pwsh",
+            "-NoProfile",
+            "-File",
+            "scripts/security/Test-DependencyPinning.ps1",
+            "-Path",
+            "AVOPS",
+            "-Recursive",
+            "-IncludeTypes",
+            "dockerfile-base-image",
+            "-FailOnUnpinned",
+            "-OutputPath",
+            "{run_dir}/avops-pinning.json"
+          ],
+          "cwd": ".",
+          "requires": [
+            "pwsh"
+          ],
+          "ci_lanes": [
+            "dependency-pinning"
+          ]
+        },
+        {
+          "id": "avops-compose-config",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": true,
+          "description": "Render the CARLA and Cosmos compose file to confirm it still resolves.",
+          "command": [
+            "docker",
+            "compose",
+            "-f",
+            "AVOPS/carla-cosmos/compose.yaml",
+            "config",
+            "--quiet"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": []
+        },
+        {
+          "id": "avops-odd-image-build",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": true,
+          "description": "Build the ODD analysis image on its pinned Python base.",
+          "command": [
+            "docker",
+            "build",
+            "AVOPS/ODD"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": []
         }
       ]
     }

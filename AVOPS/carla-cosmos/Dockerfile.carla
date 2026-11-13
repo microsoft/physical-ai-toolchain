@@ -1,4 +1,4 @@
-ARG CARLA_IMAGE=carlasim/carla:0.9.15
+ARG CARLA_IMAGE=carlasim/carla:0.9.15@sha256:1af47c314443f4a2d0869ac399c5b5eabde138a5bc39dd31dcbb1540e22f5588
 FROM ${CARLA_IMAGE}
 
 WORKDIR /home/carla

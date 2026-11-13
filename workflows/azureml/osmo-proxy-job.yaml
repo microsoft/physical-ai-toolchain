@@ -28,7 +28,7 @@ identity:
 code: ../..
 
 environment:
-  image: mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu22.04:latest@sha256:15e3cf1ec54d3051024b0e4d12fca577b343e0a62d89167e40ffba2dcb4eb414
+  image: mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu22.04:latest@sha256:45b84003c40e2e0105d4800cdf99a3e8f487ab5358c25f9f90242763101edc26
 
 compute: azureml:k8s-compute
 
