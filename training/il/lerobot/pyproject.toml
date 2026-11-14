@@ -46,6 +46,9 @@ dependencies = [
     # lerobot==0.6.1 permits diffusers releases affected by
     # GHSA-98h9-4798-4q5v; keep the runtime on the patched release.
     "diffusers==0.40.0",
+    # lerobot==0.6.1 caps Pillow below 13.0.0, which leaves the runtime exposed
+    # to GHSA-v9pv-5gc8-w2m6 and related advisories; use the patched release.
+    "Pillow==13.0.0",
     # lerobot.datasets imports pandas and jsonlines eagerly, but both ship in the
     # `dataset` extra we no longer select. Runtime installs use `--no-deps`, so
     # they must be declared here to enter the lock and the build-time export.
@@ -99,6 +102,9 @@ prerelease = "allow"
 override-dependencies = [
     # diffusers: lerobot==0.6.1 caps below 0.40.0; mirror the direct patched pin.
     "diffusers==0.40.0",
+    # Pillow: lerobot==0.6.1 caps below 13.0.0; mirror the direct patched pin
+    # for GHSA-v9pv-5gc8-w2m6 and related advisories.
+    "Pillow==13.0.0",
     # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps at <=12.27.1; mirror
     # the direct 12.30.1 pin.
     "azure-storage-blob==12.30.3",
