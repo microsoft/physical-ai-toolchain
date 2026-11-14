@@ -1585,7 +1585,9 @@
             "test",
             "judge_unit",
             "backend_coverage_gate",
-            "judge_backend_coverage_gate"
+            "judge_backend_coverage_gate",
+            "curation_coverage_gate",
+            "dataset_io_coverage_gate"
           ],
           "reports": [
             {
@@ -1595,6 +1597,14 @@
             {
               "path": "logs/pytest-vlm-judge-results.xml",
               "kind": "junit"
+            },
+            {
+              "path": "logs/coverage-curation.xml",
+              "kind": "file"
+            },
+            {
+              "path": "logs/coverage-dataset-io.xml",
+              "kind": "file"
             }
           ],
           "shards": [
@@ -1608,7 +1618,7 @@
               "run-sha256": "7f2a52cd7b34123ac5f7dac9ae2d70546a3193b9ab7c0f00684f6f6ea5f1a2cb"
             },
             "test": {
-              "run-sha256": "3e34d539de1f384e58b36e0a15d7e7716962b8acafc4c408014d518ea844353d"
+              "run-sha256": "404a8a328a02d51b9ede504e639b81cdfb4d323f9be7e0a893631614435f42a8"
             },
             "judge_unit": {
               "run-sha256": "fb9ad8b81e9fe71d8b4d8b964f73246f4e5dc2aef6cb0e808d3a05e991497769"
@@ -1619,6 +1629,14 @@
             },
             "judge_backend_coverage_gate": {
               "run-sha256": "715aaff67148e4a88206e6de14295780b82d07e9587fdcc32fc33d5991b5d547",
+              "if": "${{ !cancelled() && steps.install.outcome == 'success' }}"
+            },
+            "curation_coverage_gate": {
+              "run-sha256": "39ffaef6dc0ceb685dc53ab90b8882eced3ce762c48a28c5ee68861136c27328",
+              "if": "${{ !cancelled() && steps.install.outcome == 'success' }}"
+            },
+            "dataset_io_coverage_gate": {
+              "run-sha256": "fed45d771090d70aa295a108fa3472743818ba6341e1aa95d60071fb6386bba0",
               "if": "${{ !cancelled() && steps.install.outcome == 'success' }}"
             }
           }

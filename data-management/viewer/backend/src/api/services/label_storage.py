@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Protocol
 import aiofiles
 from fastapi import HTTPException
 from physical_ai_curation.models import DatasetLabelsFile
+from physical_ai_curation.release.errors import ReleaseVerificationError
+from physical_ai_curation.release.publication import OPERATIONAL_RELEASE_NAMESPACES, ownership_path
 from pydantic import ValidationError
 
 from ..storage import RevisionConflictError, VersionedValue
@@ -41,6 +43,25 @@ def _labels_path_for_base(dataset_id: str, base_path: str) -> Path:
     base = Path(base_path)
     parts = dataset_id.split("--") if "--" in dataset_id else [dataset_id]
     return validate_path_containment(base.joinpath(*parts, "meta", "episode_labels.json"), base)
+
+
+def _require_mutable_local_target(path: Path, base: Path) -> None:
+    """Refuse operational namespaces and any target within a recorded package."""
+    dataset = path.parent.parent
+    for ancestor in (dataset, *dataset.parents):
+        if ancestor.name in OPERATIONAL_RELEASE_NAMESPACES:
+            raise HTTPException(status_code=403, detail="Recorded releases are read-only")
+        try:
+            record = ancestor.parent / ownership_path(ancestor.name)
+            record.lstat()
+        except (ReleaseVerificationError, FileNotFoundError):
+            pass
+        except OSError:
+            raise HTTPException(status_code=403, detail="Recorded releases are read-only") from None
+        else:
+            raise HTTPException(status_code=403, detail="Recorded releases are read-only")
+        if ancestor == base:
+            return
 
 
 class LabelStorage(Protocol):
@@ -120,7 +141,12 @@ class LocalLabelStorage:
             raise HTTPException(status_code=400, detail="Path traversal detected")
         path = Path(resolved)
         return await asyncio.to_thread(
-            write_conditional, path, self._serialize(labels_file), if_match=if_match, if_none_match=if_none_match
+            _write_mutable_labels,
+            path,
+            Path(safe_base),
+            self._serialize(labels_file),
+            if_match=if_match,
+            if_none_match=if_none_match,
         )
 
 
@@ -188,6 +214,8 @@ class BlobLabelStorage:
         if_match: str | None = None,
         if_none_match: bool = False,
     ) -> str:
+        if not await self._provider._admit_blob_path(self._blob_path(dataset_id)):
+            raise HTTPException(status_code=403, detail="Recorded releases are read-only")
         try:
             client = await self._provider._get_client()
             container = client.get_container_client(self._provider.container_name)
@@ -226,6 +254,18 @@ class BlobLabelStorage:
                 e,
             )
             raise HTTPException(status_code=500, detail="Failed to save labels") from e
+
+
+def _write_mutable_labels(
+    path: Path,
+    base: Path,
+    content: str,
+    *,
+    if_match: str | None,
+    if_none_match: bool,
+) -> str:
+    _require_mutable_local_target(path, base)
+    return write_conditional(path, content, if_match=if_match, if_none_match=if_none_match)
 
 
 def _create_label_storage(

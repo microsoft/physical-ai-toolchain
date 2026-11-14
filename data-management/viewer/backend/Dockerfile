@@ -40,7 +40,7 @@ RUN set -eu; extras=""; selection="--package lerobot-annotation-api"; \
     done; \
     for extra in $(echo "${BACKEND_EXTRAS}" | tr ',' ' '); do \
         case "${extra}" in \
-            azure|analysis|export|auth|yolo) ;; \
+            azure|azureml|analysis|export|auth|yolo) ;; \
             vlm-judge) echo "Select the judge runtime with JUDGE_EXTRAS" >&2; exit 1 ;; \
             *) echo "Unsupported BACKEND_EXTRAS profile" >&2; exit 1 ;; \
         esac; \
@@ -76,4 +76,4 @@ ENV BACKEND_HOST=0.0.0.0 \
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${BACKEND_PORT}/health')"
 
-CMD ["sh", "-c", "uvicorn src.api.main:app --log-config logging.json --log-level ${LOG_LEVEL} --host ${BACKEND_HOST} --port ${BACKEND_PORT}"]
+CMD ["python", "-m", "src.api.server"]

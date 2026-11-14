@@ -33,7 +33,7 @@ jobs:
   pytest-dataviewer:
     name: Pytest Dataviewer Backend
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     outputs:
       work-status: ${{ steps.outcome.outputs.work-status }}
       expected-count: ${{ steps.outcome.outputs.expected-count }}
@@ -80,6 +80,8 @@ jobs:
           uv run --project ../../.. --all-packages --no-sync --frozen pytest -v
           --junitxml=../../../logs/pytest-dataviewer-results.xml
           --cov=src --cov=evaluation.vlm_judge
+          --cov=../../curation/physical_ai_curation
+          --cov=../../dataset-io/physical_ai_dataset_io
           --cov-report= --cov-fail-under=0
 
       - name: Generate scoped coverage reports
@@ -91,8 +93,10 @@ jobs:
           mkdir -p ../../../logs
           rm -f ../../../logs/coverage-dataviewer.xml
           rm -f ../../../logs/coverage-vlm-judge-backend.xml
+          rm -f ../../../logs/coverage-curation.xml
+          rm -f ../../../logs/coverage-dataset-io.xml
 
-          if [ ! -s .coverage ]; then
+          if [ ! -s ../../../logs/coverage-dataviewer/.coverage ]; then
             echo "::warning::Coverage data is unavailable; scoped reports cannot be generated."
             exit 1
           fi
@@ -107,9 +111,19 @@ jobs:
             --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' \
             --fail-under=0 -o ../../../logs/coverage-vlm-judge-backend.xml
           judge_status=$?
+
+          uv run --project ../../.. --all-packages --no-sync coverage xml \
+            --include='*/physical_ai_curation/*' --fail-under=0 \
+            -o ../../../logs/coverage-curation.xml
+          curation_status=$?
+
+          uv run --project ../../.. --all-packages --no-sync coverage xml \
+            --include='*/physical_ai_dataset_io/*' --fail-under=0 \
+            -o ../../../logs/coverage-dataset-io.xml
+          dataset_io_status=$?
           set -e
 
-          if [ "$backend_status" -ne 0 ] || [ "$judge_status" -ne 0 ]; then
+          if [ "$backend_status" -ne 0 ] || [ "$judge_status" -ne 0 ] || [ "$curation_status" -ne 0 ] || [ "$dataset_io_status" -ne 0 ]; then
             echo "::warning::One or more scoped coverage reports could not be generated."
             exit 1
           fi
@@ -127,6 +141,8 @@ jobs:
           reports = {
               "backend_valid": Path("../../../logs/coverage-dataviewer.xml"),
               "judge_backend_valid": Path("../../../logs/coverage-vlm-judge-backend.xml"),
+              "curation_valid": Path("../../../logs/coverage-curation.xml"),
+              "dataset_io_valid": Path("../../../logs/coverage-dataset-io.xml"),
           }
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
@@ -139,12 +155,25 @@ jobs:
                           and int(root.attrib.get("lines-valid", "0")) > 0
                           and 0.0 <= float(root.attrib.get("line-rate", "")) <= 1.0
                       )
-                  except (OSError, ET.ParseError, ValueError):
-                      pass
+                      if valid and name in {"curation_valid", "dataset_io_valid"}:
+                          threshold = 90
+                          lines_valid = int(root.attrib["lines-valid"])
+                          lines_covered = int(root.attrib["lines-covered"])
+                          branches_valid = int(root.attrib["branches-valid"])
+                          branches_covered = int(root.attrib["branches-covered"])
+                          valid = (
+                              0 <= lines_covered <= lines_valid
+                              and 0 <= branches_covered <= branches_valid
+                              and 0.0 <= float(root.attrib["branch-rate"]) <= 1.0
+                              and (lines_covered + branches_covered) * 100
+                              >= threshold * (lines_valid + branches_valid)
+                          )
+                  except (OSError, ET.ParseError, ValueError, KeyError):
+                      valid = False
 
                   print(f"{name}={'true' if valid else 'false'}", file=output)
                   if not valid:
-                      print(f"::warning::Coverage report unavailable or invalid: {path}")
+                      print(f"::warning::Coverage report unavailable or invalid, or below its threshold: {path}")
           PY
 
       - name: Enforce backend coverage threshold
@@ -175,8 +204,38 @@ jobs:
           uv run --project ../../.. --all-packages --no-sync coverage report \
             --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' --fail-under=70
 
+      - name: Enforce curation coverage threshold
+        id: curation_coverage_gate
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+
+          if [ "${{ steps.coverage_validate.outputs.curation_valid }}" != "true" ]; then
+            echo "::error::Curation coverage report is missing, invalid, or below 90%."
+            exit 1
+          fi
+
+          uv run --project ../../.. --all-packages --no-sync coverage report \
+            --include='*/physical_ai_curation/*' --fail-under=90
+
+      - name: Enforce dataset-I/O coverage threshold
+        id: dataset_io_coverage_gate
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+
+          if [ "${{ steps.coverage_validate.outputs.dataset_io_valid }}" != "true" ]; then
+            echo "::error::Dataset-I/O coverage report is missing, invalid, or below 90%."
+            exit 1
+          fi
+
+          uv run --project ../../.. --all-packages --no-sync coverage report \
+            --include='*/physical_ai_dataset_io/*' --fail-under=90
+
       - name: Run product-owned judge unit tests
         id: judge_unit
+        env:
+          COVERAGE_FILE: ${{ github.workspace }}/logs/coverage-vlm-judge/.coverage
         run: |
           uv run --project ../../.. --all-packages --no-sync --frozen pytest -v -c ../../../evaluation/vlm_judge/pyproject.toml ../../../evaluation/tests/vlm_judge --junitxml=../../../logs/pytest-vlm-judge-results.xml --cov-report=xml:../../../logs/coverage-vlm-judge.xml --cov-fail-under=35
           test -s ../../../logs/coverage-vlm-judge.xml
@@ -188,6 +247,8 @@ jobs:
           test -s ../../../logs/coverage-dataviewer.xml
           test -s ../../../logs/coverage-vlm-judge-backend.xml
           test -s ../../../logs/coverage-vlm-judge.xml
+          test -s ../../../logs/coverage-curation.xml
+          test -s ../../../logs/coverage-dataset-io.xml
 
       - name: Upload coverage.xml artifact
         id: coverage_upload
@@ -200,6 +261,8 @@ jobs:
             logs/coverage-dataviewer.xml
             logs/coverage-vlm-judge-backend.xml
             logs/coverage-vlm-judge.xml
+            logs/coverage-curation.xml
+            logs/coverage-dataset-io.xml
           if-no-files-found: ignore
           retention-days: 30
 
@@ -240,6 +303,28 @@ jobs:
           flags: pytest-vlm-judge
           name: pytest-vlm-judge-unit-coverage
 
+      - name: Upload curation coverage to Codecov
+        if: ${{ inputs.code-coverage && always() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: logs/coverage-curation.xml
+          disable_search: true
+          use_oidc: true
+          fail_ci_if_error: false
+          flags: pytest-curation
+          name: pytest-curation-coverage
+
+      - name: Upload dataset-I/O coverage to Codecov
+        if: ${{ inputs.code-coverage && always() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: logs/coverage-dataset-io.xml
+          disable_search: true
+          use_oidc: true
+          fail_ci_if_error: false
+          flags: pytest-dataset-io
+          name: pytest-dataset-io-coverage
+
       - name: Publish execution evidence
         id: outcome
         if: always()
@@ -247,5 +332,5 @@ jobs:
         with:
           workflow: dataviewer-backend-pytests
           steps-json: ${{ toJSON(steps) }}
-          required-steps: '["system-dependencies","install","test","judge_unit","backend_coverage_gate","judge_backend_coverage_gate"]'
-          reports: '[{"path":"logs/pytest-dataviewer-results.xml","kind":"junit"},{"path":"logs/pytest-vlm-judge-results.xml","kind":"junit"}]'
+          required-steps: '["system-dependencies","install","test","judge_unit","backend_coverage_gate","judge_backend_coverage_gate","curation_coverage_gate","dataset_io_coverage_gate"]'
+          reports: '[{"path":"logs/pytest-dataviewer-results.xml","kind":"junit"},{"path":"logs/pytest-vlm-judge-results.xml","kind":"junit"},{"path":"logs/coverage-curation.xml","kind":"file"},{"path":"logs/coverage-dataset-io.xml","kind":"file"}]'

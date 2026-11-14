@@ -1,0 +1,1354 @@
+import { useQuery } from '@tanstack/react-query'
+import { LoaderCircle, RefreshCw, SlidersHorizontal } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+
+import {
+  type ReleasePreview,
+  type ReleaseRequest,
+  ReleaseRequestError,
+  type ReleaseSubmission,
+} from '@/api/releases'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { useEpisodeReadiness } from '@/hooks/use-episode-readiness'
+import { fetchPrincipalContext } from '@/lib/principal-context'
+
+/** Provenance origins recorded for one episode. */
+export interface ReleaseProvenance {
+  origins: string[]
+}
+
+/** Saved judge analysis for one episode. Freshness is shown as recorded, never inferred. */
+export interface ReleaseJudge {
+  status: string
+  freshness: string
+  confidence?: number | null
+  outcome?: string | null
+}
+
+/**
+ * Episode row shown in the release selection list. Rows from the population carry `detailed: false`
+ * until their evidence is loaded; detail-dependent fields are not evidence of absence before then.
+ */
+export interface ReleaseItem {
+  episodeIndex: number
+  detailed?: boolean
+  annotation?: boolean
+  edits?: boolean
+  labels?: string[] | null
+  resources?: Record<string, unknown>[] | null
+  provenance?: ReleaseProvenance | null
+  judge?: ReleaseJudge | null
+}
+
+export interface ReleaseDialogProps {
+  datasetId: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** Restore focus to the owning workspace when the controlled dialog closes. */
+  onCloseAutoFocus?: (event: Event) => void
+  /** Full source population when `inventoryReady` is true; otherwise the loaded subset. */
+  items: ReleaseItem[]
+  /** Whether `items` holds the complete source inventory. Gates select-all and release. */
+  inventoryReady: boolean
+  /** Progress or failure text for the current source and principal, never a readiness signal. */
+  inventoryMessage?: string
+  inventoryFailed?: boolean
+  /** Restarts inventory loading without clearing the release draft. */
+  onRetryInventory?: () => void
+  /** Loads full evidence for the given episode indices. Called for visible and selected rows. */
+  onRequestDetails?: (episodes: number[]) => void
+  /** Message when selected episode details failed to load. */
+  detailError?: string | null
+  /** Destination aliases from the release capabilities response. */
+  destinations: string[]
+  /** Aliases whose available capabilities explicitly enable Azure ML registration. */
+  azuremlDestinations?: string[]
+  onPreview: (request: ReleaseRequest) => Promise<ReleasePreview>
+  /** Aborts the browser request only; the server is not asked to cancel. The pending promise then settles. */
+  onCancelPreparation?: () => void
+  /** Rejects on failure. Transport errors and 5xx responses freeze the draft for retry. */
+  onSubmit: (request: ReleaseRequest, submission: ReleaseSubmission) => Promise<void>
+  /** Forgets the saved pending submission. Makes no API call and does not cancel any job. */
+  onDiscardSubmission?: () => void
+  disabled?: boolean
+}
+
+type ReleaseRequestDraft = ReleaseRequest & { description?: string }
+
+type Tristate = 'any' | 'yes' | 'no'
+
+interface Filters {
+  search: string
+  labelValues: string[]
+  annotation: Tristate
+  edits: Tristate
+  labels: Tristate
+  resources: Tristate
+  /** Provenance origin to match, or `any`. */
+  provenance: string
+  judge: Tristate
+}
+
+const ANY_FILTERS: Filters = {
+  search: '',
+  labelValues: [],
+  annotation: 'any',
+  edits: 'any',
+  labels: 'any',
+  resources: 'any',
+  provenance: 'any',
+  judge: 'any',
+}
+
+interface DraftIdentity {
+  packageId: string
+  attemptId: string
+}
+
+interface ReviewState {
+  key: string
+  request: ReleaseRequestDraft
+  preview: ReleasePreview
+  processingConsent: boolean
+  localDiskAcknowledged: boolean
+}
+
+interface PendingSubmit {
+  key: string
+  request: ReleaseRequestDraft
+  submission: ReleaseSubmission
+}
+
+interface Notice {
+  key: string
+  message: string
+}
+
+const RELEASE_TARGET = 'v3'
+/** Rows rendered per page of the selection list. */
+const ROW_PAGE_SIZE = 50
+
+function createDraftIdentity(): DraftIdentity {
+  return { packageId: crypto.randomUUID(), attemptId: crypto.randomUUID() }
+}
+
+function matchesTristate(value: boolean, filter: Tristate): boolean {
+  return filter === 'any' || (filter === 'yes') === value
+}
+
+/**
+ * Cross-filter: an item must satisfy every active filter. Filters on detail-only evidence never match
+ * a row whose details are still loading.
+ */
+function matchesFilters(item: ReleaseItem, filters: Filters): boolean {
+  const detailFilterActive = hasDetailFilter(filters)
+  if (detailFilterActive && item.detailed !== true) return false
+  return (
+    `episode ${item.episodeIndex} ${(item.labels ?? []).join(' ')}`
+      .toLowerCase()
+      .includes(filters.search.trim().toLowerCase()) &&
+    (filters.labelValues.length === 0 ||
+      filters.labelValues.some((label) => item.labels?.includes(label))) &&
+    matchesTristate(item.annotation === true, filters.annotation) &&
+    matchesTristate(item.edits === true, filters.edits) &&
+    matchesTristate((item.labels?.length ?? 0) > 0, filters.labels) &&
+    matchesTristate((item.resources?.length ?? 0) > 0, filters.resources) &&
+    (filters.provenance === 'any' ||
+      (item.provenance?.origins ?? []).includes(filters.provenance)) &&
+    matchesTristate(item.judge != null, filters.judge)
+  )
+}
+
+/** True when a filter reads evidence that is only available after details load. */
+function hasDetailFilter(filters: Filters): boolean {
+  return (
+    filters.annotation !== 'any' ||
+    filters.edits !== 'any' ||
+    filters.resources !== 'any' ||
+    filters.provenance !== 'any' ||
+    filters.judge !== 'any'
+  )
+}
+
+function toSnakeKey(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[-\s]+/g, '_')
+    .toLowerCase()
+}
+
+/** Recursively converts object keys to snake_case for the backend contract. */
+function toSnakeCase(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(toSnakeCase)
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [toSnakeKey(key), toSnakeCase(entry)]),
+    )
+  }
+  return value
+}
+
+function readList(summary: ReleasePreview['summary'], key: string): string[] {
+  const value = summary[key]
+  if (!Array.isArray(value)) return []
+  return value.map((entry) => (typeof entry === 'string' ? entry : JSON.stringify(entry)))
+}
+
+/**
+ * Destination kind from the preview summary. Null when the preview does not report one, which
+ * makes local disk acknowledgment required.
+ */
+function readDestinationKind(summary: ReleasePreview['summary']): string | null {
+  const value = summary.destinationKind
+  return typeof value === 'string' ? value : null
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return 'Unknown'
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`
+}
+
+/** Reserved bytes of 0 mean the backend did not estimate them, so they are shown as unknown. */
+function formatReservedBytes(bytes: number): string {
+  return bytes > 0 ? formatBytes(bytes) : 'Unknown'
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof ReleaseRequestError)
+    return error.inputReason ?? `Release request failed: ${error.code}.`
+  return 'Release request failed.'
+}
+
+/** Keep the same request when the response does not establish that submission was refused. */
+function isAmbiguousFailure(error: unknown): boolean {
+  if (error instanceof ReleaseRequestError) return !error.isDefinitiveRejection
+  return true
+}
+
+function describeJudge(judge: ReleaseJudge): string {
+  const parts = [
+    judge.status,
+    `freshness ${judge.freshness}`,
+    typeof judge.confidence === 'number' ? `confidence ${judge.confidence}` : null,
+    judge.outcome ? `outcome ${judge.outcome}` : null,
+  ]
+  return `judge ${parts.filter((part): part is string => part !== null).join(', ')}`
+}
+
+/**
+ * Describes a row from loaded evidence. Rows without details report that details are loading rather than
+ * implying that annotation, edits, resources, provenance, or judge analysis are absent.
+ *
+ * @param item - Dialog row.
+ * @returns Single-line description for the row.
+ */
+function describeRow(item: ReleaseItem): string {
+  if (item.detailed !== true) {
+    const labels = item.labels?.length ? `labels: ${item.labels.join(', ')}` : null
+    return ['details loading', labels].filter((part): part is string => part !== null).join(', ')
+  }
+  const parts = [
+    item.annotation ? 'annotated' : null,
+    item.edits ? 'edited' : null,
+    item.labels?.length ? `labels: ${item.labels.join(', ')}` : null,
+    item.resources?.length ? `${item.resources.length} resource(s)` : null,
+    item.provenance?.origins.length ? `origin: ${item.provenance.origins.join(', ')}` : null,
+    item.judge ? describeJudge(item.judge) : null,
+  ]
+  return parts.filter((part): part is string => part !== null).join(', ')
+}
+
+/**
+ * Counts provenance origins and judge analyses across rows. Freshness is reported as recorded.
+ *
+ * @param rows - Selected dialog rows.
+ * @returns Provenance and judge summary lines.
+ */
+function summarizeEvidence(rows: ReleaseItem[]): { provenance: string; judge: string } {
+  const origins = new Map<string, number>()
+  const freshness = new Map<string, number>()
+  let judged = 0
+  for (const row of rows) {
+    for (const origin of new Set(row.provenance?.origins ?? [])) {
+      origins.set(origin, (origins.get(origin) ?? 0) + 1)
+    }
+    if (row.judge) {
+      judged += 1
+      freshness.set(row.judge.freshness, (freshness.get(row.judge.freshness) ?? 0) + 1)
+    }
+  }
+  const originText = [...origins]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([origin, count]) => `${origin} ${count}`)
+    .join(', ')
+  const freshnessText = [...freshness]
+    .map(([value, count]) => `; freshness ${value}: ${count}`)
+    .join('')
+  return {
+    provenance: `Provenance origins: ${originText || 'none'}`,
+    judge: `Judge analyses: ${judged}${freshnessText}`,
+  }
+}
+
+function TristateSelect({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string
+  label: string
+  value: Tristate
+  onChange: (value: Tristate) => void
+}) {
+  return (
+    <div className="grid gap-1">
+      <Label htmlFor={id}>{label}</Label>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value as Tristate)}
+        className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+      >
+        <option value="any">Any</option>
+        <option value="yes">Yes</option>
+        <option value="no">No</option>
+      </select>
+    </div>
+  )
+}
+
+function SummaryList({ title, items, empty }: { title: string; items: string[]; empty: string }) {
+  return (
+    <div className="grid gap-1">
+      <p className="text-sm font-medium">{title}</p>
+      {items.length === 0 ? (
+        <p className="text-muted-foreground text-sm">{empty}</p>
+      ) : (
+        <ul className="list-disc pl-5 text-sm [overflow-wrap:anywhere]">
+          {items.map((item, index) => (
+            <li key={`${index}-${item}`}>{item}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** Shows elapsed request time, not an inferred backend stage or completion percentage. */
+function PreviewProgress({
+  episodeCount,
+  submitting = false,
+  cancelling = false,
+}: {
+  episodeCount: number
+  submitting?: boolean
+  cancelling?: boolean
+}) {
+  const stopLabel = submitting ? 'Stopping the wait...' : 'Stopping preview...'
+  const [startedAt] = useState(Date.now)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+
+  useEffect(() => {
+    const timer = globalThis.setInterval(() => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
+    }, 1000)
+    return () => globalThis.clearInterval(timer)
+  }, [startedAt])
+
+  return (
+    <div className="text-muted-foreground grid shrink-0 gap-1 text-sm">
+      <p role="status" className="flex items-center gap-2">
+        <LoaderCircle
+          className="size-4 shrink-0 animate-spin motion-reduce:animate-none"
+          aria-hidden="true"
+        />
+        {cancelling
+          ? stopLabel
+          : submitting
+            ? 'Preparing release submission...'
+            : `Preparing preview for ${episodeCount} ${episodeCount === 1 ? 'episode' : 'episodes'}.`}
+      </p>
+      <p id="release-request-notice">
+        {cancelling
+          ? submitting
+            ? 'Only the browser request is stopping. This does not cancel the release.'
+            : 'Only the browser request is stopping. The server may still finish it.'
+          : submitting
+            ? 'Waiting for submission confirmation. Closing this dialog does not cancel the release.'
+            : 'Checking the selection and preparing an advisory preview. No release has been submitted.'}
+      </p>
+      <p
+        role="timer"
+        aria-label={submitting ? 'Submission elapsed time' : 'Preview elapsed time'}
+        aria-live="off"
+        className="tabular-nums"
+      >
+        Elapsed: {Math.floor(elapsedSeconds / 60)}m {elapsedSeconds % 60}s
+      </p>
+    </div>
+  )
+}
+
+/**
+ * Dialog for selecting source episodes, previewing a curated dataset release, and submitting it
+ * with an idempotency key. Selection is ordered by click sequence.
+ */
+export function ReleaseDialog({
+  datasetId,
+  open,
+  onOpenChange,
+  onCloseAutoFocus,
+  items,
+  inventoryReady,
+  inventoryMessage = 'The full source inventory is still loading. Select all and release are disabled.',
+  inventoryFailed = false,
+  onRetryInventory,
+  onRequestDetails,
+  detailError = null,
+  destinations,
+  azuremlDestinations = [],
+  onPreview,
+  onCancelPreparation,
+  onSubmit,
+  onDiscardSubmission,
+  disabled = false,
+}: ReleaseDialogProps) {
+  const principal = useQuery({
+    queryKey: ['auth', 'principal-context'],
+    queryFn: fetchPrincipalContext,
+    staleTime: Infinity,
+  })
+  const [selected, setSelected] = useState<number[]>([])
+  const [destinationChoice, setDestinationChoice] = useState('')
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [finalized, setFinalized] = useState(false)
+  const [filters, setFilters] = useState<Filters>(ANY_FILTERS)
+  const [filtersExpanded, setFiltersExpanded] = useState(false)
+  const [reviewSelected, setReviewSelected] = useState(false)
+  const [rowLimit, setRowLimit] = useState(ROW_PAGE_SIZE)
+  const selectedOnlyRef = useRef<HTMLButtonElement>(null)
+  const releaseNameInput = useRef<HTMLInputElement>(null)
+  const retrySubmissionButton = useRef<HTMLButtonElement>(null)
+  const focusNameAfterDiscard = useRef(false)
+  const episodeCheckboxes = useRef(new Map<number, HTMLButtonElement>())
+  const [identity, setIdentity] = useState<DraftIdentity>(createDraftIdentity)
+  const [review, setReview] = useState<ReviewState | null>(null)
+  const [notice, setNotice] = useState<Notice | null>(null)
+  const [ambiguous, setAmbiguous] = useState<PendingSubmit | null>(null)
+  const [previewing, setPreviewing] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+
+  useEffect(() => {
+    if (!open || submitting) return
+    if (ambiguous) retrySubmissionButton.current?.focus()
+    else if (focusNameAfterDiscard.current) {
+      releaseNameInput.current?.focus()
+      focusNameAfterDiscard.current = false
+    }
+  }, [ambiguous, open, submitting])
+
+  const itemByIndex = new Map(items.map((item) => [item.episodeIndex, item]))
+  const availableRows = [...itemByIndex.values()]
+  const liveSelected = selected.filter((index) => itemByIndex.has(index))
+  const selectedRows = liveSelected.flatMap((index) => {
+    const item = itemByIndex.get(index)
+    return item ? [item] : []
+  })
+  const orderByIndex = new Map(liveSelected.map((index, position) => [index, position + 1]))
+  const matchingRows = (reviewSelected ? selectedRows : availableRows).filter((item) =>
+    matchesFilters(item, filters),
+  )
+  const shownRows = matchingRows.slice(0, rowLimit)
+  const pendingSelected = liveSelected.filter((index) => itemByIndex.get(index)?.detailed !== true)
+  const detailsReady = pendingSelected.length === 0
+  const detailFilterActive = hasDetailFilter(filters)
+  const pendingDetailsCount = availableRows.filter((item) => item.detailed !== true).length
+  const shownSelectedCount = shownRows.filter((item) => orderByIndex.has(item.episodeIndex)).length
+  const labelCounts = new Map<string, number>()
+  for (const item of availableRows) {
+    for (const label of new Set(item.labels ?? [])) {
+      labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1)
+    }
+  }
+  const labelOptions = [...labelCounts].sort(([left], [right]) => left.localeCompare(right))
+  const activeFilterCount =
+    Number(filters.search.trim() !== '') +
+    filters.labelValues.length +
+    [
+      filters.annotation,
+      filters.edits,
+      filters.labels,
+      filters.resources,
+      filters.provenance,
+      filters.judge,
+    ].filter((value) => value !== 'any').length
+  const provenanceOrigins = [
+    ...new Set(items.flatMap((item) => item.provenance?.origins ?? [])),
+  ].sort()
+  const selectedEvidence = summarizeEvidence(selectedRows)
+  const destination = destinations.includes(destinationChoice)
+    ? destinationChoice
+    : (destinations[0] ?? '')
+
+  const readiness = useEpisodeReadiness(datasetId, liveSelected, open && liveSelected.length > 0)
+
+  // Selected rows need details for preview and release; visible rows need them for detail filters.
+  const detailTargets = [
+    ...new Set([
+      ...pendingSelected,
+      ...shownRows.filter((item) => item.detailed !== true).map((item) => item.episodeIndex),
+    ]),
+  ].sort((left, right) => left - right)
+  const detailTargetKey = detailTargets.join(',')
+  useEffect(() => {
+    if (!open || !onRequestDetails || detailTargetKey === '') return
+    onRequestDetails(detailTargetKey.split(',').map(Number))
+  }, [open, onRequestDetails, detailTargetKey])
+
+  const request: ReleaseRequestDraft = {
+    destination,
+    packageId: identity.packageId,
+    attemptId: identity.attemptId,
+    datasetId,
+    datasetName: name,
+    episodeIndices: liveSelected,
+    resources: selectedRows.flatMap((row) =>
+      (row.resources ?? []).map((resource) => toSnakeCase(resource) as Record<string, unknown>),
+    ),
+    finalized,
+    description: description.trim() || undefined,
+  }
+
+  // Any change to the body or to the principal or readiness invalidates the preview.
+  const draftKey = JSON.stringify({
+    request,
+    ready: readiness.ready,
+    scopeId: principal.data?.scopeId ?? null,
+    authMode: principal.data?.authMode ?? null,
+  })
+  const currentReview = review?.key === draftKey ? review : null
+  const contextKey = JSON.stringify([
+    datasetId,
+    principal.data?.scopeId,
+    principal.data?.authMode,
+    identity.attemptId,
+  ])
+  const currentNotice =
+    notice?.key === draftKey || notice?.key === contextKey ? notice.message : null
+
+  const summary = currentReview?.preview.summary
+  const destinationKind = summary ? readDestinationKind(summary) : null
+  const actions = summary ? readList(summary, 'actions') : []
+  const blocking = summary ? readList(summary, 'blocking') : []
+  const warnings = summary ? readList(summary, 'warnings') : []
+  const requiresLocalDiskAck = destinationKind !== 'blob'
+  const acknowledgmentsReady =
+    !requiresLocalDiskAck || currentReview?.localDiskAcknowledged === true
+
+  const formLocked = disabled || ambiguous !== null || previewing || submitting
+  const baseReady =
+    !disabled &&
+    inventoryReady &&
+    detailsReady &&
+    readiness.ready &&
+    liveSelected.length > 0 &&
+    destination !== ''
+  const nameError =
+    name === ''
+      ? 'Enter a release name.'
+      : !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name) || name.includes('--')
+        ? 'Use 1-128 ASCII letters, digits, periods, underscores or hyphens; start with a letter or digit and avoid consecutive hyphens.'
+        : azuremlDestinations.includes(destination) && name.length > 30
+          ? 'Azure ML release versions must be at most 30 characters.'
+          : null
+  const canPreview = !formLocked && baseReady && nameError === null && !previewing
+  const canSubmit =
+    !formLocked &&
+    baseReady &&
+    nameError === null &&
+    finalized &&
+    currentReview !== null &&
+    blocking.length === 0 &&
+    acknowledgmentsReady
+
+  function describeActionStatus(): string {
+    if (ambiguous) return 'Submission not confirmed.'
+    if (submitting) return 'Submitting release...'
+    if (previewing) return 'Preparing preview...'
+    if (disabled) return 'Release creation is unavailable.'
+    if (!inventoryReady)
+      return inventoryFailed
+        ? 'Source inventory unavailable. Retry loading.'
+        : 'Waiting for source inventory.'
+    if (liveSelected.length === 0) return 'No episodes selected.'
+    if (!detailsReady)
+      return detailError
+        ? 'Selected episode details unavailable. Retry loading details.'
+        : 'Loading selected episode details.'
+    if (!readiness.ready)
+      return `Not ready: ${readiness.reason ?? 'saved episode context is loading.'}`
+    if (!destination) return 'Destination required.'
+    if (!name.trim()) return 'Release name required.'
+    if (!currentReview) return 'Preview required before submission.'
+    if (blocking.length > 0) return 'Preview has blocking issues.'
+    if (!finalized) return 'Finalization declaration required.'
+    if (requiresLocalDiskAck && !currentReview.localDiskAcknowledged)
+      return 'Local disk acknowledgment required.'
+    return 'Ready to submit.'
+  }
+
+  function resetDraft() {
+    setSelected([])
+    setDestinationChoice('')
+    setName('')
+    setDescription('')
+    setFinalized(false)
+    setFilters(ANY_FILTERS)
+    setFiltersExpanded(false)
+    setReviewSelected(false)
+    setRowLimit(ROW_PAGE_SIZE)
+    setIdentity(createDraftIdentity())
+    setReview(null)
+    setNotice(null)
+    setAmbiguous(null)
+  }
+
+  function handleOpenChange(next: boolean) {
+    if (!next && onCancelPreparation && !cancelling) {
+      if (previewing || submitting) setCancelling(true)
+      onCancelPreparation()
+    }
+    onOpenChange(next)
+  }
+
+  function toggleIndex(index: number) {
+    setSelected((previous) =>
+      previous.includes(index) ? previous.filter((value) => value !== index) : [...previous, index],
+    )
+  }
+
+  function appendSelection(indices: number[]) {
+    setSelected((previous) => {
+      const next = new Set(previous)
+      indices.forEach((index) => next.add(index))
+      return [...next]
+    })
+  }
+
+  function updateAcknowledgment(
+    field: 'processingConsent' | 'localDiskAcknowledged',
+    value: boolean,
+  ) {
+    setReview((previous) =>
+      previous && previous.key === draftKey ? { ...previous, [field]: value } : previous,
+    )
+  }
+
+  async function handlePreview() {
+    if (!canPreview) return
+    const key = draftKey
+    setPreviewing(true)
+    setNotice(null)
+    setReview(null)
+    try {
+      const preview = await onPreview(request)
+      setReview({
+        key,
+        request,
+        preview,
+        processingConsent: false,
+        localDiskAcknowledged: false,
+      })
+    } catch (error) {
+      setNotice({
+        key,
+        message:
+          error instanceof Error && error.name === 'AbortError'
+            ? 'Preview stopped in the browser. No release was submitted.'
+            : describeError(error),
+      })
+    } finally {
+      setPreviewing(false)
+      setCancelling(false)
+    }
+  }
+
+  async function submitPending(pending: PendingSubmit) {
+    setSubmitting(true)
+    setNotice(null)
+    try {
+      await onSubmit(pending.request, pending.submission)
+      resetDraft()
+      handleOpenChange(false)
+    } catch (error) {
+      if (isAmbiguousFailure(error)) {
+        setAmbiguous(pending)
+      } else {
+        setReview(null)
+        setNotice({
+          key:
+            error instanceof ReleaseRequestError && error.code === 'stale_preview'
+              ? contextKey
+              : pending.key,
+          message: describeError(error),
+        })
+      }
+    } finally {
+      setSubmitting(false)
+      setCancelling(false)
+    }
+  }
+
+  function handleSubmit() {
+    if (!currentReview) return
+    void submitPending({
+      key: draftKey,
+      request: currentReview.request,
+      submission: {
+        previewDigest: currentReview.preview.digest,
+        processingDigest: currentReview.processingConsent
+          ? (currentReview.preview.summary.processingDigest ?? '')
+          : '',
+        localDiskAcknowledged: requiresLocalDiskAck && currentReview.localDiskAcknowledged,
+        idempotencyKey: crypto.randomUUID(),
+      },
+    })
+  }
+
+  function handleRetry() {
+    if (ambiguous) void submitPending(ambiguous)
+  }
+
+  function handleDiscardAmbiguous() {
+    focusNameAfterDiscard.current = true
+    resetDraft()
+    onDiscardSubmission?.()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent
+        className="flex h-[92dvh] max-h-[980px] w-[calc(100%-2rem)] max-w-[1120px] flex-col overflow-hidden p-4 sm:p-6"
+        onCloseAutoFocus={onCloseAutoFocus}
+      >
+        <DialogHeader className="shrink-0">
+          <DialogTitle>Release curated dataset</DialogTitle>
+          <DialogDescription>
+            Select source episodes, preview the release, then submit. Target: {RELEASE_TARGET}{' '}
+            (fixed).
+          </DialogDescription>
+        </DialogHeader>
+
+        <fieldset
+          disabled={formLocked}
+          className="m-0 grid min-h-0 min-w-0 flex-1 grid-cols-1 content-start gap-4 overflow-y-auto border-0 p-1.5"
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="release-name">Release name</Label>
+              <Input
+                ref={releaseNameInput}
+                id="release-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                aria-invalid={nameError !== null}
+                aria-describedby={nameError ? 'release-name-error' : undefined}
+                required
+              />
+              {nameError && (
+                <p id="release-name-error" role="alert" className="text-destructive text-sm">
+                  {nameError}
+                </p>
+              )}
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="release-destination">Destination</Label>
+              <select
+                id="release-destination"
+                value={destination}
+                onChange={(event) => setDestinationChoice(event.target.value)}
+                disabled={destinations.length === 0}
+                className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+              >
+                {destinations.map((alias) => (
+                  <option key={alias} value={alias}>
+                    {alias}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-2 sm:col-span-2">
+              <Label htmlFor="release-description">Description</Label>
+              <Textarea
+                id="release-description"
+                rows={2}
+                className="min-h-16"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="release-finalized"
+              checked={finalized}
+              onCheckedChange={(checked) => setFinalized(checked === true)}
+            />
+            <Label htmlFor="release-finalized">
+              I declare the local source dataset is finalized and will not change during release.
+            </Label>
+          </div>
+
+          <section aria-labelledby="release-selection-heading" className="grid min-w-0 gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <h3 id="release-selection-heading" className="text-sm font-medium">
+                Episodes
+              </h3>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="sm:hidden"
+                aria-expanded={filtersExpanded}
+                aria-controls="release-episode-filters"
+                onClick={() => setFiltersExpanded((previous) => !previous)}
+              >
+                <SlidersHorizontal className="mr-2 size-4" aria-hidden="true" />
+                Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+              </Button>
+            </div>
+
+            <div className="grid min-w-0 gap-4 sm:grid-cols-[180px_minmax(0,1fr)] lg:grid-cols-[220px_minmax(0,1fr)]">
+              <div
+                id="release-episode-filters"
+                className={`${filtersExpanded ? 'grid' : 'hidden'} min-w-0 content-start gap-3 sm:grid`}
+              >
+                <div className="grid gap-2">
+                  <Label htmlFor="release-search">Search episodes</Label>
+                  <Input
+                    id="release-search"
+                    type="search"
+                    value={filters.search}
+                    onChange={(event) =>
+                      setFilters((previous) => ({ ...previous, search: event.target.value }))
+                    }
+                  />
+                </div>
+                <fieldset className="grid min-w-0 gap-2">
+                  <legend className="mb-2 text-sm font-medium">Match any label</legend>
+                  <div className="grid max-h-40 gap-2 overflow-y-auto p-1">
+                    {labelOptions.map(([label, count], position) => (
+                      <div key={label} className="flex items-start gap-2">
+                        <Checkbox
+                          id={`release-label-${position}`}
+                          checked={filters.labelValues.includes(label)}
+                          onCheckedChange={(checked) =>
+                            setFilters((previous) => ({
+                              ...previous,
+                              labelValues:
+                                checked === true
+                                  ? [...previous.labelValues, label]
+                                  : previous.labelValues.filter((value) => value !== label),
+                            }))
+                          }
+                        />
+                        <Label
+                          htmlFor={`release-label-${position}`}
+                          className="min-w-0 leading-5 [overflow-wrap:anywhere]"
+                        >
+                          {label} ({count})
+                        </Label>
+                      </div>
+                    ))}
+                    {labelOptions.length === 0 && (
+                      <p className="text-muted-foreground text-sm">No saved labels.</p>
+                    )}
+                  </div>
+                </fieldset>
+                <details>
+                  <summary className="cursor-pointer text-sm font-medium">More filters</summary>
+                  <div className="mt-3 grid gap-3">
+                    <TristateSelect
+                      id="filter-annotation"
+                      label="Annotation"
+                      value={filters.annotation}
+                      onChange={(value) =>
+                        setFilters((previous) => ({ ...previous, annotation: value }))
+                      }
+                    />
+                    <TristateSelect
+                      id="filter-edits"
+                      label="Edits"
+                      value={filters.edits}
+                      onChange={(value) =>
+                        setFilters((previous) => ({ ...previous, edits: value }))
+                      }
+                    />
+                    <TristateSelect
+                      id="filter-labels"
+                      label="Labels"
+                      value={filters.labels}
+                      onChange={(value) =>
+                        setFilters((previous) => ({ ...previous, labels: value }))
+                      }
+                    />
+                    <TristateSelect
+                      id="filter-resources"
+                      label="Resources"
+                      value={filters.resources}
+                      onChange={(value) =>
+                        setFilters((previous) => ({ ...previous, resources: value }))
+                      }
+                    />
+                    <div className="grid gap-1">
+                      <Label htmlFor="filter-provenance">Provenance origin</Label>
+                      <select
+                        id="filter-provenance"
+                        value={filters.provenance}
+                        onChange={(event) =>
+                          setFilters((previous) => ({
+                            ...previous,
+                            provenance: event.target.value,
+                          }))
+                        }
+                        className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                      >
+                        <option value="any">Any</option>
+                        {provenanceOrigins.map((origin) => (
+                          <option key={origin} value={origin}>
+                            {origin}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <TristateSelect
+                      id="filter-judge"
+                      label="Judge analysis"
+                      value={filters.judge}
+                      onChange={(value) =>
+                        setFilters((previous) => ({ ...previous, judge: value }))
+                      }
+                    />
+                  </div>
+                </details>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setFilters(ANY_FILTERS)}
+                >
+                  Reset filters
+                </Button>
+              </div>
+
+              <div className="grid min-w-0 content-start gap-3">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="release-selected-only"
+                      ref={selectedOnlyRef}
+                      checked={reviewSelected}
+                      onCheckedChange={(checked) => setReviewSelected(checked === true)}
+                    />
+                    <Label htmlFor="release-selected-only">Selected only</Label>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!inventoryReady}
+                    onClick={() => appendSelection(availableRows.map((item) => item.episodeIndex))}
+                  >
+                    Select all
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={liveSelected.length === 0}
+                    onClick={() => setSelected([])}
+                  >
+                    Clear selection
+                  </Button>
+                </div>
+                <p
+                  id="release-selection-status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                  className="text-muted-foreground text-sm"
+                >
+                  {liveSelected.length} of {availableRows.length}
+                  {!inventoryReady ? ' loaded' : ''} selected; {shownRows.length} shown;{' '}
+                  {liveSelected.length - shownSelectedCount} selected outside this view.
+                  {liveSelected.length > 0 && (
+                    <span className="block">
+                      {liveSelected.length - pendingSelected.length} of {liveSelected.length}{' '}
+                      selected episode details loaded.
+                    </span>
+                  )}
+                  {detailFilterActive && pendingDetailsCount > 0 && (
+                    <span className="block">
+                      Details for {pendingDetailsCount} episode(s) are not loaded. Filter results
+                      are incomplete.
+                    </span>
+                  )}
+                  {shownRows.length === 0 &&
+                    inventoryReady &&
+                    !(detailFilterActive && pendingDetailsCount > 0) && (
+                      <span className="block">
+                        {reviewSelected
+                          ? 'No selected episodes match these filters.'
+                          : 'No episodes match these filters.'}
+                      </span>
+                    )}
+                </p>
+
+                {detailFilterActive && pendingDetailsCount > 0 && onRequestDetails && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      onRequestDetails(
+                        availableRows
+                          .filter((item) => item.detailed !== true)
+                          .map((item) => item.episodeIndex),
+                      )
+                    }
+                  >
+                    <RefreshCw className="mr-2 size-4" aria-hidden="true" />
+                    Load remaining episode details
+                  </Button>
+                )}
+
+                {!inventoryReady && (
+                  <div className="grid gap-2">
+                    <p
+                      role={inventoryFailed ? 'alert' : 'status'}
+                      className="text-muted-foreground flex items-center gap-2 text-sm"
+                    >
+                      {!inventoryFailed && (
+                        <LoaderCircle
+                          className="size-4 shrink-0 animate-spin motion-reduce:animate-none"
+                          aria-hidden="true"
+                        />
+                      )}
+                      {inventoryMessage}
+                    </p>
+                    {inventoryFailed && onRetryInventory && (
+                      <Button type="button" variant="outline" size="sm" onClick={onRetryInventory}>
+                        <RefreshCw className="mr-2 size-4" aria-hidden="true" />
+                        Retry inventory
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+                <div className="overflow-hidden rounded-md border">
+                  <div className="bg-muted/40 flex items-center gap-3 border-b px-3 py-3">
+                    <Checkbox
+                      id="release-select-shown"
+                      disabled={shownRows.length === 0}
+                      checked={
+                        shownSelectedCount === 0
+                          ? false
+                          : shownSelectedCount === shownRows.length
+                            ? true
+                            : 'indeterminate'
+                      }
+                      onCheckedChange={(checked) => {
+                        const shownIndices = new Set(shownRows.map((item) => item.episodeIndex))
+                        if (checked === true) appendSelection([...shownIndices])
+                        else
+                          setSelected((previous) =>
+                            previous.filter((index) => !shownIndices.has(index)),
+                          )
+                      }}
+                    />
+                    <Label htmlFor="release-select-shown">Select shown</Label>
+                  </div>
+                  <ol
+                    aria-label="Episodes"
+                    className="divide-border max-h-[420px] min-h-32 divide-y overflow-y-auto"
+                  >
+                    {shownRows.map((item, rowIndex) => {
+                      const order = orderByIndex.get(item.episodeIndex)
+                      const checkboxId = `release-episode-${item.episodeIndex}`
+                      return (
+                        <li
+                          key={item.episodeIndex}
+                          className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 px-3 py-3 ${order !== undefined ? 'bg-accent/50' : ''}`}
+                        >
+                          <Checkbox
+                            id={checkboxId}
+                            ref={(element) => {
+                              if (element) episodeCheckboxes.current.set(item.episodeIndex, element)
+                              else episodeCheckboxes.current.delete(item.episodeIndex)
+                            }}
+                            checked={order !== undefined}
+                            onCheckedChange={() => {
+                              if (reviewSelected && order !== undefined) {
+                                const neighbor = shownRows[rowIndex + 1] ?? shownRows[rowIndex - 1]
+                                const target = neighbor
+                                  ? episodeCheckboxes.current.get(neighbor.episodeIndex)
+                                  : selectedOnlyRef.current
+                                target?.focus()
+                              }
+                              toggleIndex(item.episodeIndex)
+                            }}
+                          />
+                          <div className="grid min-w-0 gap-1">
+                            <Label htmlFor={checkboxId} className="leading-4">
+                              Episode {item.episodeIndex}
+                            </Label>
+                            <span className="text-muted-foreground text-xs [overflow-wrap:anywhere]">
+                              {describeRow(item)}
+                            </span>
+                          </div>
+                          {order !== undefined && (
+                            <span className="text-sm font-medium tabular-nums">#{order}</span>
+                          )}
+                        </li>
+                      )
+                    })}
+                  </ol>
+                  {matchingRows.length > shownRows.length && (
+                    <div className="text-muted-foreground flex flex-wrap items-center gap-3 border-t px-3 py-2 text-sm">
+                      <span>
+                        Showing {shownRows.length} of {matchingRows.length} matching episodes.
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRowLimit((previous) => previous + ROW_PAGE_SIZE)}
+                      >
+                        Show more
+                      </Button>
+                    </div>
+                  )}
+                  {detailError && (
+                    <div className="flex flex-wrap items-center gap-3 border-t px-3 py-2 text-sm">
+                      <span role="alert" className="text-destructive">
+                        {detailError}
+                      </span>
+                      {onRequestDetails && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onRequestDetails(detailTargets)}
+                        >
+                          Retry details
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {liveSelected.length > 0 && (
+                  <div className="text-muted-foreground grid gap-1 text-sm">
+                    <p>{selectedEvidence.provenance}</p>
+                    <p>{selectedEvidence.judge}</p>
+                  </div>
+                )}
+
+                {liveSelected.length > 0 && !readiness.ready && (
+                  <p role="status" className="text-sm text-amber-700 dark:text-amber-400">
+                    {readiness.reason}
+                  </p>
+                )}
+              </div>
+            </div>
+          </section>
+
+          {currentReview && (
+            <section
+              aria-labelledby="release-preview-heading"
+              aria-live="polite"
+              className="grid gap-3 rounded-md border p-3"
+            >
+              <h3 id="release-preview-heading" className="text-sm font-medium">
+                Preview
+              </h3>
+              <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
+                <dt className="text-muted-foreground">Episodes</dt>
+                <dd>{currentReview.request.episodeIndices.length}</dd>
+                <dt className="text-muted-foreground">Reserved bytes</dt>
+                <dd>{formatReservedBytes(currentReview.preview.reservedBytes)}</dd>
+                {destinationKind === 'local' && (
+                  <>
+                    <dt className="text-muted-foreground">Backend available space</dt>
+                    <dd>
+                      {typeof summary?.availableBytes === 'number'
+                        ? formatBytes(summary.availableBytes)
+                        : 'Unknown'}
+                    </dd>
+                  </>
+                )}
+                <dt className="text-muted-foreground">Digest</dt>
+                <dd className="font-mono text-xs break-all">{currentReview.preview.digest}</dd>
+              </dl>
+              <SummaryList title="Blocking" items={blocking} empty="None" />
+              <SummaryList title="Warnings" items={warnings} empty="None" />
+              <SummaryList title="Processing actions" items={actions} empty="None" />
+
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id="release-consent-processing"
+                  checked={currentReview.processingConsent}
+                  onCheckedChange={(checked) =>
+                    updateAcknowledgment('processingConsent', checked === true)
+                  }
+                />
+                <Label htmlFor="release-consent-processing">
+                  Allow video processing when required by this selection.
+                </Label>
+              </div>
+
+              {requiresLocalDiskAck && (
+                <div className="flex items-start gap-2">
+                  <Checkbox
+                    id="release-ack-local-disk"
+                    checked={currentReview.localDiskAcknowledged}
+                    onCheckedChange={(checked) =>
+                      updateAcknowledgment('localDiskAcknowledged', checked === true)
+                    }
+                  />
+                  <Label htmlFor="release-ack-local-disk">
+                    I acknowledge local disk use of{' '}
+                    {formatBytes(currentReview.preview.reservedBytes)}
+                    {destinationKind === null ? ' (destination kind not reported)' : ''}.
+                  </Label>
+                </div>
+              )}
+            </section>
+          )}
+        </fieldset>
+
+        {currentNotice && (
+          <Alert variant="destructive">
+            <AlertDescription>{currentNotice}</AlertDescription>
+          </Alert>
+        )}
+
+        {ambiguous && (
+          <Alert variant="destructive">
+            <AlertDescription>
+              We couldn't confirm whether your release was submitted. It may already have been
+              accepted. Retry submission reuses the same request to avoid duplicates. Closing keeps
+              your pending request. Discarding does not cancel an accepted release; starting over
+              could create a duplicate. Check release jobs before discarding.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <div id="release-action-status" className="shrink-0">
+          {previewing || submitting ? (
+            <PreviewProgress
+              episodeCount={request.episodeIndices.length}
+              submitting={submitting}
+              cancelling={cancelling}
+            />
+          ) : (
+            <p role="status" className="text-muted-foreground text-sm">
+              {describeActionStatus()}
+            </p>
+          )}
+        </div>
+        <DialogFooter
+          className={
+            ambiguous
+              ? 'shrink-0 gap-2'
+              : 'shrink-0 flex-row flex-wrap justify-end gap-2 sm:space-x-0'
+          }
+        >
+          {ambiguous ? (
+            <>
+              <Button variant="outline" onClick={() => handleOpenChange(false)}>
+                Close
+              </Button>
+              <Button variant="outline" onClick={handleDiscardAmbiguous} disabled={submitting}>
+                Discard and start over
+              </Button>
+              <Button ref={retrySubmissionButton} onClick={handleRetry} disabled={submitting}>
+                Retry submission
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => handleOpenChange(false)}
+                disabled={cancelling}
+                aria-describedby={submitting ? 'release-request-notice' : undefined}
+              >
+                {cancelling
+                  ? 'Stopping...'
+                  : previewing
+                    ? 'Stop preview'
+                    : submitting
+                      ? 'Stop waiting'
+                      : 'Cancel'}
+              </Button>
+              <Button
+                variant={currentReview ? 'outline' : 'default'}
+                aria-label={previewing ? 'Previewing...' : 'Preview release'}
+                aria-describedby="release-action-status"
+                onClick={() => void handlePreview()}
+                disabled={!canPreview}
+              >
+                {previewing && (
+                  <LoaderCircle
+                    className="mr-2 size-4 shrink-0 animate-spin motion-reduce:animate-none"
+                    aria-hidden="true"
+                  />
+                )}
+                <span className="sm:hidden">{previewing ? 'Previewing...' : 'Preview'}</span>
+                <span className="hidden sm:inline">
+                  {previewing ? 'Previewing...' : 'Preview release'}
+                </span>
+              </Button>
+              <Button
+                variant={currentReview ? 'default' : 'outline'}
+                aria-label={submitting ? 'Submitting...' : 'Submit release'}
+                aria-describedby="release-action-status"
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+              >
+                <span className="sm:hidden">{submitting ? 'Submitting...' : 'Submit'}</span>
+                <span className="hidden sm:inline">
+                  {submitting ? 'Submitting...' : 'Submit release'}
+                </span>
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}

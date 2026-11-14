@@ -562,6 +562,10 @@ fi
 # is normalized to commas with no spaces.
 backend_extras=$(printf '%s' "$DATAVIEWER_BACKEND_EXTRAS" | tr -s ', ' ',,' | sed -e 's/^,//' -e 's/,$//')
 judge_extras=$(printf '%s' "$DATAVIEWER_JUDGE_EXTRAS" | tr -s ', ' ',,' | sed -e 's/^,//' -e 's/,$//')
+azureml_enabled="${CURATION_RELEASE_AZUREML_ENABLED:-false}"
+if [[ "${azureml_enabled,,}" == "true" && ",$backend_extras," != *",azureml,"* ]]; then
+  backend_extras="${backend_extras:+$backend_extras,}azureml"
+fi
 
 buildkit_images=()
 if [[ "$skip_build" == "false" ]]; then
@@ -819,6 +823,10 @@ if [[ "$skip_build" == "false" ]]; then
       "$backend_context/data-management/curation/physical_ai_curation/"
     cp "$REPO_ROOT/data-management/curation/physical_ai_curation/adapters/"*.py \
       "$backend_context/data-management/curation/physical_ai_curation/adapters/"
+    tar -C "$REPO_ROOT/data-management/curation/physical_ai_curation" \
+      --exclude='__pycache__' --exclude='*.pyc' --exclude='.env*' \
+      -cf - release \
+      | tar -C "$backend_context/data-management/curation/physical_ai_curation" -xf -
     cp "$REPO_ROOT/data-management/dataset-io/pyproject.toml" "$backend_context/data-management/dataset-io/"
     cp "$REPO_ROOT/data-management/dataset-io/physical_ai_dataset_io/"*.py \
       "$backend_context/data-management/dataset-io/physical_ai_dataset_io/"

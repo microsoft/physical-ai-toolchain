@@ -12,6 +12,7 @@ Repository = "https://github.com/microsoft/physical-ai-toolchain"
 [project.optional-dependencies]
 api = ["fastapi==0.159.1", "uvicorn[standard]==0.54.0"]
 parquet = ["physical-ai-dataset-io[parquet]==0.1.0"]
+azureml = ["azure-ai-ml==1.35.2"]
 
 [tool.uv.sources]
 physical-ai-dataset-io = { workspace = true }

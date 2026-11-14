@@ -42,6 +42,7 @@ test('P06 job controls retain progress through refresh failure and keyboard canc
     })
   })
   await page.goto('http://127.0.0.1:4173/?dataset=integration-fixture')
+  await expect(page.getByRole('heading', { name: 'Episode 0' })).toBeVisible()
   const disclosure = page.getByRole('button', { name: /Dataset workspace/ })
   await disclosure.click()
   const workspace = page.getByRole('region', { name: 'Dataset workspace', exact: true })

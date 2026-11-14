@@ -13,12 +13,16 @@ Supports:
 
 from __future__ import annotations
 
+import io
 import json
 import logging
-from collections.abc import Callable, Iterator
+import math
+from bisect import bisect_left
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, TextIO
 
 _LOGGER = logging.getLogger("evaluation.vlm_judge")
 
@@ -46,11 +50,57 @@ class EpisodeRecord:
         return float(self.length) / float(self.fps)
 
 
+class LeRobotFiles(Protocol):
+    """Read-only, dataset-relative access to one LeRobot dataset.
+
+    Relative paths use forward slashes. ``path`` is the identity reported in
+    ``EpisodeRecord.video_paths``: a real path for local directories, or a
+    relative path for release stores that callers resolve through the same store.
+    """
+
+    name: str
+
+    def read_bytes(self, relative: str) -> bytes: ...
+
+    def open_text(self, relative: str) -> AbstractContextManager[TextIO]: ...
+
+    def exists(self, relative: str) -> bool: ...
+
+    def find(self, directory: str, pattern: str) -> list[str]:
+        """Return sorted relative paths under ``directory`` whose basename matches ``pattern``."""
+
+    def path(self, relative: str) -> Path: ...
+
+
+class LocalLeRobotFiles:
+    """Filesystem view of one dataset directory, used by trusted CLI callers."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.name = root.name
+
+    def read_bytes(self, relative: str) -> bytes:
+        return (self.root / relative).read_bytes()
+
+    def open_text(self, relative: str) -> AbstractContextManager[TextIO]:
+        return (self.root / relative).open(encoding="utf-8")
+
+    def exists(self, relative: str) -> bool:
+        return (self.root / relative).exists()
+
+    def find(self, directory: str, pattern: str) -> list[str]:
+        base = self.root / directory
+        return sorted(item.relative_to(self.root).as_posix() for item in base.rglob(pattern))
+
+    def path(self, relative: str) -> Path:
+        return self.root / relative
+
+
 @dataclass(frozen=True, slots=True)
 class DatasetSpec:
     """Top-level dataset metadata loaded from ``meta/info.json``."""
 
-    root: Path
+    files: LeRobotFiles
     codebase_version: str
     fps: float
     total_episodes: int
@@ -61,18 +111,55 @@ class DatasetSpec:
     per_view_video_paths: dict[str, str]
 
 
-def load_dataset_spec(root: Path) -> DatasetSpec:
-    info_path = root / "meta" / "info.json"
-    info: dict[str, Any] = json.loads(info_path.read_text())
+def remap_persistent_language_rows(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    source_to_output: Mapping[int, int],
+    source_timestamps: Sequence[float],
+    output_timestamps: Sequence[float],
+    timestamp_tolerance_s: float = 1e-4,
+) -> list[dict[str, Any]]:
+    """Retarget persistent language changes to their first retained output frame.
+
+    Removed starts advance to the next retained source frame. Changes of one
+    style, role and camera that collapse together retain the latest source time.
+    """
+    kept = sorted(source_to_output)
+    placed = {}
+    for row in rows:
+        source_time = float(row["timestamp"])
+        if not math.isfinite(source_time):
+            raise ValueError("persistent language timestamps must be finite")
+        frame = bisect_left(source_timestamps, source_time - timestamp_tolerance_s)
+        index = bisect_left(kept, frame)
+        if index == len(kept):
+            continue
+        key = (row.get("style"), row.get("role"), row.get("camera"), source_to_output[kept[index]])
+        current = placed.get(key)
+        if current is None or source_time > current[0]:
+            placed[key] = (source_time, [row])
+        elif source_time == current[0]:
+            current[1].append(row)
+    planned = [{**row, "timestamp": output_timestamps[key[-1]]} for key, (_, group) in placed.items() for row in group]
+    return sorted(planned, key=lambda row: (float(row["timestamp"]), row.get("style") or "", row.get("role") or ""))
+
+
+def _as_files(root: Path | LeRobotFiles) -> LeRobotFiles:
+    return LocalLeRobotFiles(root) if isinstance(root, Path) else root
+
+
+def load_dataset_spec(root: Path | LeRobotFiles) -> DatasetSpec:
+    files = _as_files(root)
+    info: dict[str, Any] = json.loads(files.read_bytes("meta/info.json"))
     features: dict[str, Any] = info.get("features", {})
     video_keys = tuple(k for k, v in features.items() if v.get("dtype") == "video")
     if not video_keys:
-        raise ValueError(f"No video features found in {info_path}")
+        raise ValueError("No video features found in meta/info.json")
     per_view_paths = {
         k: str(features[k]["videos_path"]) for k in video_keys if isinstance(features[k].get("videos_path"), str)
     }
     return DatasetSpec(
-        root=root,
+        files=files,
         codebase_version=str(info.get("codebase_version", "v2.1")),
         fps=float(info.get("fps", 30.0)),
         total_episodes=int(info["total_episodes"]),
@@ -85,7 +172,7 @@ def load_dataset_spec(root: Path) -> DatasetSpec:
 
 
 def iter_episodes(
-    root: Path,
+    root: Path | LeRobotFiles,
     *,
     views: tuple[str, ...] | None = None,
     limit: int | None = None,
@@ -107,7 +194,7 @@ def iter_episodes(
         # Some v3 datasets store metadata as parquet (chunk-packed videos), while
         # others use jsonl with one-mp4-per-episode layout. Detect by metadata
         # file presence.
-        parquet_meta = sorted((spec.root / "meta" / "episodes").rglob("file-*.parquet"))
+        parquet_meta = spec.files.find("meta/episodes", "file-*.parquet")
         records = (
             _iter_v3(spec, selected_views)
             if parquet_meta
@@ -147,11 +234,9 @@ def _resolve_views(spec: DatasetSpec, views: tuple[str, ...] | None) -> tuple[st
 
 
 def _iter_v21(spec: DatasetSpec, views: tuple[str, ...]) -> Iterator[EpisodeRecord]:
-    episodes_path = spec.root / "meta" / "episodes.jsonl"
-    tasks_path = spec.root / "meta" / "tasks.jsonl"
-    tasks_by_index = _load_tasks_jsonl(tasks_path)
+    tasks_by_index = _load_tasks_jsonl(spec.files, "meta/tasks.jsonl")
 
-    with episodes_path.open() as fh:
+    with spec.files.open_text("meta/episodes.jsonl") as fh:
         for line in fh:
             payload = json.loads(line)
             ep_idx = int(payload["episode_index"])
@@ -159,16 +244,17 @@ def _iter_v21(spec: DatasetSpec, views: tuple[str, ...]) -> Iterator[EpisodeReco
             length = int(payload.get("length", 0))
             chunk = ep_idx // spec.chunks_size
             video_paths = {
-                v: spec.root
-                / spec.video_path.format(
-                    episode_chunk=chunk,
-                    video_key=v,
-                    episode_index=ep_idx,
+                v: spec.files.path(
+                    spec.video_path.format(
+                        episode_chunk=chunk,
+                        video_key=v,
+                        episode_index=ep_idx,
+                    )
                 )
                 for v in views
             }
             yield EpisodeRecord(
-                episode_id=f"{spec.root.name}/episode_{ep_idx:06d}",
+                episode_id=f"{spec.files.name}/episode_{ep_idx:06d}",
                 episode_index=ep_idx,
                 instruction=instruction,
                 fps=spec.fps,
@@ -179,11 +265,11 @@ def _iter_v21(spec: DatasetSpec, views: tuple[str, ...]) -> Iterator[EpisodeReco
             )
 
 
-def _load_tasks_jsonl(path: Path) -> dict[int, str]:
+def _load_tasks_jsonl(files: LeRobotFiles, relative: str) -> dict[int, str]:
     tasks: dict[int, str] = {}
-    if not path.exists():
+    if not files.exists(relative):
         return tasks
-    with path.open() as fh:
+    with io.StringIO(files.read_bytes(relative).decode()) as fh:
         for line in fh:
             entry = json.loads(line)
             if "task_index" not in entry or "task" not in entry:
@@ -211,15 +297,13 @@ def _resolve_instruction_v21(
 def _iter_v3(spec: DatasetSpec, views: tuple[str, ...]) -> Iterator[EpisodeRecord]:
     import pyarrow.parquet as pq
 
-    tasks_by_index = _load_tasks_parquet(spec.root / "meta" / "tasks.parquet")
-    episode_files = sorted((spec.root / "meta" / "episodes").rglob("file-*.parquet"))
+    tasks_by_index = _load_tasks_parquet(spec.files, "meta/tasks.parquet")
+    episode_files = spec.files.find("meta/episodes", "file-*.parquet")
     if not episode_files:
-        raise FileNotFoundError(
-            f"No v3 episode metadata found under {spec.root / 'meta' / 'episodes'}",
-        )
+        raise FileNotFoundError("No v3 episode metadata found under meta/episodes")
 
     for ep_file in episode_files:
-        df = pq.read_table(ep_file).to_pandas()
+        df = pq.read_table(io.BytesIO(spec.files.read_bytes(ep_file))).to_pandas()
         for row in df.to_dict(orient="records"):
             ep_idx = int(row["episode_index"])
             length = int(row["length"])
@@ -234,13 +318,15 @@ def _iter_v3(spec: DatasetSpec, views: tuple[str, ...]) -> Iterator[EpisodeRecor
                 from_ts = float(row[f"videos/{view}/from_timestamp"])
                 to_ts = float(row[f"videos/{view}/to_timestamp"])
                 video_windows[view] = (from_ts, to_ts)
-                video_paths[view] = spec.root / spec.video_path.format(
-                    chunk_index=v_chunk,
-                    file_index=v_file,
-                    video_key=view,
+                video_paths[view] = spec.files.path(
+                    spec.video_path.format(
+                        chunk_index=v_chunk,
+                        file_index=v_file,
+                        video_key=view,
+                    )
                 )
             yield EpisodeRecord(
-                episode_id=f"{spec.root.name}/episode_{ep_idx:06d}",
+                episode_id=f"{spec.files.name}/episode_{ep_idx:06d}",
                 episode_index=ep_idx,
                 instruction=instruction,
                 fps=spec.fps,
@@ -264,20 +350,16 @@ def _iter_v3_jsonl(
     indices: list[int] | None = None,
     video_validator: Callable[[Path], Path] | None = None,
 ) -> Iterator[EpisodeRecord]:
-    ep_meta_dir = spec.root / "meta" / "episodes"
-    ep_files = sorted(ep_meta_dir.rglob("episode_*.jsonl"))
+    ep_files = spec.files.find("meta/episodes", "episode_*.jsonl")
+    if not ep_files and spec.files.exists("meta/episodes.jsonl"):
+        ep_files = ["meta/episodes.jsonl"]
     if not ep_files:
-        flat = spec.root / "meta" / "episodes.jsonl"
-        ep_files = [flat] if flat.exists() else []
-    if not ep_files:
-        raise FileNotFoundError(
-            f"No jsonl v3 episode metadata found under {ep_meta_dir}",
-        )
+        raise FileNotFoundError("No jsonl v3 episode metadata found under meta/episodes")
 
-    tasks_by_index = _load_tasks_jsonl(spec.root / "meta" / "tasks.jsonl")
+    tasks_by_index = _load_tasks_jsonl(spec.files, "meta/tasks.jsonl")
 
     for ep_file in ep_files:
-        with ep_file.open() as fh:
+        with spec.files.open_text(ep_file) as fh:
             for line in fh:
                 line = line.strip()
                 if not line:
@@ -296,10 +378,11 @@ def _iter_v3_jsonl(
                         raise KeyError(
                             f"No videos_path template for view {view!r} in info.json features",
                         )
-                    candidate = spec.root / template.format(episode_index=ep_idx)
+                    relative = template.format(episode_index=ep_idx)
+                    candidate = spec.files.path(relative)
                     if video_validator is not None:
                         candidate = video_validator(candidate)
-                    elif not candidate.exists():
+                    elif not spec.files.exists(relative):
                         missing_views.append(view)
                     video_paths[view] = candidate
                 if missing_views:
@@ -310,7 +393,7 @@ def _iter_v3_jsonl(
                     )
                     continue
                 yield EpisodeRecord(
-                    episode_id=f"{spec.root.name}/episode_{ep_idx:06d}",
+                    episode_id=f"{spec.files.name}/episode_{ep_idx:06d}",
                     episode_index=ep_idx,
                     instruction=instruction,
                     fps=spec.fps,
@@ -351,17 +434,17 @@ def _resolve_instruction_v3(
     return ""
 
 
-def _load_tasks_parquet(path: Path) -> dict[int, str]:
-    if not path.exists():
+def _load_tasks_parquet(files: LeRobotFiles, relative: str) -> dict[int, str]:
+    if not files.exists(relative):
         return {}
     import pyarrow.parquet as pq
 
-    df = pq.read_table(path).to_pandas()
+    df = pq.read_table(io.BytesIO(files.read_bytes(relative))).to_pandas()
     # LeRobot v3 stores the task text as the (named) DataFrame index alongside a
     # "task_index" column, so ``to_dict(records)`` drops the text and a direct
     # ``row["task"]`` lookup raises KeyError. Restore index columns first.
     if "task" not in df.columns or "task_index" not in df.columns:
-        df = df.reset_index()
+        df = df.reset_index(drop=df.index.name is None and "task_index" in df.columns)
     text_col = "task" if "task" in df.columns else None
     if text_col is None:
         # Fall back to the first non-index text column (e.g. "task_description").

@@ -2356,7 +2356,7 @@ class TestAccessibilityRuntimeConfigs:
         self, runtime_configs: dict[str, dict[str, Any]]
     ) -> None:
         # Arrange
-        expected_viewer = {f"V{number:02d}" for number in range(1, 20)}
+        expected_viewer = {f"V{number:02d}" for number in range(1, 22)}
         expected_docs = {f"F{number:02d}" for number in range(1, 7)}
 
         # Act

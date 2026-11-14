@@ -185,6 +185,7 @@ test('skill packages: CLI reports invalid repositories', t => {
 });
 
 test('product workspace: judge tests and coverage remain required in the backend owner', () => {
+  assert.equal(graph['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer']['timeout-minutes'], 40);
   const steps = graph['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer'].steps;
   const install = steps.find(step => step.id === 'install').run;
   assert.match(install, /--project \.\.\/\.\.\/\.\. --all-packages --frozen/);
@@ -193,7 +194,9 @@ test('product workspace: judge tests and coverage remain required in the backend
   }
   assert.equal(install.includes('--all-groups'), false);
   assert.equal(install.includes('azureml-tracking'), false);
-  const judge = steps.find(step => step.id === 'judge_unit').run;
+  const judgeStep = steps.find(step => step.id === 'judge_unit');
+  assert.equal(judgeStep.env.COVERAGE_FILE, '${{ github.workspace }}/logs/coverage-vlm-judge/.coverage');
+  const judge = judgeStep.run;
   assert.match(judge, /--no-sync --frozen pytest/);
   assert.ok(judge.includes('evaluation/vlm_judge/pyproject.toml'));
   assert.ok(judge.includes('evaluation/tests/vlm_judge'));
@@ -218,6 +221,7 @@ test('product workspace: judge tests and coverage remain required in the backend
   assert.match(generate.if, /!cancelled\(\)/);
   assert.match(generate.if, /steps\.install\.outcome == 'success'/);
   assert.ok(generate.run.includes('coverage xml'));
+  assert.ok(generate.run.includes('! -s ../../../logs/coverage-dataviewer/.coverage'));
   assert.ok(generate.run.includes('backend_status=$?'));
   assert.ok(generate.run.includes('judge_status=$?'));
   assert.ok(generate.run.includes('rm -f'));
@@ -262,7 +266,7 @@ test('backend coverage: invalid backend XML does not reject valid judge XML', t 
   const cwd = join(workspace, 'data-management/viewer/backend');
 
   mkdirSync(cwd, { recursive: true });
-  writeFixture(cwd, '.coverage', 'fixture');
+  writeFixture(workspace, 'logs/coverage-dataviewer/.coverage', 'fixture');
   writeFixture(workspace, 'logs/coverage-dataviewer.xml', '<coverage');
   writeFixture(
     workspace,
@@ -295,6 +299,8 @@ test('backend coverage: invalid backend XML does not reject valid judge XML', t 
   assert.deepEqual(outputs, {
     backend_valid: 'false',
     judge_backend_valid: 'true',
+    curation_valid: 'false',
+    dataset_io_valid: 'false',
   });
 
   assert.match(result.stdout, /::warning::Coverage report unavailable or invalid/);
@@ -307,7 +313,7 @@ test('backend coverage: judge report generation runs after backend generation fa
 
   mkdirSync(cwd, { recursive: true });
   mkdirSync(bin, { recursive: true });
-  writeFixture(cwd, '.coverage', 'fixture');
+  writeFixture(workspace, 'logs/coverage-dataviewer/.coverage', 'fixture');
 
   const uv = join(bin, 'uv');
   const log = join(workspace, 'uv.log');
@@ -330,7 +336,7 @@ case "$*" in
   *backend/src*)
     exit 7
     ;;
-  *evaluation/vlm_judge*)
+  *evaluation/vlm_judge*|*physical_ai_curation*|*physical_ai_dataset_io*)
     mkdir -p "$(dirname "$output")"
     printf '<coverage lines-valid="1" line-rate="1"/>\\n' > "$output"
     exit 0
@@ -362,9 +368,11 @@ exit 99
 
   const calls = readFileSync(log, 'utf8').trim().split('\n');
 
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 4);
   assert.match(calls[0], /backend\/src/);
   assert.match(calls[1], /evaluation\/vlm_judge/);
+  assert.match(calls[2], /physical_ai_curation/);
+  assert.match(calls[3], /physical_ai_dataset_io/);
 
   assert.equal(
     existsSync(join(workspace, 'logs/coverage-dataviewer.xml')),
@@ -376,11 +384,84 @@ exit 99
     true
   );
 
+  for (const report of ['coverage-curation.xml', 'coverage-dataset-io.xml']) {
+    assert.equal(existsSync(join(workspace, 'logs', report)), true);
+  }
+
   assert.match(
     result.stdout,
     /One or more scoped coverage reports could not be generated/
   );
 });
+
+test('product workspace: curation and dataset-I/O coverage is collected and uploaded separately', () => {
+  const steps = graph['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer'].steps;
+  const codecov = parseYaml(readFileSync(join(root, 'codecov.yml'), 'utf8'));
+  for (const [directory, packageName] of [
+    ['curation', 'physical_ai_curation'],
+    ['dataset-io', 'physical_ai_dataset_io'],
+  ]) {
+    const report = `logs/coverage-${directory}.xml`;
+    const flag = `pytest-${directory}`;
+    const source = `data-management/${directory}/${packageName}/`;
+    assert.ok(steps.find(step => step.id === 'test').run.includes(`--cov=../../${directory}/${packageName}`));
+    const generation = steps.find(step => step.id === 'coverage_generate').run;
+    assert.ok(generation.includes(`--include='*/${packageName}/*' --fail-under=0`));
+    assert.ok(generation.includes(`-o ../../../${report}`));
+    assert.ok(steps.find(step => step.id === 'coverage_report').run.includes(`test -s ../../../${report}`));
+    assert.ok(steps.find(step => step.id === 'coverage_upload').with.path.split('\n').includes(report));
+    const upload = steps.find(step => step.with?.flags === flag);
+    assert.equal(upload.with.files, report);
+    assert.equal(upload.with.disable_search, true);
+    assert.equal(upload.with.use_oidc, true);
+    const gateId = `${directory.replaceAll('-', '_')}_coverage_gate`;
+    const gate = steps.find(step => step.id === gateId);
+    assert.ok(gate, `Missing required gate: ${directory}`);
+    assert.ok(gate.run.includes('--fail-under=90'));
+    assert.ok(gate.run.includes(`${directory.replaceAll('-', '_')}_valid`));
+    const owner = contract.execution['dataviewer-backend-pytests'].jobs['pytest-dataviewer'];
+    assert.ok(owner['required-steps'].includes(gateId));
+    assert.ok(owner.reports.some(candidate => candidate.path === report));
+    assert.deepEqual(codecov.flags[flag].paths, [source]);
+    const component = codecov.component_management.individual_components
+      .find(candidate => candidate.component_id === `data-management-${directory}`);
+    assert.deepEqual(component.paths, [`${source}**`]);
+  }
+});
+
+for (const [label, report, curationExpected, datasetIoExpected] of [
+  ['absent', null, 'false', 'false'],
+  ['malformed', '<coverage', 'false', 'false'],
+  ['below 90% combined coverage', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="79" line-rate="1" branch-rate="0.79"/>', 'false', 'false'],
+  ['exact 90% combined coverage', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="80" line-rate="1" branch-rate="0.8"/>', 'true', 'true'],
+  ['above 90% combined coverage', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="81" line-rate="1" branch-rate="0.81"/>', 'true', 'true'],
+  ['complete combined coverage', '<coverage lines-valid="100" lines-covered="100" branches-valid="100" branches-covered="100" line-rate="1" branch-rate="1"/>', 'true', 'true'],
+]) {
+  test(`release coverage: ${label} reports produce the correct required-gate input`, t => {
+    const workspace = temporaryDirectory(t);
+    const cwd = join(workspace, 'data-management/viewer/backend');
+    mkdirSync(cwd, { recursive: true });
+    if (report !== null) {
+      for (const library of ['curation', 'dataset-io']) {
+        writeFixture(workspace, `logs/coverage-${library}.xml`, report);
+      }
+    }
+    const output = join(workspace, 'outputs');
+    const steps = graph['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer'].steps;
+    const validation = steps.find(step => step.id === 'coverage_validate');
+    const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', validation.run], {
+      cwd,
+      encoding: 'utf8',
+      timeout: 10_000,
+      env: { ...process.env, GITHUB_OUTPUT: output },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const outputs = Object.fromEntries(readFileSync(output, 'utf8').trim().split('\n').map(line => line.split('=')));
+    assert.equal(outputs.curation_valid, curationExpected);
+    assert.equal(outputs.dataset_io_valid, datasetIoExpected);
+  });
+}
 
 test('product workspace: independent evaluation keeps its own gate without judge coverage', () => {
   const steps = graph['.github/workflows/evaluation-pytests.yml'].jobs.pytest.steps;
@@ -767,10 +848,10 @@ test('range resolver: non-ancestor base selects full validation', t => {
   }), fullValidation);
 });
 
-test('range resolver: non-diffable pair selects full validation', t => {
+test('range resolver: pair without a computable diff selects full validation', t => {
   const repo = mergeFixture(t);
   const git = (args, cwd) => args[0] === 'diff'
-    ? { status: 1, stdout: '', stderr: 'not diffable' }
+    ? { status: 1, stdout: '', stderr: 'cannot compute diff' }
     : spawnSync('git', args, { cwd, encoding: 'utf8' });
   assert.deepEqual(resolveWorkflowChangeRange({
     eventName: 'merge_group', baseSha: repo.base, headSha: repo.head, cwd: repo.cwd, git,
@@ -1645,6 +1726,13 @@ for (const [name, mutate, diagnostic] of graphMutations) {
     assert.ok(errors.some(error => error.includes(diagnostic)), `Expected ${diagnostic}; received ${JSON.stringify(errors)}`);
   });
 }
+
+test('execution graph: backend suite timeout remains bounded', () => {
+  const candidate = structuredClone(graph);
+  candidate['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer']['timeout-minutes'] = 41;
+  const errors = validateWorkflows(candidate, contract);
+  assert.ok(errors.some(error => error.includes('dataviewer-backend-pytests:pytest-dataviewer: timeout must be within the execution budget')));
+});
 
 const executionMutations = [
   ['missing reusable output', ({ workflow }) => { delete workflow.on.workflow_call.outputs['work-status']; }, 'broken reusable output work-status'],
