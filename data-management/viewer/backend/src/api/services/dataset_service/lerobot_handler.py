@@ -392,7 +392,7 @@ class LeRobotFormatHandler:
                     logger.warning("No video stream found in %s", video_path)
                     return None
 
-                if stream.time_base is not None:
+                if stream.time_base:
                     timestamp = int(seek_time_s / float(stream.time_base))
                     container.seek(timestamp, stream=stream, any_frame=False, backward=True)
 

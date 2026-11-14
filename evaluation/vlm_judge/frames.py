@@ -42,7 +42,7 @@ def extract_frames(
 
     try:
         return _extract_frames(window, n_frames=n_frames, target_size=target_size)
-    except (av.FFmpegError, OSError, ValueError, RuntimeError, IndexError, OverflowError) as err:
+    except (av.FFmpegError, OSError, ValueError, RuntimeError, IndexError, OverflowError, ZeroDivisionError) as err:
         raise MediaInputError("Invalid media input") from err
 
 
@@ -127,7 +127,7 @@ def encode_jpeg_b64(images: Sequence[Image], *, quality: int = 80) -> list[str]:
 def _stream_duration_s(container: object, stream: object) -> float:
     duration = getattr(stream, "duration", None)
     time_base = getattr(stream, "time_base", None)
-    if duration is not None and time_base is not None:
+    if duration is not None and time_base:
         return float(duration * time_base)
     container_duration = getattr(container, "duration", None)
     if container_duration is not None:
@@ -146,12 +146,14 @@ def _evenly_spaced(from_s: float, to_s: float, n: int) -> list[float]:
 
 
 def _seek_and_decode(container, stream, timestamp_s: float):
-    pts = int(timestamp_s / float(stream.time_base))
-    container.seek(pts, any_frame=False, backward=True, stream=stream)
+    time_base = getattr(stream, "time_base", None)
+    if time_base:
+        pts = int(timestamp_s / float(time_base))
+        container.seek(pts, any_frame=False, backward=True, stream=stream)
     target = timestamp_s
     last_frame = None
     for frame in container.decode(stream):
-        ts = float(frame.pts * stream.time_base) if frame.pts is not None else 0.0
+        ts = float(frame.pts * time_base) if (frame.pts is not None and time_base) else 0.0
         last_frame = frame
         if ts >= target:
             break
