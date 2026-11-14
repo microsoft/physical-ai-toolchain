@@ -3,6 +3,17 @@ set -Eeuo pipefail
 
 # shellcheck disable=SC2154  # exit_code is assigned within the trap body below
 trap 'exit_code=$?; echo "ERROR: command failed (line ${LINENO}): ${BASH_COMMAND} (exit ${exit_code})" >&2' ERR
+VLA_ENTRY_START_EPOCH="$(date +%s)"
+export VLA_ENTRY_START_EPOCH
+
+# Python helpers ship next to this script: the repository copy on Azure ML, /tmp on OSMO.
+GROOT_HELPERS_DIR="${GROOT_HELPERS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+for helper in verify_prebuilt_runtime.py patch_n17_trainer.py preflight_check.py; do
+  [ -s "${GROOT_HELPERS_DIR}/${helper}" ] || {
+    echo "ERROR: missing GR00T helper ${GROOT_HELPERS_DIR}/${helper}" >&2
+    exit 1
+  }
+done
 
 retry_cmd() {
   local max_attempts="$1"
@@ -30,6 +41,15 @@ latest_checkpoint() {
     | cut -d' ' -f2- || true
 }
 
+# Install into the interpreter that runs the job; uv-created GR00T venvs ship without pip.
+python_install() {
+  if [ -n "${VIRTUAL_ENV:-}" ] && command -v uv >/dev/null 2>&1; then
+    uv pip install --python "${VIRTUAL_ENV}/bin/python" "$@"
+  else
+    pip install "$@"
+  fi
+}
+
 if [ -d "${DATASET_PATH}" ] && [ -n "$(ls -A "${DATASET_PATH}" 2>/dev/null)" ]; then
   echo "--- using existing local dataset at ${DATASET_PATH} ---"
   ls -lh "${DATASET_PATH}/" | head
@@ -39,7 +59,7 @@ elif [ -n "${BLOB_URL:-}" ]; then
   export DEBIAN_FRONTEND=noninteractive
   retry_cmd 3 apt-get update -qq
   retry_cmd 3 apt-get install -y --no-install-recommends curl >/dev/null
-  pip install --quiet azure-storage-blob==12.27.1 azure-identity==1.25.3
+  python_install --quiet azure-storage-blob==12.27.1 azure-identity==1.25.3
   python3 /tmp/download_blob.py
   echo "--- dataset download complete ---"
   ls -lh "${DATASET_PATH}/" | head
@@ -79,8 +99,16 @@ echo "   base model:  ${BASE_MODEL}"
 echo "   data config: ${DATA_CONFIG}"
 echo "   batch_size:  ${BATCH_SIZE}"
 echo "   max_steps:   ${MAX_STEPS}"
+echo "   num_gpus:    ${NUM_GPUS:-1}"
 echo "========================================================"
 BASE_MODEL_SOURCE="${BASE_MODEL}"
+export BASE_MODEL_SOURCE
+
+NUM_GPUS="${NUM_GPUS:-1}"
+if ! printf '%s' "${NUM_GPUS}" | grep -qE '^[1-9][0-9]*$'; then
+  echo "ERROR: NUM_GPUS must be a positive integer (got '${NUM_GPUS}')" >&2
+  exit 1
+fi
 
 nvidia-smi
 df -h /dev/shm /outputs || true
@@ -88,56 +116,71 @@ echo "--- dataset ---"; ls -1 "${DATASET_PATH}" | head
 echo "--- dataset/meta ---"; ls -1 "${DATASET_PATH}/meta" | head
 
 export DEBIAN_FRONTEND=noninteractive
-retry_cmd 3 apt-get update -qq
-retry_cmd 3 apt-get install -y --no-install-recommends \
-  git git-lfs build-essential cmake ffmpeg \
-  libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev \
-  libvulkan-dev ca-certificates wget curl >/dev/null
-
-cd /workspace || cd /tmp
-if [ ! -d Isaac-GR00T ]; then
-  echo "--- cloning Isaac-GR00T ---"
-  retry_cmd 3 git clone https://github.com/NVIDIA/Isaac-GR00T.git
-fi
-cd Isaac-GR00T
-git lfs install --system || true
-
-# Pin Isaac-GR00T to an immutable commit: git tags/branches are mutable, so a
-# non-SHA ref could silently check out new upstream code between runs.
 if ! printf '%s' "${ISAAC_GROOT_REF}" | grep -qzE '^[0-9a-fA-F]{40}$'; then
   echo "ERROR: isaac_groot_ref '${ISAAC_GROOT_REF}' must be an immutable 40-hex commit SHA" >&2
   exit 1
 fi
 
-echo "--- checking out ref: ${ISAAC_GROOT_REF} ---"
-if ! git checkout "${ISAAC_GROOT_REF}"; then
-  echo "WARN: initial checkout failed; fetching ref then retrying" >&2
-  git fetch origin "${ISAAC_GROOT_REF}" --depth 1 || true
-  git checkout "${ISAAC_GROOT_REF}"
-fi
-RESOLVED_GROOT_REF="$(git rev-parse HEAD)"
-export RESOLVED_GROOT_REF
+GROOT_PREBUILT_ROOT="${GROOT_PREBUILT_ROOT:-/opt/Isaac-GR00T}"
+GROOT_IMAGE_METADATA="/opt/groot-n17-image.json"
+GROOT_PREBUILT=false
+if [ -f "${GROOT_IMAGE_METADATA}" ] && [ -d "${GROOT_PREBUILT_ROOT}/.git" ]; then
+  cd "${GROOT_PREBUILT_ROOT}"
+  python3 "${GROOT_HELPERS_DIR}/verify_prebuilt_runtime.py" \
+    --metadata "${GROOT_IMAGE_METADATA}" --groot-ref "${ISAAC_GROOT_REF}"
+  [ "$(git rev-parse HEAD)" = "${ISAAC_GROOT_REF}" ] || {
+    echo "ERROR: prebuilt Isaac-GR00T checkout does not match ${ISAAC_GROOT_REF}" >&2
+    exit 1
+  }
+  export PATH="${GROOT_PREBUILT_ROOT}/.venv/bin:${PATH}"
+  export VIRTUAL_ENV="${GROOT_PREBUILT_ROOT}/.venv"
+  GROOT_PREBUILT=true
+  echo "[setup] using digest-pinned prebuilt GR00T dependency image"
+else
+  retry_cmd 3 apt-get update -qq
+  retry_cmd 3 apt-get install -y --no-install-recommends \
+    git git-lfs build-essential cmake ffmpeg python3.10-dev \
+    libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev \
+    libvulkan-dev ca-certificates wget curl >/dev/null
 
-# GR00T N1.7+ pins python==3.10.*; the default pytorch image ships
-# python 3.11. Create a conda env when the active interpreter is
-# not 3.10 so the editable install can resolve.
-if [ -f "gr00t/experiment/launch_finetune.py" ]; then
-  CURRENT_PY="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-  if [ "${CURRENT_PY}" != "3.10" ] && command -v conda >/dev/null 2>&1; then
-    echo "[setup] GR00T N1.7 requires Python 3.10 (active: ${CURRENT_PY}); creating conda env"
-    conda create -y -n gr00t-py310 python=3.10
-    # shellcheck disable=SC1091
-    source /opt/conda/etc/profile.d/conda.sh
-    conda activate gr00t-py310
-    pip install --upgrade pip setuptools wheel
-    pip install azure-identity==1.25.3 azure-storage-blob==12.27.1
+  cd /workspace || cd /tmp
+  if [ ! -d Isaac-GR00T ]; then
+    echo "--- cloning Isaac-GR00T ---"
+    retry_cmd 3 git clone https://github.com/NVIDIA/Isaac-GR00T.git
+  fi
+  cd Isaac-GR00T
+  git lfs install --system || true
+
+  echo "--- checking out ref: ${ISAAC_GROOT_REF} ---"
+  if ! git checkout "${ISAAC_GROOT_REF}"; then
+    echo "WARN: initial checkout failed; fetching ref then retrying" >&2
+    git fetch origin "${ISAAC_GROOT_REF}" --depth 1 || true
+    git checkout "${ISAAC_GROOT_REF}"
   fi
 fi
+RESOLVED_GROOT_REF="$(git rev-parse HEAD)"
+export GROOT_PREBUILT RESOLVED_GROOT_REF
+
+python3 "${GROOT_HELPERS_DIR}/patch_n17_trainer.py" --groot-root . --resume "${RESUME:-false}"
 
 ACCELERATE_VER="1.14.0"
 NUMPY_VER="1.26.4"
 OPENCV_VER="4.8.0.74"
 
+if [ -f "gr00t/experiment/launch_finetune.py" ]; then
+  if [ "${GROOT_PREBUILT}" = "true" ]; then
+    echo "--- GR00T N1.7 dependencies already present in image ---"
+  else
+    echo "--- installing GR00T N1.7 from its immutable uv lock ---"
+    python3 -m pip install --quiet uv==0.8.14
+    UV_PREVIEW=1 UV_HTTP_TIMEOUT=300 UV_CONCURRENT_DOWNLOADS=4 \
+      uv sync --frozen --no-install-project --no-dev --no-cache
+    uv pip install --python "$(pwd)/.venv/bin/python" -e . --no-deps
+    PATH="$(pwd)/.venv/bin:${PATH}"
+    VIRTUAL_ENV="$(pwd)/.venv"
+    export PATH VIRTUAL_ENV
+  fi
+else
 pip install --upgrade setuptools wheel
 pip install gpustat==1.1.1 wandb==0.19.0 packaging==25.0 ninja==1.13.0
 
@@ -211,6 +254,7 @@ python -c "import torch, torchvision, flash_attn; print('torch=', torch.__versio
 
 pip install "accelerate==${ACCELERATE_VER}"
 pip install torchcodec==0.4.0 || true
+fi
 
 if [ -n "${DATA_CONFIG_B64:-}" ]; then
   DATA_CFG_PY="$(pwd)/gr00t/experiment/data_config.py"
@@ -218,12 +262,40 @@ if [ -n "${DATA_CONFIG_B64:-}" ]; then
   echo "  patched ${DATA_CFG_PY} with custom data config (${DATA_CONFIG})"
 fi
 
-if [ -n "${MODALITY_CONFIG_B64:-}" ]; then
+if [ -n "${MODALITY_CONFIG_PATH:-}" ]; then
+  if [ ! -f "${MODALITY_CONFIG_PATH}" ]; then
+    echo "ERROR: MODALITY_CONFIG_PATH does not exist: ${MODALITY_CONFIG_PATH}" >&2
+    exit 1
+  fi
+  cp "${MODALITY_CONFIG_PATH}" /tmp/modality_config.py
+  echo "  copied modality config from ${MODALITY_CONFIG_PATH}"
+elif [ -n "${MODALITY_CONFIG_B64:-}" ]; then
   echo "${MODALITY_CONFIG_B64}" | base64 -d > /tmp/modality_config.py
   echo "  wrote modality config to /tmp/modality_config.py"
 fi
 
 python -c "import torch; p=torch.cuda.get_device_properties(0); print(f'[preflight] GPU: {p.name}  total={p.total_memory/1024**3:.2f} GiB  sm={p.major}.{p.minor}')"
+python "${GROOT_HELPERS_DIR}/preflight_check.py" gpus --expected "${NUM_GPUS}"
+
+VLA_SETUP_SECONDS="$(( $(date +%s) - VLA_ENTRY_START_EPOCH ))"
+export VLA_SETUP_SECONDS
+printf 'VLA_PHASE_TIMING={"entry_to_training_ready_seconds":%s,"prebuilt_dependencies":%s}\n' \
+  "${VLA_SETUP_SECONDS}" "${GROOT_PREBUILT}"
+
+if [ "${PREFLIGHT_ONLY:-false}" = "true" ]; then
+  python "${GROOT_HELPERS_DIR}/preflight_check.py" dataset \
+    --dataset "${DATASET_PATH}" --modality-config /tmp/modality_config.py
+  cat > "${OUTPUT_DIR}/preflight-result.json" <<EOF
+{
+  "result": "PASS",
+  "num_gpus": ${NUM_GPUS},
+  "dataset_path": "${DATASET_PATH}",
+  "isaac_groot_ref": "${RESOLVED_GROOT_REF}"
+}
+EOF
+  echo "TRAIN_RESULT=PREFLIGHT_PASS"
+  exit 0
+fi
 
 # Pin the base model to an immutable commit before the (external) finetune
 # script resolves it: nvcr/HF tags are mutable, so an upstream repo could
@@ -252,20 +324,40 @@ import pathlib
 import sys
 
 packages = ("accelerate", "flash-attn", "numpy", "opencv-python", "torch", "torchaudio", "torchvision")
+expected_env = {
+    "accelerate": "ACCELERATE_VER",
+    "flash-attn": "FLASH_ATTN_VER",
+    "numpy": "NUMPY_VER",
+    "opencv-python": "OPENCV_VER",
+    "torch": "TORCH_VER",
+    "torchaudio": "TA_VER",
+    "torchvision": "TV_VER",
+}
+runtime_versions = {}
+for name in packages:
+    try:
+        runtime_versions[name] = importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        pass
+
 payload = {
     "base_model": os.environ["BASE_MODEL_SOURCE"],
     "base_model_revision": os.environ.get("BASE_MODEL_REVISION", ""),
     "expected_runtime_versions": {
-        "accelerate": os.environ["ACCELERATE_VER"],
-        "flash-attn": os.environ["FLASH_ATTN_VER"],
-        "numpy": os.environ["NUMPY_VER"],
-        "opencv-python": os.environ["OPENCV_VER"],
-        "torch": os.environ["TORCH_VER"],
-        "torchaudio": os.environ["TA_VER"],
-        "torchvision": os.environ["TV_VER"],
+        package: os.environ[variable]
+        for package, variable in expected_env.items()
+        if os.environ.get(variable)
     },
     "isaac_groot_ref": os.environ["RESOLVED_GROOT_REF"],
-    "runtime_versions": {name: importlib.metadata.version(name) for name in packages},
+    "prebuilt_dependencies": os.environ.get("GROOT_PREBUILT", "false") == "true",
+    "setup_seconds": int(os.environ["VLA_SETUP_SECONDS"]),
+    "launcher": (
+        f"torchrun --standalone --nproc_per_node={os.environ.get('NUM_GPUS', '1')}"
+        if pathlib.Path("gr00t/experiment/launch_finetune.py").is_file()
+        else "python"
+    ),
+    "resume_from_checkpoint": os.environ.get("RESUME", "false") == "true",
+    "runtime_versions": runtime_versions,
 }
 path = pathlib.Path(sys.argv[1])
 path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -281,7 +373,7 @@ if [ -f "scripts/gr00t_finetune.py" ]; then
     --data-config "${DATA_CONFIG}" \
     --batch-size "${BATCH_SIZE}" \
     --max-steps "${MAX_STEPS}" \
-    --num-gpus 1 \
+    --num-gpus "${NUM_GPUS}" \
     --save-steps "${SAVE_STEPS}" \
     --base-model-path "${BASE_MODEL}" \
     --no-tune-llm \
@@ -303,7 +395,7 @@ elif [ -f "gr00t/experiment/launch_finetune.py" ]; then
     --save_steps "${SAVE_STEPS}"
     --global_batch_size "${BATCH_SIZE}"
     --dataloader_num_workers "${DATALOADER_WORKERS}"
-    --num_gpus 1
+    --num_gpus "${NUM_GPUS}"
     --tune_diffusion_model
     --tune_projector
     --save_total_limit 5
@@ -314,10 +406,19 @@ elif [ -f "gr00t/experiment/launch_finetune.py" ]; then
   if [ -f "/tmp/modality_config.py" ]; then
     FINETUNE_ARGS+=(--modality_config_path /tmp/modality_config.py)
   fi
-  export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
-  python gr00t/experiment/launch_finetune.py "${FINETUNE_ARGS[@]}"
+  if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+    CUDA_VISIBLE_DEVICES="$(seq -s, 0 $((NUM_GPUS - 1)))"
+    export CUDA_VISIBLE_DEVICES
+  fi
+  torchrun --standalone --nproc_per_node="${NUM_GPUS}" \
+    gr00t/experiment/launch_finetune.py "${FINETUNE_ARGS[@]}"
 else
   echo "ERROR: no finetune script found in Isaac-GR00T" >&2; exit 1
+fi
+
+if [ "${RESUME:-false}" = "true" ] && [ -L "${LATEST_CKPT}" ]; then
+  rm "${LATEST_CKPT}"
+  echo "[resume] removed mounted checkpoint link before output upload"
 fi
 
 echo "--- training done ---"
@@ -329,11 +430,13 @@ if [ "${AZURE_UPLOAD:-false}" = "true" ]; then
     echo "AZURE_UPLOAD=true but AZUREML_WORKSPACE_NAME or AZURE_SUBSCRIPTION_ID not set. Skipping." >&2
   else
     echo "--- mirroring run to Azure ML ---"
-    pip install --quiet \
+    python_install --quiet \
       'mlflow==2.22.5' \
       'azureml-mlflow==1.62.0.post3' \
       'azure-identity==1.25.3' \
       'azure-ai-ml==1.34.0'
+    # aml_mirror owns its MLflow run; drop the Azure ML job run binding so it does not resume the job run.
+    env -u MLFLOW_RUN_ID -u MLFLOW_EXPERIMENT_ID -u MLFLOW_EXPERIMENT_NAME \
     RUN_ID="${RUN_ID}" OUTPUT_DIR="${OUTPUT_DIR}" \
     TRAINING_FRAMEWORK=groot AML_SOURCE=osmo-train \
       BASE_MODEL="${BASE_MODEL_SOURCE}" \
@@ -354,7 +457,7 @@ if [ -n "${ACR_REGISTRY:-}" ]; then
   chmod +x /usr/local/bin/oras
   rm -f "oras_${ORAS_VERSION}_linux_amd64.tar.gz"
 
-  pip install --quiet azure-identity==1.25.3
+  python_install --quiet azure-identity==1.25.3
   ACR_HOST="${ACR_REGISTRY}.azurecr.io"
   az login --identity --allow-no-subscriptions 2>/dev/null && \
     az acr login --name "${ACR_REGISTRY}" 2>/dev/null || {
