@@ -91,10 +91,11 @@ Install the base host packages:
 ```bash
 sudo apt-get update
 sudo apt-get install --yes curl jq podman
+gpu-offload/scripts/allow-podman-pasta-signal.sh
 podman info --format '{{.Host.Security.Rootless}} {{.Host.OCIRuntime.Name}}'
 ```
 
-The final command must print `true crun`.
+The final command must print `true crun`. The script lets Podman stop its `pasta` network helper under Ubuntu's AppArmor profile, which kind needs to delete clusters. It changes nothing on hosts without that profile. See [kind cannot delete the cluster](#kind-cannot-delete-the-cluster).
 
 ### Ref 02: Install Kubernetes Tools
 
@@ -595,6 +596,25 @@ sysctl kernel.apparmor_restrict_unprivileged_userns
 ```
 
 This restriction affects image builds only. k3s runs as root and is unaffected.
+
+### kind cannot delete the cluster
+
+`kind delete cluster` or `mise run f-40-teardown-all` fails on Ubuntu 26.04 with:
+
+```text
+ERROR: failed to delete cluster "gpu-offload": failed to delete nodes: command "podman rm -f -v gpu-offload-control-plane" failed with error: exit status 125
+  * rootless netns: kill network process: permission denied
+```
+
+Ubuntu's AppArmor profile for `pasta`, the rootless network helper in Podman 5, rejects the signal Podman sends to stop it ([LP#2154379](https://bugs.launchpad.net/bugs/2154379)). Preflight reports the same condition before a cluster is created. Add the missing rule, then delete the cluster again:
+
+```bash
+gpu-offload/scripts/allow-podman-pasta-signal.sh
+export KIND_EXPERIMENTAL_PROVIDER=podman
+kind delete cluster --name gpu-offload
+```
+
+The script inserts `signal (receive) set=(term) peer=podman,` into `/etc/apparmor.d/usr.bin.pasta` and reloads the profile. That file belongs to a package, so a later upgrade can ask whether to keep the modified version. Keep it until the package includes the rule. The script detects an existing rule and leaves the file alone.
 
 ### kind selects another provider
 
