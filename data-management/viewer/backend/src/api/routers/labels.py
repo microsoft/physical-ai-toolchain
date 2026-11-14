@@ -8,17 +8,19 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from physical_ai_curation.models import DEFAULT_LABELS, DatasetLabelsFile, EpisodeAnalysisRecord
-from pydantic import Field
+from pydantic import Field, StrictBool
 
 from ..auth import PrincipalContext, require_principal_context
 from ..csrf import require_csrf_token
 from ..models.contributions import ContributionLedger
+from ..models.errors import error_responses
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..services.label_storage import (
     BlobLabelStorage as BlobLabelStorage,
@@ -33,7 +35,9 @@ from ..services.label_storage import (
 )
 from ..storage import RevisionConflictError, VersionedValue
 from ..validation import (
+    NON_WHITESPACE_PATTERN,
     SAFE_DATASET_ID_PATTERN,
+    WHITESPACE_PATTERN,
     SanitizedModel,
     path_int_param,
     path_string_param,
@@ -43,7 +47,7 @@ __all__ = ["BlobLabelStorage", "LocalLabelStorage", "router"]
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(responses=error_responses(400))
 
 
 class EpisodeLabels(SanitizedModel):
@@ -63,7 +67,7 @@ class BulkLabelUpdate(SanitizedModel):
 class AddLabelOption(SanitizedModel):
     """Request body for adding a new available label option."""
 
-    label: str = Field(min_length=1, max_length=100)
+    label: str = Field(min_length=1, max_length=100, json_schema_extra={"pattern": NON_WHITESPACE_PATTERN})
 
 
 # Analysis fields that make sensible categorical labels, mapped to their default
@@ -78,14 +82,25 @@ ANALYSIS_IMPORT_FIELDS: dict[str, str] = {
     "motion_flags": "FLAG",
     "source": "SOURCE",
 }
+_IMPORT_FIELD_ALTERNATIVES = "|".join(
+    r"[\r\n]*".join(re.escape(character) for character in field) for field in ANALYSIS_IMPORT_FIELDS
+)
 
 
 class ImportAnalysisRequest(SanitizedModel):
     """Request to promote an analysis field into filterable episode labels."""
 
-    field: str = Field(min_length=1, max_length=64)
+    field: str = Field(
+        min_length=1,
+        max_length=64,
+        description=(
+            f"Analysis field to import: {', '.join(ANALYSIS_IMPORT_FIELDS)}. "
+            "CR/LF characters are removed before surrounding whitespace is trimmed."
+        ),
+        json_schema_extra={"pattern": rf"^{WHITESPACE_PATTERN}*(?:{_IMPORT_FIELD_ALTERNATIVES}){WHITESPACE_PATTERN}*$"},
+    )
     prefix: str | None = Field(default=None, max_length=32)
-    overwrite: bool = False
+    overwrite: StrictBool = False
 
 
 class ImportAnalysisResult(SanitizedModel):
@@ -170,7 +185,7 @@ class RevisionPrecondition:
 
 def require_revision_precondition(
     if_match: str | None = Header(default=None),
-    if_none_match: str | None = Header(default=None),
+    if_none_match: str | None = Header(default=None, json_schema_extra={"enum": ["*"]}),
 ) -> RevisionPrecondition:
     """Require exactly one strong revision precondition."""
     if if_match is None and if_none_match is None:
@@ -228,7 +243,11 @@ async def get_label_options(
     return labels_file.available_labels
 
 
-@router.post("/{dataset_id}/labels/options", dependencies=[Depends(require_csrf_token)])
+@router.post(
+    "/{dataset_id}/labels/options",
+    dependencies=[Depends(require_csrf_token)],
+    responses=error_responses(412, 428, 500),
+)
 async def add_label_option(
     response: Response,
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
@@ -249,6 +268,7 @@ async def add_label_option(
 @router.delete(
     "/{dataset_id}/labels/options/{label}",
     dependencies=[Depends(require_csrf_token)],
+    responses=error_responses(409, 412, 428, 500),
 )
 async def delete_label_option(
     response: Response,
@@ -264,7 +284,7 @@ async def delete_label_option(
         raise HTTPException(status_code=400, detail="Label cannot be empty")
 
     if normalized in DEFAULT_LABELS:
-        raise HTTPException(status_code=400, detail="Built-in labels cannot be deleted")
+        raise HTTPException(status_code=409, detail="Built-in labels cannot be deleted")
 
     labels_file.available_labels = [existing for existing in labels_file.available_labels if existing != normalized]
 
@@ -296,6 +316,7 @@ async def get_episode_labels(
 @router.put(
     "/{dataset_id}/episodes/{episode_idx}/labels",
     dependencies=[Depends(require_csrf_token)],
+    responses=error_responses(412, 428, 500),
 )
 async def set_episode_labels(
     response: Response,
@@ -335,7 +356,11 @@ async def set_episode_labels(
     )
 
 
-@router.post("/{dataset_id}/labels/save", dependencies=[Depends(require_csrf_token)])
+@router.post(
+    "/{dataset_id}/labels/save",
+    dependencies=[Depends(require_csrf_token)],
+    responses=error_responses(412, 428, 500),
+)
 async def save_all_labels(
     response: Response,
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
@@ -351,6 +376,7 @@ async def save_all_labels(
 @router.post(
     "/{dataset_id}/labels/import-from-analysis",
     dependencies=[Depends(require_csrf_token)],
+    responses=error_responses(412, 428, 500),
 )
 async def import_analysis_labels(
     response: Response,
@@ -496,6 +522,7 @@ async def get_episode_analysis(
 @router.put(
     "/{dataset_id}/episodes/{episode_idx}/analysis",
     dependencies=[Depends(require_csrf_token)],
+    responses=error_responses(412, 428, 500),
 )
 async def set_episode_analysis(
     response: Response,

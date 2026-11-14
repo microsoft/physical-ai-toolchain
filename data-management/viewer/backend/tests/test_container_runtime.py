@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import errno
 import http.server
 import json
 import os
@@ -12,6 +13,7 @@ import sys
 import sysconfig
 import threading
 import tomllib
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -943,28 +945,49 @@ elif args[:2] == ["containerapp", "ingress"]:
     script = Path(__file__).resolve().parents[3] / "setup/deploy-dataviewer.sh"
     master, slave = pty.openpty()
     os.write(master, b"no\n" if scenario == "operator-rejected" else b"yes\n")
-    try:
-        result = subprocess.run(
-            ["bash", str(script), "--tf-dir", str(tmp_path), "--tag", "fixture", *arguments],
-            env={
-                **os.environ,
-                "PATH": f"{binaries}:{os.environ['PATH']}",
-                "DEPLOY_FIXTURE": str(tmp_path),
-                "DEPLOY_SCENARIO": scenario,
-            },
-            stdin=slave,
-            stdout=slave,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-    finally:
-        os.close(slave)
-        os.close(master)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        output = executor.submit(_read_terminal, master)
+        try:
+            result = subprocess.run(
+                ["bash", str(script), "--tf-dir", str(tmp_path), "--tag", "fixture", *arguments],
+                env={
+                    **os.environ,
+                    "PATH": f"{binaries}:{os.environ['PATH']}",
+                    "DEPLOY_FIXTURE": str(tmp_path),
+                    "DEPLOY_SCENARIO": scenario,
+                },
+                stdin=slave,
+                stdout=slave,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        finally:
+            os.close(slave)
+            try:
+                (tmp_path / "deployment.stdout").write_bytes(output.result(timeout=5))
+            finally:
+                os.close(master)
     trace_path = tmp_path / "trace.jsonl"
     records = [json.loads(line) for line in trace_path.read_text().splitlines()] if trace_path.exists() else []
     return result.returncode, records
+
+
+def _read_terminal(descriptor: int) -> bytes:
+    """Drain terminal output so the child cannot block on a full PTY buffer."""
+    chunks = []
+    while True:
+        try:
+            chunk = os.read(descriptor, 65536)
+        except OSError as exc:
+            if exc.errno != errno.EIO:
+                raise
+            break  # Linux signals a closed terminal slave with EIO.
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @pytest.mark.parametrize(

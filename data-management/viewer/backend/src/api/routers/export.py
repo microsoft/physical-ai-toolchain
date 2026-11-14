@@ -11,16 +11,20 @@ import asyncio
 import json
 import logging
 import os
+import re
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, FiniteFloat, NonNegativeInt
+from physical_ai_curation.models import EPISODE_KEY_PATTERN, EpisodeIndexKey
+from pydantic import BaseModel, BeforeValidator, Field, StrictBool, StrictFloat
 
 from ..csrf import require_csrf_token
 from ..models.annotations import EpisodeAnnotationFile
+from ..models.errors import error_responses
 from ..services.annotation_service import AnnotationService, get_annotation_service
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..services.episode_edits import (
@@ -35,24 +39,47 @@ from ..services.lerobot_exporter import LeRobotExporter, admits_export
 from ..services.lerobot_language import LanguageInstruction
 from ..validation import (
     SAFE_DATASET_ID_PATTERN,
+    JsonInteger,
     SanitizedModel,
     path_string_param,
     query_csv_ints_param,
 )
 
-router = APIRouter()
+router = APIRouter(responses=error_responses(400, 404))
 logger = logging.getLogger(__name__)
+
+_CHANNEL_KEY_PATTERN = r"^[0-9]+$(?![\s\S])"
+
+
+def _validate_integer_key(value: object, *, pattern: str) -> object:
+    if isinstance(value, bool) or not isinstance(value, (str, int)) or re.fullmatch(pattern, str(value)) is None:
+        raise ValueError("Expected an ASCII decimal integer key")
+    return value
+
+
+ChannelIndexKey = Annotated[
+    int,
+    BeforeValidator(partial(_validate_integer_key, pattern=_CHANNEL_KEY_PATTERN)),
+    Field(ge=0),
+]
+
+
+class ExportStreamEvent(BaseModel):
+    """An SSE event carrying a JSON-encoded export payload."""
+
+    event: Literal["progress", "complete", "error"]
+    data: str = Field(json_schema_extra={"contentMediaType": "application/json"})
 
 
 class ImageTransformRequest(SanitizedModel):
     """Image transform request model."""
 
-    crop: dict[str, int] | None = Field(
+    crop: dict[str, JsonInteger] | None = Field(
         None,
         description="Crop region with x, y, width, height",
         examples=[{"x": 10, "y": 10, "width": 200, "height": 150}],
     )
-    resize: dict[str, int] | None = Field(
+    resize: dict[str, JsonInteger] | None = Field(
         None,
         description="Resize dimensions with width, height",
         examples=[{"width": 224, "height": 224}],
@@ -64,7 +91,7 @@ class SubtaskRequest(SanitizedModel):
 
     id: str = Field(..., description="Unique segment ID")
     label: str = Field(..., description="Human-readable label")
-    frameRange: list[int] = Field(
+    frameRange: list[JsonInteger] = Field(
         ...,
         description="Frame range [start, end] inclusive",
         min_length=2,
@@ -78,8 +105,8 @@ class SubtaskRequest(SanitizedModel):
 class FrameInsertionRequest(SanitizedModel):
     """Frame insertion request model."""
 
-    afterFrameIndex: int = Field(..., ge=0, description="Insert after this frame index")
-    interpolationFactor: float = Field(
+    afterFrameIndex: JsonInteger = Field(..., ge=0, description="Insert after this frame index")
+    interpolationFactor: StrictFloat = Field(
         0.5,
         ge=0.0,
         le=1.0,
@@ -90,20 +117,28 @@ class FrameInsertionRequest(SanitizedModel):
 class TrajectoryAdjustmentRequest(SanitizedModel):
     """Joint-position adjustment at one frame; a set value replaces that channel's delta."""
 
-    frameIndex: NonNegativeInt = Field(..., description="Original frame index")
-    channelDeltas: dict[NonNegativeInt, FiniteFloat] | None = Field(None, description="Values added to channels")
-    channelValues: dict[NonNegativeInt, FiniteFloat] | None = Field(None, description="Values that replace channels")
+    frameIndex: JsonInteger = Field(..., ge=0, description="Original frame index")
+    channelDeltas: dict[ChannelIndexKey, Annotated[StrictFloat, Field(allow_inf_nan=False)]] | None = Field(
+        None,
+        description="Values added to channels",
+        json_schema_extra={"propertyNames": {"pattern": _CHANNEL_KEY_PATTERN}},
+    )
+    channelValues: dict[ChannelIndexKey, Annotated[StrictFloat, Field(allow_inf_nan=False)]] | None = Field(
+        None,
+        description="Values that replace channels",
+        json_schema_extra={"propertyNames": {"pattern": _CHANNEL_KEY_PATTERN}},
+    )
 
 
 class EpisodeEditRequest(SanitizedModel):
     """Edit operations for a single episode."""
 
-    episodeIndex: int = Field(..., description="Episode index")
+    episodeIndex: JsonInteger = Field(..., description="Episode index")
     globalTransform: ImageTransformRequest | None = Field(None, description="Transform applied to all cameras")
     cameraTransforms: dict[str, ImageTransformRequest] | None = Field(
         None, description="Per-camera transform overrides"
     )
-    removedFrames: list[int] | None = Field(None, description="Frame indices to exclude")
+    removedFrames: list[JsonInteger] | None = Field(None, description="Frame indices to exclude")
     insertedFrames: list[FrameInsertionRequest] | None = Field(None, description="Interpolated frame insertions")
     subtasks: list[SubtaskRequest] | None = Field(None, description="Sub-task segments")
     trajectoryAdjustments: list[TrajectoryAdjustmentRequest] | None = Field(
@@ -134,11 +169,15 @@ def _edit_operations(dataset_id: str, edit_req: EpisodeEditRequest) -> EpisodeEd
 class ExportRequest(SanitizedModel):
     """Export request model."""
 
-    episodeIndices: list[int] = Field(..., description="Episode indices to export", min_length=1)
+    episodeIndices: list[JsonInteger] = Field(..., description="Episode indices to export", min_length=1)
     outputPath: str = Field(..., description="Output directory path")
-    applyEdits: bool = Field(True, description="Whether to apply edit operations")
-    edits: dict[int, EpisodeEditRequest] | None = Field(None, description="Edit operations by episode index")
-    includeLanguageInstructions: bool = Field(
+    applyEdits: StrictBool = Field(True, description="Whether to apply edit operations")
+    edits: dict[EpisodeIndexKey, EpisodeEditRequest] | None = Field(
+        None,
+        description="Edit operations by episode index",
+        json_schema_extra={"propertyNames": {"pattern": EPISODE_KEY_PATTERN}},
+    )
+    includeLanguageInstructions: StrictBool = Field(
         True,
         description=(
             "For LeRobot sources, write each episode's latest saved instruction as task_aug and plan rows; "
@@ -257,6 +296,7 @@ def _public_export_result(result: ExportResult) -> ExportResultResponse:
 @router.post(
     "/{dataset_id}/export",
     response_model=ExportResultResponse,
+    responses=error_responses(500, 501),
     dependencies=[Depends(require_csrf_token)],
 )
 async def export_episodes(
@@ -327,7 +367,12 @@ async def export_episodes(
         )
 
 
-@router.post("/{dataset_id}/export/stream", dependencies=[Depends(require_csrf_token)])
+@router.post(
+    "/{dataset_id}/export/stream",
+    dependencies=[Depends(require_csrf_token)],
+    response_class=StreamingResponse,
+    responses={200: {"content": {"text/event-stream": {"schema": ExportStreamEvent.model_json_schema()}}}},
+)
 async def export_episodes_stream(
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     request: ExportRequest = ...,

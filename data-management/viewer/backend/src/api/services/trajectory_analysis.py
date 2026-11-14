@@ -1,18 +1,69 @@
+# cspell:ignore prec
 """
 Trajectory quality analysis service.
 
 Computes automatic quality metrics from trajectory data using NumPy and SciPy.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+from decimal import Decimal, localcontext
 from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
 
+from .trajectory_numerics import (
+    DECIMAL_PRECISION,
+    MetricArray,
+    decimal_array,
+    decimal_row_norms,
+    differentiate,
+    float_row_norms,
+    row_norms,
+    time_deltas,
+)
+
 SmoothnessMode = Literal["log-scaled", "radian-based"]
 SMOOTHNESS_MODES: tuple[SmoothnessMode, ...] = ("log-scaled", "radian-based")
 DEFAULT_SMOOTHNESS_MODE: SmoothnessMode = "log-scaled"
+
+_MIN_PATH_LENGTH = Decimal("0.000001")
+_MIN_SPECTRAL_AMPLITUDE = Decimal("0.00001")  # Square root of the original 1e-10 power floor.
+
+
+def _derivatives(positions: NDArray[np.float64], timestamps: NDArray[np.float64]) -> tuple[MetricArray, MetricArray]:
+    """Compute velocity and jerk with overflow-safe numerical primitives."""
+    dt = time_deltas(timestamps)
+    velocity = differentiate(positions, dt)
+    acceleration = differentiate(velocity, dt[1:])
+    return velocity, differentiate(acceleration, dt[2:])
+
+
+def _path_efficiency(direct_distance: float | Decimal, path_length: float | Decimal) -> float:
+    if path_length < _MIN_PATH_LENGTH:
+        return 1.0
+    return float(min(1, max(0, direct_distance / path_length)))
+
+
+def _decimal_path_efficiency(positions: NDArray[np.float64]) -> float:
+    with localcontext() as context:
+        context.prec = DECIMAL_PRECISION
+        decimal_positions = decimal_array(positions)
+        path_segments = np.diff(decimal_positions, axis=0)
+        displacement = decimal_positions[-1:] - decimal_positions[:1]
+    direct_distance = decimal_row_norms(displacement)[0]
+    path_length = sum(decimal_row_norms(path_segments))
+    return _path_efficiency(direct_distance, path_length)
+
+
+def _rms(values: MetricArray) -> Decimal:
+    scale = max(abs(value) for value in values.flat)
+    if scale == 0:
+        return Decimal(0)
+    scaled = np.asarray(values / scale, dtype=np.float64)
+    return Decimal(scale) * Decimal(float(np.sqrt(np.mean(scaled**2))))
 
 
 @dataclass
@@ -113,14 +164,7 @@ class TrajectoryAnalyzer:
                 flags=[],
             )
 
-        # Compute time deltas
-        dt = np.diff(timestamps)
-        dt = np.where(dt > 0, dt, 1e-6)  # Avoid division by zero
-
-        # Compute derivatives
-        velocity = np.diff(positions, axis=0) / dt[:, np.newaxis]
-        acceleration = np.diff(velocity, axis=0) / dt[1:, np.newaxis]
-        jerk = np.diff(acceleration, axis=0) / dt[2:, np.newaxis]
+        velocity, jerk = _derivatives(positions, timestamps)
 
         # Compute metrics
         smoothness = self._compute_smoothness(jerk)
@@ -147,7 +191,7 @@ class TrajectoryAnalyzer:
             flags=flags,
         )
 
-    def _compute_smoothness(self, jerk: NDArray[np.float64]) -> float:
+    def _compute_smoothness(self, jerk: MetricArray) -> float:
         """
         Compute smoothness from jerk (third derivative).
 
@@ -157,14 +201,13 @@ class TrajectoryAnalyzer:
             return 1.0
 
         # RMS jerk
-        rms_jerk = np.sqrt(np.mean(jerk**2))
+        rms_jerk = _rms(jerk)
 
         # Normalize to 0-1 scale (assuming typical jerk range)
         # Using sigmoid-like transformation
-        smoothness = 1.0 / (1.0 + rms_jerk)
-        return float(np.clip(smoothness, 0.0, 1.0))
+        return float(1 / (1 + rms_jerk))
 
-    def _compute_normalized_smoothness(self, jerk: NDArray[np.float64]) -> float:
+    def _compute_normalized_smoothness(self, jerk: MetricArray) -> float:
         """
         Compute a rescaled smoothness that discriminates across episodes.
 
@@ -181,13 +224,13 @@ class TrajectoryAnalyzer:
         if len(jerk) == 0:
             return 1.0
 
-        rms_jerk = float(np.sqrt(np.mean(jerk**2)))
+        rms_jerk = _rms(jerk)
         if self.smoothness_mode == "radian-based":
-            rms_jerk_rad = rms_jerk * (np.pi / 180.0)
-            normalized = 1.0 / (1.0 + rms_jerk_rad)
+            rms_jerk_rad = rms_jerk * Decimal(np.pi / 180.0)
+            normalized = 1 / (1 + rms_jerk_rad)
         else:  # log-scaled
-            normalized = 1.0 / (1.0 + np.log10(1.0 + rms_jerk))
-        return float(np.clip(normalized, 0.0, 1.0))
+            normalized = 1 / (1 + (1 + rms_jerk).log10())
+        return float(normalized)
 
     def _compute_efficiency(self, positions: NDArray[np.float64]) -> float:
         """
@@ -196,22 +239,21 @@ class TrajectoryAnalyzer:
         if len(positions) < 2:
             return 1.0
 
-        # Direct distance from start to end
-        direct_distance = np.linalg.norm(positions[-1] - positions[0])
-
-        # Actual path length
-        path_segments = np.diff(positions, axis=0)
-        path_length = np.sum(np.linalg.norm(path_segments, axis=1))
-
-        if path_length < 1e-6:
-            return 1.0
-
-        efficiency = direct_distance / path_length
-        return float(np.clip(efficiency, 0.0, 1.0))
+        # Subtract before scaling norms so constant offsets cannot erase small movements.
+        with np.errstate(over="ignore", invalid="ignore"):
+            path_segments = np.diff(positions, axis=0)
+            displacement = positions[-1:] - positions[:1]
+            direct_norms = float_row_norms(displacement)
+            segment_norms = float_row_norms(path_segments)
+            if direct_norms is not None and segment_norms is not None:
+                path_length = float(np.sum(segment_norms))
+                if np.isfinite(path_length):
+                    return _path_efficiency(float(direct_norms[0]), path_length)
+        return _decimal_path_efficiency(positions)
 
     def _compute_jitter(
         self,
-        velocity: NDArray[np.float64],
+        velocity: MetricArray,
         timestamps: NDArray[np.float64],
     ) -> float:
         """
@@ -227,14 +269,16 @@ class TrajectoryAnalyzer:
             from scipy import fft as scipy_fft
 
             # Compute velocity magnitude
-            vel_magnitude = np.linalg.norm(velocity, axis=1)
+            scale = max(1, max(abs(value) for value in velocity.flat))
+            vel_magnitude = np.linalg.norm(np.asarray(velocity / scale, dtype=np.float64), axis=1)
 
             # FFT of velocity
             n = len(vel_magnitude)
             freq_spectrum = np.abs(scipy_fft.fft(vel_magnitude))[: n // 2]
 
             # Estimate sample rate
-            avg_dt = np.mean(np.diff(timestamps[: len(velocity) + 1]))
+            time_span = Decimal(float(timestamps[len(velocity)])) - Decimal(float(timestamps[0]))
+            avg_dt = float(time_span / len(velocity))
             if avg_dt <= 0:
                 avg_dt = 1.0 / 30.0  # Default 30 FPS
 
@@ -245,7 +289,7 @@ class TrajectoryAnalyzer:
             high_freq_power = np.sum(freq_spectrum[high_freq_mask] ** 2)
             total_power = np.sum(freq_spectrum**2)
 
-            if total_power < 1e-10:
+            if total_power == 0 or np.sqrt(total_power) < float(_MIN_SPECTRAL_AMPLITUDE / Decimal(scale)):
                 return 0.0
 
             jitter = high_freq_power / total_power
@@ -255,11 +299,11 @@ class TrajectoryAnalyzer:
             # Fallback without scipy
             return 0.0
 
-    def _count_hesitations(self, velocity: NDArray[np.float64]) -> int:
+    def _count_hesitations(self, velocity: MetricArray) -> int:
         """
         Count segments where velocity was near zero.
         """
-        vel_magnitude = np.linalg.norm(velocity, axis=1)
+        vel_magnitude = row_norms(velocity)
         is_stopped = vel_magnitude < self.velocity_threshold
 
         # Find consecutive stopped segments
@@ -280,7 +324,7 @@ class TrajectoryAnalyzer:
 
         return hesitation_count
 
-    def _count_corrections(self, velocity: NDArray[np.float64]) -> int:
+    def _count_corrections(self, velocity: MetricArray) -> int:
         """
         Count direction reversal events.
         """
@@ -288,7 +332,13 @@ class TrajectoryAnalyzer:
             return 0
 
         # Compute velocity direction changes
-        vel_normalized = velocity / (np.linalg.norm(velocity, axis=1, keepdims=True) + 1e-10)
+        norms = row_norms(velocity)
+        if norms.dtype == object:
+            vel_normalized = np.asarray(
+                decimal_array(velocity) / (norms[:, np.newaxis] + Decimal("1e-10")), dtype=np.float64
+            )
+        else:
+            vel_normalized = velocity / (norms[:, np.newaxis] + 1e-10)
 
         # Dot product between consecutive velocity directions
         dot_products = np.sum(vel_normalized[:-1] * vel_normalized[1:], axis=1)
