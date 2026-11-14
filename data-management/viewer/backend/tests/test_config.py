@@ -73,6 +73,24 @@ class TestLoadConfig:
         monkeypatch.setenv("CORS_ORIGINS", "http://a.test , http://b.test ,, ")
         cfg = load_config()
         assert cfg.cors_origins == ["http://a.test", "http://b.test"]
+        assert cfg.cors_origin_regex is None
+
+    def test_cors_wildcard_origins_become_regex(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv(
+            "CORS_ORIGINS",
+            "http://localhost:5173,https://*.nicegrass-1a2b3c4d.eastus.azurecontainerapps.io",
+        )
+        cfg = load_config()
+        assert cfg.cors_origins == ["http://localhost:5173"]
+        assert cfg.cors_origin_regex is not None
+        assert "localhost" not in cfg.cors_origin_regex
+        import re
+
+        assert re.fullmatch(
+            cfg.cors_origin_regex,
+            "https://frontend.nicegrass-1a2b3c4d.eastus.azurecontainerapps.io",
+        )
+        assert re.fullmatch(cfg.cors_origin_regex, "https://evil.example.com") is None
 
     def test_int_env_coercion(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("BACKEND_PORT", "9090")

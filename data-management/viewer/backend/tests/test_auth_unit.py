@@ -257,13 +257,13 @@ class TestPrincipalBounds:
     def test_given_invalid_environment_limit_when_starting_hosted_auth_then_rejects_configuration(
         self, setting: str, value: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from src.api.auth import validate_hosted_auth_configuration
+        from src.api.auth import validate_auth_configuration
 
         set_hosted_environment(monkeypatch)
         monkeypatch.setenv(setting, value)
 
         with pytest.raises(ValueError, match=f"{setting} must be a positive integer"):
-            validate_hosted_auth_configuration()
+            validate_auth_configuration()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(("size", "accepted"), [(6144, True), (6145, False)], ids=["at-limit", "over-limit"])
@@ -479,6 +479,22 @@ class TestProviderSelection:
             await require_auth(make_asgi_request("POST", "/api/x"))
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail == "Caller authentication required"
+
+    async def test_azure_ad_missing_settings_fail_closed(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
+        monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "azure_ad")
+        monkeypatch.delenv("DATAVIEWER_AZURE_TENANT_ID", raising=False)
+        monkeypatch.delenv("DATAVIEWER_AZURE_CLIENT_ID", raising=False)
+        with pytest.raises(ValueError, match="DATAVIEWER_AZURE_TENANT_ID"):
+            await require_auth(make_asgi_request("POST", "/api/x"))
+
+    async def test_auth0_missing_settings_fail_closed(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
+        monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "auth0")
+        monkeypatch.delenv("DATAVIEWER_AUTH0_DOMAIN", raising=False)
+        monkeypatch.delenv("DATAVIEWER_AUTH0_AUDIENCE", raising=False)
+        with pytest.raises(ValueError, match="DATAVIEWER_AUTH0_DOMAIN"):
+            await require_auth(make_asgi_request("POST", "/api/x"))
 
     async def test_azure_ad_selection(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
