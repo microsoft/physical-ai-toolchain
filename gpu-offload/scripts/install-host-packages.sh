@@ -4,3 +4,4 @@ set -o errexit -o nounset
 
 sudo apt-get update
 sudo apt-get install --yes curl jq podman uidmap
+"$(dirname "${BASH_SOURCE[0]}")/allow-podman-pasta-signal.sh"
