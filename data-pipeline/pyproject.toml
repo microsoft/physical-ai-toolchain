@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Data capture pipeline runtime"
 requires-python = ">=3.12"
 dependencies = [
-    "pydantic==2.14.2",
+    "pydantic==2.14.3",
 ]
 
 [tool.uv]
@@ -53,7 +53,7 @@ output = "logs/coverage.xml"
 
 [dependency-groups]
 dev = [
-    "hypothesis==6.170.14",
+    "hypothesis==6.170.15",
     "pytest==9.2.0",
     "pytest-cov==7.1.0",
 ]
