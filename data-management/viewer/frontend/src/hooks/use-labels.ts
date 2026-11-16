@@ -275,6 +275,8 @@ export function useDatasetLabels() {
   const resourceKey = JSON.stringify([currentDataset?.id, principalScopeId])
 
   useEffect(() => {
+    lastServerBodyRef.current = null
+    hydratedDatasetRef.current = null
     prepareDatasetLabels(currentDataset?.id ?? null, principalScopeId ?? null)
   }, [currentDataset?.id, principalScopeId, prepareDatasetLabels])
 
@@ -343,22 +345,38 @@ export function useDatasetLabels() {
           return
         }
         if (draft && state.editGeneration === hydrationEditGeneration) {
-          restoreLabelDraft(
-            draft.draft.availableLabels,
-            draft.draft.episodeLabels,
-            draft.baseline.episodeLabels,
-          )
-          useLabelStore.setState({
-            baseEtag: draft.baseEtag,
-            sourceScopes: draft.sourceScopes ?? {},
-          })
-          const dirtyEntry = Object.entries(draft.draft.episodeLabels).find(
-            ([index, labels]) =>
-              JSON.stringify(labels) !==
-              JSON.stringify(draft.baseline.episodeLabels[Number(index)] ?? []),
-          )
-          if (dirtyEntry && draft.baseEtag !== state.baseEtag) {
-            state.setConflict(state.baseEtag, Number(dirtyEntry[0]), dirtyEntry[1])
+          const dirtyIndices = [
+            ...new Set([
+              ...Object.keys(draft.baseline.episodeLabels),
+              ...Object.keys(draft.draft.episodeLabels),
+            ]),
+          ]
+            .map(Number)
+            .filter(
+              (index) =>
+                JSON.stringify(draft.draft.episodeLabels[index] ?? []) !==
+                JSON.stringify(draft.baseline.episodeLabels[index] ?? []),
+            )
+          if (dirtyIndices.length > 0) {
+            const recoveredLabels = { ...state.episodeLabels }
+            const recoveredBaseline = { ...state.savedEpisodeLabels }
+            for (const index of dirtyIndices) {
+              recoveredLabels[index] = draft.draft.episodeLabels[index] ?? []
+              recoveredBaseline[index] = draft.baseline.episodeLabels[index] ?? []
+            }
+            restoreLabelDraft(
+              [...new Set([...state.availableLabels, ...draft.draft.availableLabels])],
+              recoveredLabels,
+              recoveredBaseline,
+            )
+            useLabelStore.setState({
+              baseEtag: draft.baseEtag,
+              sourceScopes: draft.sourceScopes ?? {},
+            })
+            if (draft.baseEtag !== state.baseEtag) {
+              const index = dirtyIndices[0]
+              state.setConflict(state.baseEtag, index, recoveredLabels[index])
+            }
           }
         }
         useLabelStore.setState({ draftHydrated: true })

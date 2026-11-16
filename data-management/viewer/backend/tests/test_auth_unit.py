@@ -48,6 +48,34 @@ def _reset_provider():
     reset_auth_provider()
 
 
+class TestReleaseIdentity:
+    def test_given_shared_identity_when_release_integrates_then_no_separate_policy_resolver(self) -> None:
+        from src.api import auth
+
+        assert not hasattr(auth, "resolve_release_authority")
+
+    @pytest.mark.parametrize("auth_method", ["azure_ad", "auth0", "easy_auth", "apikey"])
+    @pytest.mark.parametrize("roles", [None, [], ["viewer"]])
+    def test_given_verified_roleless_or_ordinary_user_when_resolve_then_no_release_role_required(
+        self, auth_method: str, roles: object
+    ) -> None:
+        user = {"sub": "verified-application", "auth_method": auth_method, "roles": roles}
+
+        context = resolve_principal_context(user)
+
+        assert context.auth_mode == auth_method
+        assert context.scope_id.startswith("principal-")
+        assert context.scope_id == resolve_principal_context({"sub": user["sub"], "auth_method": auth_method}).scope_id
+
+    def test_given_actor_override_when_resolve_then_server_scope_wins(self) -> None:
+        user = {"sub": "verified-application", "auth_method": "azure_ad", "principal_scope_id": "forged"}
+
+        assert (
+            resolve_principal_context(user).scope_id
+            == resolve_principal_context({"sub": "verified-application", "auth_method": "azure_ad"}).scope_id
+        )
+
+
 class TestApiKeyProvider:
     @pytest.mark.asyncio
     async def test_valid_key_returns_user(self):
@@ -589,7 +617,7 @@ class TestPrincipalContext:
         context = resolve_principal_context(None)
 
         assert context.auth_mode == "local"
-        assert context.scope_id
+        assert context.scope_id == "localuser"
 
     @pytest.mark.parametrize(
         "user",

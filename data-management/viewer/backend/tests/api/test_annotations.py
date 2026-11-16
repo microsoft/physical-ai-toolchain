@@ -136,7 +136,7 @@ class TestAnnotationEndpoints:
         data = response.json()
         assert data["episode_index"] == 5
         assert len(data["annotations"]) == 1
-        assert data["annotations"][0]["annotator_id"].startswith("principal-")
+        assert data["annotations"][0]["annotator_id"] == "localuser"
         assert data["annotations"][0]["annotator_id"] != "test-user"
 
     def test_save_annotation_updates_existing(self, client, registered_dataset, sample_annotation):

@@ -19,7 +19,7 @@ import {
   type JsonResponseLike,
   mockFetch,
 } from '@/test-utils/fetch-mocks'
-import { renderHookWithProviders } from '@/test-utils/render'
+import { createTestQueryClient, renderHookWithProviders } from '@/test-utils/render'
 
 const labelDraftMocks = vi.hoisted(() => ({
   load: vi.fn(),
@@ -732,6 +732,82 @@ describe('use-labels hooks', () => {
       expect(useLabelStore.getState().savedEpisodeLabels[0]).toEqual(['SUCCESS'])
     })
 
+    it.each([false, true])(
+      'preserves server labels outside a recovered draft (dirty: %s)',
+      async (dirty) => {
+        mockFetch.mockResolvedValueOnce(
+          jsonResponse(
+            {
+              dataset_id: 'ds-1',
+              available_labels: ['SUCCESS', 'CUSTOM'],
+              episodes: { '0': ['SUCCESS'], '1': ['SUCCESS'] },
+            },
+            { headers: { ETag: 'current' } },
+          ),
+        )
+        labelDraftMocks.load.mockResolvedValueOnce({
+          baseEtag: 'old',
+          baseline: { availableLabels: ['SUCCESS'], episodeLabels: {} },
+          draft: {
+            availableLabels: ['SUCCESS', 'CUSTOM'],
+            episodeLabels: dirty ? { 2: ['CUSTOM'] } : {},
+          },
+        })
+        selectDataset('ds-1')
+        renderHookWithProviders(() => useDatasetLabels())
+        await waitFor(() => expect(useLabelStore.getState().draftHydrated).toBe(true))
+        expect(useLabelStore.getState().episodeLabels).toEqual({
+          0: ['SUCCESS'],
+          1: ['SUCCESS'],
+          ...(dirty ? { 2: ['CUSTOM'] } : {}),
+        })
+        expect(useLabelStore.getState().savedEpisodeLabels[0]).toEqual(['SUCCESS'])
+        expect(useLabelStore.getState().savedEpisodeLabels[1]).toEqual(['SUCCESS'])
+        expect(useLabelStore.getState().baseEtag).toBe(dirty ? 'old' : 'current')
+        if (dirty) expect(useLabelStore.getState().conflict?.episodeIndex).toBe(2)
+        else expect(useLabelStore.getState().conflict).toBeNull()
+      },
+    )
+
+    it('retains explicit draft removals without reverting untouched episodes to old labels', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(
+          {
+            dataset_id: 'ds-1',
+            available_labels: ['SUCCESS', 'FAILURE', 'CUSTOM'],
+            episodes: { '0': ['SUCCESS'], '1': ['FAILURE'], '2': ['SUCCESS'], '3': ['CUSTOM'] },
+          },
+          { headers: { ETag: 'current' } },
+        ),
+      )
+      labelDraftMocks.load.mockResolvedValueOnce({
+        baseEtag: 'old',
+        baseline: { episodeLabels: { 0: ['SUCCESS'], 1: ['SUCCESS'], 2: ['SUCCESS'] } },
+        draft: { availableLabels: ['SUCCESS'], episodeLabels: { 0: [], 1: ['SUCCESS'] } },
+      })
+      selectDataset('ds-1')
+      renderHookWithProviders(() => useDatasetLabels())
+      await waitFor(() => expect(useLabelStore.getState().draftHydrated).toBe(true))
+      expect(useLabelStore.getState().episodeLabels).toEqual({
+        0: [],
+        1: ['FAILURE'],
+        2: [],
+        3: ['CUSTOM'],
+      })
+      expect(useLabelStore.getState().savedEpisodeLabels).toEqual({
+        0: ['SUCCESS'],
+        1: ['FAILURE'],
+        2: ['SUCCESS'],
+        3: ['CUSTOM'],
+      })
+      expect(useLabelStore.getState().availableLabels).toEqual(['SUCCESS', 'FAILURE', 'CUSTOM'])
+      expect(useLabelStore.getState().conflict).toMatchObject({
+        currentEtag: 'current',
+        episodeIndex: 0,
+        submittedLabels: [],
+      })
+    })
+
     it('does not let delayed label draft hydration overwrite a newer local edit', async () => {
       let resolveDraft!: (value: unknown) => void
       labelDraftMocks.load.mockReturnValueOnce(
@@ -831,6 +907,61 @@ describe('use-labels hooks', () => {
       expect(useLabelStore.getState().episodeLabels[0]).toEqual(['PARTIAL'])
       expect(useLabelStore.getState().savedEpisodeLabels[0]).toEqual(['PARTIAL'])
     })
+
+    it.each(['loading', 'failed'])(
+      'restores cached labels after returning from a %s dataset',
+      async (state) => {
+        const queryClient = createTestQueryClient()
+        queryClient.setDefaultOptions({ queries: { retry: false, gcTime: Infinity } })
+        mockFetch.mockResolvedValueOnce(
+          jsonResponse(
+            {
+              dataset_id: 'ds-1',
+              available_labels: ['SUCCESS', 'CUSTOM'],
+              episodes: { '0': ['SUCCESS'], '1': ['CUSTOM'] },
+              analysis: { '0': { object: 'cube' } },
+            },
+            { headers: { ETag: 'saved-labels' } },
+          ),
+        )
+        if (state === 'failed')
+          mockFetch.mockResolvedValue(jsonResponse({ detail: 'Unavailable' }, { status: 403 }))
+        else mockFetch.mockImplementation(() => new Promise<JsonResponseLike>(() => undefined))
+        selectDataset('ds-1')
+        const { unmount } = renderHookWithProviders(() => useDatasetLabels(), { queryClient })
+        await waitFor(() => expect(useLabelStore.getState().draftHydrated).toBe(true))
+        expect(useLabelStore.getState().episodeLabels[0]).toEqual(['SUCCESS'])
+
+        act(() => selectDataset('ds-2'))
+        await waitFor(() => expect(useLabelStore.getState().datasetId).toBe('ds-2'))
+        expect(useLabelStore.getState().episodeLabels).toEqual({})
+        if (state === 'failed')
+          await waitFor(() =>
+            expect(
+              queryClient.getQueryState(labelKeys.dataset('ds-2', 'principal-one'))?.status,
+            ).toBe('error'),
+          )
+
+        act(() => selectDataset('ds-1'))
+        await waitFor(() =>
+          expect(useLabelStore.getState().episodeLabels).toEqual({
+            0: ['SUCCESS'],
+            1: ['CUSTOM'],
+          }),
+        )
+        expect(useLabelStore.getState().savedEpisodeLabels).toEqual({
+          0: ['SUCCESS'],
+          1: ['CUSTOM'],
+        })
+        expect(useLabelStore.getState().episodeAnalysis[0]).toEqual({ object: 'cube' })
+        expect(useLabelStore.getState().baseEtag).toBe('saved-labels')
+        expect(useLabelStore.getState().isLoaded).toBe(true)
+        await waitFor(() => expect(useLabelStore.getState().draftHydrated).toBe(true))
+        expect(mockFetch).toHaveBeenCalledTimes(2)
+        unmount()
+        queryClient.clear()
+      },
+    )
 
     it('clears the previous dataset labels while the next dataset loads', async () => {
       mockFetch.mockImplementation(() => new Promise<JsonResponseLike>(() => undefined))

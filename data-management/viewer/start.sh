@@ -240,6 +240,14 @@ start_backend() {
     )
     local judge_extra=""
     local should_install_vlm_judge=false
+    local azureml_enabled="${CURATION_RELEASE_AZUREML_ENABLED:-}"
+    if [[ -z "${azureml_enabled}" ]] && [[ -f "${BACKEND_DIR}/.env" ]]; then
+        azureml_enabled="$(sed -n 's/^CURATION_RELEASE_AZUREML_ENABLED=//p' "${BACKEND_DIR}/.env" | tail -n 1)"
+    fi
+    azureml_enabled="${azureml_enabled//[[:space:]]/}"
+    case "${azureml_enabled,,}" in
+        true|'"true"'|"'true'") backend_sync_args+=(--extra azureml) ;;
+    esac
 
     # Resolve VLM_JUDGE_ENABLED from shell env first, then fall back to backend/.env
     # so that setting it only in .env (the common local-dev pattern) still triggers install.
@@ -309,7 +317,7 @@ start_backend() {
         cd "${BACKEND_DIR}"
         # shellcheck source=/dev/null
         source .venv/bin/activate
-        exec uvicorn src.api.main:app --log-config logging.json --log-level "${LOG_LEVEL}" --reload --host 127.0.0.1 --port "${BACKEND_PORT}" 2>&1
+        exec python -m src.api.server --log-config logging.json --log-level "${LOG_LEVEL}" --reload --host 127.0.0.1 --port "${BACKEND_PORT}" 2>&1
     ) &
     BACKEND_PID=$!
 
