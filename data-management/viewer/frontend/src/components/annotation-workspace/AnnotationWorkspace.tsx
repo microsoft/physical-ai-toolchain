@@ -1,3 +1,5 @@
+import { Activity } from 'react'
+
 import { AnnotationWorkspaceContent } from '@/components/annotation-workspace/AnnotationWorkspaceContent'
 import { AnnotationWorkspaceEmptyState } from '@/components/annotation-workspace/AnnotationWorkspaceEmptyState'
 import { DraftConflictDialog } from '@/components/annotation-workspace/DraftConflictDialog'
@@ -76,7 +78,9 @@ export function AnnotationWorkspace({
           )}
         </div>
       )}
-      <AnnotationWorkspaceContent shell={shell} />
+      <Activity mode={visible ? 'visible' : 'hidden'}>
+        <AnnotationWorkspaceContent shell={shell} />
+      </Activity>
       <DraftConflictDialog />
     </div>
   )

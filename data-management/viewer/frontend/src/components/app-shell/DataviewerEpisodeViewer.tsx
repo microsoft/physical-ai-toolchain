@@ -9,6 +9,8 @@ import { recordDiagnosticEvent } from '@/lib/playback-diagnostics'
 import { useEpisodeStore } from '@/stores'
 
 interface DataviewerEpisodeViewerProps {
+  /** Suspend hidden workspace visuals while keeping saved resource loaders active. */
+  visible?: boolean
   datasetId: string
   episodeIndex: number
   diagnosticsVisible: boolean
@@ -20,6 +22,7 @@ interface DataviewerEpisodeViewerProps {
 }
 
 export function DataviewerEpisodeViewer({
+  visible = true,
   datasetId,
   episodeIndex,
   diagnosticsVisible,
@@ -124,6 +127,7 @@ export function DataviewerEpisodeViewer({
   } else {
     content = (
       <AnnotationWorkspace
+        visible={visible}
         diagnosticsVisible={diagnosticsVisible}
         canGoPreviousEpisode={canGoPreviousEpisode}
         onPreviousEpisode={onPreviousEpisode}

@@ -30,6 +30,10 @@ azure = [
     "azure-storage-blob==12.31.0",
     "azure-identity==1.26.0",
 ]
+azureml = [
+    "physical-ai-curation[azureml]==0.1.0",
+    "azure-identity==1.26.0",
+]
 analysis = [
     "scipy==1.18.1",
     "scikit-learn==1.9.1",
@@ -62,7 +66,7 @@ dev = [
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
     "httpx==0.28.1",
-    "hypothesis==6.170.11",
+    "hypothesis==6.170.15",
     "schemathesis==4.32.2",
 ]
 
@@ -101,10 +105,18 @@ pythonpath = ["../../.."]
 testpaths = ["tests", "../../curation/tests"]
 
 [tool.coverage.run]
+data_file = "../../../logs/coverage-dataviewer/.coverage"
 source = ["src"]
 branch = true
+patch = ["subprocess"]
 omit = ["src/**/conftest.py", "src/**/__init__.py"]
 
 [tool.coverage.report]
 show_missing = true
 precision = 2
+
+[tool.coverage.xml]
+output = "../../../logs/coverage-dataviewer.xml"
+
+[tool.coverage.html]
+directory = "../../../logs/coverage-dataviewer/html"
