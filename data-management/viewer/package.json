@@ -18,7 +18,7 @@
         "test:backend": "cd backend && UV_PROJECT_ENVIRONMENT=\"${UV_PROJECT_ENVIRONMENT:-$PWD/.venv}\" uv run --project ../../.. --all-packages --frozen --group dev --extra analysis --extra hdf5 --extra export --extra auth --extra azure --extra openai pytest -o pythonpath=../../..",
         "test:frontend": "npm --prefix ../.. run validate --workspace robotic-training-data-tool",
         "test": "npm run test:backend && npm run test:frontend",
-        "lint:backend": "cd backend && UV_PROJECT_ENVIRONMENT=\"${UV_PROJECT_ENVIRONMENT:-$PWD/.venv}\" uv run --project ../../.. --all-packages --frozen --group dev ruff check src/ scripts/",
+        "lint:backend": "cd backend && UV_PROJECT_ENVIRONMENT=\"${UV_PROJECT_ENVIRONMENT:-$PWD/.venv}\" uv run --project ../../.. --all-packages --frozen --group dev ruff check src/ tests/",
         "lint:frontend": "npm --prefix ../.. run lint --workspace robotic-training-data-tool",
         "lint": "npm run lint:backend && npm run lint:frontend",
         "validate:backend": "npm run lint:backend && npm run test:backend",
