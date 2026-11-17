@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +22,7 @@ from src.api.services.dataset_service import get_dataset_service
 
 class LabelBlobProvider:
     container_name = "datasets"
+    recorded_release = False
 
     def __init__(self, content: bytes | None, etag: str = '"revision"') -> None:
         self.content = content
@@ -51,6 +53,91 @@ class LabelBlobProvider:
         self.content = content
         self.etag = '"written"'
         return {"etag": self.etag}
+
+    async def _admit_blob_path(self, _path: str) -> bool:
+        return not self.recorded_release
+
+
+@pytest.mark.parametrize("nested", [False, True])
+async def test_given_recorded_release_label_target_when_saved_then_refused_without_mutation(
+    tmp_path: Path, nested: bool
+) -> None:
+    from physical_ai_curation.release.publication import ownership_path
+
+    package = tmp_path / "group" / "source" / "releases" / "published"
+    owner = package.parent / ownership_path(package.name)
+    owner.parent.mkdir(parents=True)
+    owner.write_bytes(b"pending-or-published-record")
+    package.mkdir()
+    target = package / "annotations" if nested else package
+    dataset_id = target.relative_to(tmp_path).as_posix().replace("/", "--")
+    storage = label_storage_mod.LocalLabelStorage(str(tmp_path))
+
+    with pytest.raises(HTTPException) as error:
+        await storage.save(dataset_id, labels_mod.DatasetLabelsFile(dataset_id=dataset_id), if_none_match=True)
+
+    assert error.value.status_code == 403
+    assert error.value.detail == "Recorded releases are read-only"
+    assert not (target / "meta/episode_labels.json").exists()
+    assert owner.read_bytes() == b"pending-or-published-record"
+
+
+async def test_given_unreadable_release_ownership_when_saving_labels_then_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = Path.lstat
+
+    def unreadable(path: Path) -> os.stat_result:
+        if path.parent.name == "_releases":
+            raise PermissionError("private ownership path")
+        return original(path)
+
+    monkeypatch.setattr(Path, "lstat", unreadable)
+    storage = label_storage_mod.LocalLabelStorage(str(tmp_path))
+    with pytest.raises(HTTPException) as error:
+        await storage.save("ds", labels_mod.DatasetLabelsFile(dataset_id="ds"), if_none_match=True)
+    assert error.value.status_code == 403
+    assert not (tmp_path / "ds/meta/episode_labels.json").exists()
+
+
+async def test_given_recorded_package_as_label_base_when_saving_descendant_then_refused(tmp_path: Path) -> None:
+    from physical_ai_curation.release.publication import ownership_path
+
+    package = tmp_path / "published"
+    owner = tmp_path / ownership_path(package.name)
+    owner.parent.mkdir()
+    owner.write_bytes(b"recorded-package")
+    package.mkdir()
+    storage = label_storage_mod.LocalLabelStorage(str(package))
+    with pytest.raises(HTTPException) as error:
+        await storage.save("annotations", labels_mod.DatasetLabelsFile(dataset_id="annotations"), if_none_match=True)
+    assert error.value.status_code == 403
+    assert not (package / "annotations/meta/episode_labels.json").exists()
+
+
+async def test_given_recorded_release_label_blob_when_saved_then_refused_without_upload() -> None:
+    provider = LabelBlobProvider(b"original")
+    provider.recorded_release = True
+    storage = label_storage_mod.BlobLabelStorage(provider)
+
+    with pytest.raises(HTTPException) as error:
+        await storage.save("group--source--releases--published", labels_mod.DatasetLabelsFile(dataset_id="published"))
+
+    assert error.value.status_code == 403
+    assert error.value.detail == "Recorded releases are read-only"
+    assert provider.content == b"original"
+
+
+async def test_given_deep_recorded_release_when_checking_blob_path_then_all_ancestors_are_considered() -> None:
+    from src.api.storage.blob_dataset import BlobDatasetProvider
+
+    release_id = "a--b--c--d--e--source--releases--published"
+    provider = SimpleNamespace(_admitted=AsyncMock(side_effect=lambda value: value != release_id))
+    admitted = await BlobDatasetProvider._admit_blob_path(
+        provider, release_id.replace("--", "/") + "/meta/episode_labels.json"
+    )
+    assert not admitted
+    assert provider._admitted.call_args == call(release_id)
 
 
 @pytest.mark.parametrize("failure", ["directory", "encoding"])
@@ -1104,7 +1191,11 @@ async def test_given_existing_blob_when_create_only_then_returns_revision_confli
     blob = SimpleNamespace(upload_blob=AsyncMock(side_effect=error))
     container = SimpleNamespace(get_blob_client=lambda path: blob)
     client = SimpleNamespace(get_container_client=lambda name: container)
-    provider = SimpleNamespace(_get_client=AsyncMock(return_value=client), container_name="datasets")
+    provider = SimpleNamespace(
+        _get_client=AsyncMock(return_value=client),
+        container_name="datasets",
+        _admit_blob_path=AsyncMock(return_value=True),
+    )
 
     with pytest.raises(labels_mod.RevisionConflictError):
         await labels_mod.BlobLabelStorage(provider).save(
@@ -1123,6 +1214,7 @@ async def test_blob_label_storage_save_uploads_json() -> None:
     provider = SimpleNamespace(
         _get_client=AsyncMock(return_value=client),
         container_name="datasets",
+        _admit_blob_path=AsyncMock(return_value=True),
     )
     storage = labels_mod.BlobLabelStorage(provider)
     labels_file = labels_mod.DatasetLabelsFile(dataset_id="ds")
@@ -1153,7 +1245,11 @@ async def test_blob_label_storage_save_uses_matching_revision(monkeypatch: pytes
     container.get_blob_client.return_value = blob_client
     client = MagicMock()
     client.get_container_client.return_value = container
-    provider = SimpleNamespace(_get_client=AsyncMock(return_value=client), container_name="datasets")
+    provider = SimpleNamespace(
+        _get_client=AsyncMock(return_value=client),
+        container_name="datasets",
+        _admit_blob_path=AsyncMock(return_value=True),
+    )
     storage = labels_mod.BlobLabelStorage(provider)
 
     etag = await storage.save(
@@ -1175,7 +1271,11 @@ async def test_blob_label_storage_save_uses_create_only_precondition() -> None:
     container.get_blob_client.return_value = blob_client
     client = MagicMock()
     client.get_container_client.return_value = container
-    provider = SimpleNamespace(_get_client=AsyncMock(return_value=client), container_name="datasets")
+    provider = SimpleNamespace(
+        _get_client=AsyncMock(return_value=client),
+        container_name="datasets",
+        _admit_blob_path=AsyncMock(return_value=True),
+    )
     storage = labels_mod.BlobLabelStorage(provider)
 
     etag = await storage.save(
@@ -1197,6 +1297,7 @@ async def test_blob_label_storage_save_failure_raises_500(monkeypatch: pytest.Mo
     provider = SimpleNamespace(
         _get_client=AsyncMock(side_effect=error),
         container_name="datasets",
+        _admit_blob_path=AsyncMock(return_value=True),
     )
     storage = labels_mod.BlobLabelStorage(provider)
 

@@ -61,9 +61,10 @@ def launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
         encoding="utf-8",
     )
     uvicorn.chmod(0o755)
+    shutil.copy2(uvicorn, backend_bin / "python")
     (backend / ".env").write_text(f"DATA_DIR={root}\n", encoding="utf-8")
 
-    for name in ("DATA_DIR", "VLM_JUDGE_ENABLED", "VLM_JUDGE_BACKEND", "LOG_LEVEL"):
+    for name in ("DATA_DIR", "VLM_JUDGE_ENABLED", "VLM_JUDGE_BACKEND", "LOG_LEVEL", "CURATION_RELEASE_AZUREML_ENABLED"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("PATH", f"{backend_bin}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("HEALTH_TIMEOUT", "5")
@@ -157,6 +158,30 @@ def test_vlm_setup_preserves_existing_optional_dependencies(launcher: Path, monk
         assert ["--extra", extra] in [sync_calls[0][index : index + 2] for index in range(len(sync_calls[0]) - 1)]
 
 
+@pytest.mark.parametrize("shell_value", [None, "false", "true"])
+def test_given_azureml_configuration_when_launching_then_optional_sdk_restore_follows_precedence(
+    launcher: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    shell_value: str | None,
+) -> None:
+    environment = launcher.parent / "backend/.env"
+    environment.write_text(environment.read_text() + "CURATION_RELEASE_AZUREML_ENABLED=true\n")
+    if shell_value is not None:
+        monkeypatch.setenv("CURATION_RELEASE_AZUREML_ENABLED", shell_value)
+    result = subprocess.run(
+        ["bash", str(launcher), "--backend"],
+        capture_output=True,
+        text=True,
+        timeout=LAUNCH_TIMEOUT,
+        check=False,
+    )
+    assert result.returncode == 23, result.stdout + result.stderr
+    args = shlex.split((launcher.parent / "backend/uv-calls.txt").read_text().splitlines()[0])
+    assert (["--extra", "azureml"] in [args[index : index + 2] for index in range(len(args) - 1)]) is (
+        shell_value != "false"
+    )
+
+
 def _option_value(args: list[str], option: str) -> str | None:
     return args[args.index(option) + 1] if option in args else None
 
@@ -210,8 +235,8 @@ def test_backend_runs_on_loopback_with_logging_config(
         assert args[:5] == ["run", "--no-sync", "--frozen", "--directory", "backend"]
         assert _option_value(args, "--project") == str(launcher.parents[2])
         assert _option_value(args, "--package") == "lerobot-annotation-api"
-        args = args[args.index("uvicorn") + 1 :]
-    assert args[0] == "src.api.main:app"
+        args = args[args.index("python") + 1 :]
+    assert args[:2] == ["-m", "src.api.server"]
     assert _option_value(args, "--log-config") == "logging.json"
     assert _option_value(args, "--log-level") == expected_level
     assert _option_value(args, "--host") == "127.0.0.1"
