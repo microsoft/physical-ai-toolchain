@@ -547,3 +547,17 @@ class TestVideoAndFrames:
         handler, _ = _configured_handler(monkeypatch, tmp_path)
 
         assert handler.get_frame_image("dataset", 0, 0, "unknown") is None
+
+    def test_extract_frame_av_returns_none_when_time_base_unset(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path)
+        from fractions import Fraction
+        zero_time_base = getattr(av, "AVRational", Fraction)(0, 1)
+        fake_stream = SimpleNamespace(type="video", time_base=zero_time_base)
+        fake_container = MagicMock()
+        fake_container.streams = [fake_stream]
+        fake_av = MagicMock()
+        fake_av.open.return_value.__enter__.return_value = fake_container
+        monkeypatch.setitem(sys.modules, "av", fake_av)
+
+        result = handler._extract_frame_av(tmp_path / "video.mp4", frame_idx=0, fps=30.0)
+        assert result is None

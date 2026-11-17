@@ -147,13 +147,14 @@ def _evenly_spaced(from_s: float, to_s: float, n: int) -> list[float]:
 
 def _seek_and_decode(container, stream, timestamp_s: float):
     time_base = getattr(stream, "time_base", None)
-    if time_base:
-        pts = int(timestamp_s / float(time_base))
-        container.seek(pts, any_frame=False, backward=True, stream=stream)
+    if not time_base:
+        raise ValueError("Video stream has no time base; cannot sample frames by timestamp")
+    pts = int(timestamp_s / float(time_base))
+    container.seek(pts, any_frame=False, backward=True, stream=stream)
     target = timestamp_s
     last_frame = None
     for frame in container.decode(stream):
-        ts = float(frame.pts * time_base) if (frame.pts is not None and time_base) else 0.0
+        ts = float(frame.pts * time_base) if frame.pts is not None else 0.0
         last_frame = frame
         if ts >= target:
             break

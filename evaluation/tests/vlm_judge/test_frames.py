@@ -9,12 +9,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import av
+import numpy as np
 import pytest
 from PIL import Image
 
 from evaluation.vlm_judge.frames import (
     FrameWindow,
     MediaInputError,
+    _seek_and_decode,
     _stream_duration_s,
     encode_jpeg_b64,
     extract_frames,
@@ -112,7 +114,7 @@ def test_given_non_rgb_image_when_encoding_then_returns_decodable_rgb_jpeg() -> 
         (SimpleNamespace(duration=2, time_base=Fraction(1, 4)), SimpleNamespace(duration=2_000_000), 0.5),
         (SimpleNamespace(duration=None, time_base=None), SimpleNamespace(duration=2_000_000), 2.0),
         (SimpleNamespace(duration=2, time_base=Fraction(0, 1)), SimpleNamespace(duration=2_000_000), 2.0),
-        (SimpleNamespace(duration=2, time_base=av.AVRational(0, 1)), SimpleNamespace(duration=2_000_000), 2.0),
+        (SimpleNamespace(duration=2, time_base=getattr(av, "AVRational", Fraction)(0, 1)), SimpleNamespace(duration=2_000_000), 2.0),
     ],
 )
 def test_given_video_timing_metadata_when_reading_duration_then_prefers_stream_and_falls_back_to_container(
@@ -139,29 +141,14 @@ def test_given_zero_division_when_extracting_frames_then_translates_to_media_inp
     assert isinstance(error.value.__cause__, ZeroDivisionError)
 
 
-def test_given_stream_with_unset_time_base_when_seeking_and_decoding_then_handles_gracefully() -> None:
-    import numpy as np
-
-    from evaluation.vlm_judge.frames import _seek_and_decode
-
-    class FakeFrame:
-        pts = 100
-
-        def to_ndarray(self, format="rgb24"):
-            return np.zeros((10, 10, 3), dtype=np.uint8)
-
+def test_given_stream_with_unset_time_base_when_seeking_and_decoding_then_rejects_stream() -> None:
     class FakeContainer:
-        def __init__(self):
-            self.sought = False
+        def seek(self, *args: object, **kwargs: object) -> None:
+            raise AssertionError("seek must not run without a time base")
 
-        def seek(self, *args, **kwargs):
-            self.sought = True
+        def decode(self, stream: object) -> list[object]:
+            return []
 
-        def decode(self, stream):
-            return [FakeFrame()]
-
-    container = FakeContainer()
-    stream = SimpleNamespace(time_base=av.AVRational(0, 1))
-    arr = _seek_and_decode(container, stream, 0.5)
-    assert not container.sought
-    assert arr.shape == (10, 10, 3)
+    zero_time_base = getattr(av, "AVRational", Fraction)(0, 1)
+    with pytest.raises(ValueError, match="no time base"):
+        _seek_and_decode(FakeContainer(), SimpleNamespace(time_base=zero_time_base), 0.5)
