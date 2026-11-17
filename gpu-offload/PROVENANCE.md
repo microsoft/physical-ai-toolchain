@@ -1,7 +1,7 @@
 ---
 title: GPU Offload Provenance
 description: Upstream snapshot record, licensing permission, and attribution
-ms.date: 2026-11-11
+ms.date: 2026-11-17
 ms.topic: reference
 ---
 
@@ -26,12 +26,11 @@ Key upstream files referenced during the port and their recorded disposition:
 | platform/offload/*/dockerbuild-*        | Reviewed for patterns; Podman used instead |
 | platform/offload/*/dockerrun-*          | Reviewed for patterns; Podman used instead |
 
-These paths and dispositions are retained from the original porting record.
-
 ## Licensing and Permissions
 
-The original porting record states that licensing permission for reuse of the pinned
-upstream snapshot has been obtained.
+Licensing permission for reuse of the pinned upstream snapshot was recorded when the
+domain was ported (#1556). The audit evidence for that permission is still outstanding;
+see the Implementation Checkpoints in `XAVIER-PORTING.md`.
 
 Implementation teams must confirm and retain:
 
@@ -44,9 +43,12 @@ documentation. Do not rely on this file as license text.
 
 ## Repository and Third-Party Licensing
 
-The repository's root `LICENSE` file contains the MIT License. Repository-authored
-GPU-offload material is covered by that license unless a file or applicable third-party
-notice specifies otherwise.
+The `gpu-offload` domain adapts a GPU-offloading reference architecture from the pinned
+upstream snapshot as documented reference material (contract and deployment topology).
+Repository-authored and adapted GPU-offload material is delivered under the repository's
+MIT license, as recorded in the root `LICENSE` file and per-file
+`SPDX-License-Identifier: MIT` headers, unless a file or applicable third-party notice
+specifies otherwise.
 
 The SO-101 example at `examples/so101-real-hardware/` pins the LeRobot Python package
 to version `0.6.1`, as recorded in its `.lerobot-version`, `pyproject.toml`, and
@@ -55,10 +57,6 @@ to version `0.6.1`, as recorded in its `.lerobot-version`, `pyproject.toml`, and
 LeRobot is a third-party dependency. Its applicable license and attribution obligations
 must be determined from the LeRobot distribution and its license notices. The
 repository's MIT license does not replace or relicense third-party dependencies.
-
-There is no separate `ros2_bridge/` directory in the tracked SO-101 example. Therefore,
-this provenance record does not identify a ROS 2 bridge there as an Apache-2.0
-exception.
 
 ## Image Names
 
