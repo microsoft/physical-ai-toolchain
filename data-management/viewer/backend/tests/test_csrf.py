@@ -55,6 +55,37 @@ class TestRequireCsrfToken:
         token = generate_csrf_token()
         await require_csrf_token(_csrf_request("POST", cookie=token, header=token))
 
+    @pytest.mark.parametrize("claimed_type", ["machine", "headless", "application"])
+    async def test_given_client_claimed_machine_when_no_cookie_then_csrf_denied(self, claimed_type: str) -> None:
+        request = make_asgi_request(
+            "POST",
+            "/api/releases",
+            headers={
+                "Authorization": "Bearer client-claim",
+                "X-Client-Type": claimed_type,
+                CSRF_HEADER_NAME: "token-without-cookie",
+            },
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await require_csrf_token(request)
+
+        assert exc_info.value.status_code == 403
+
+    async def test_given_headless_cookie_jar_when_matching_header_then_mutation_passes(self) -> None:
+        token = generate_csrf_token()
+        request = make_asgi_request(
+            "POST",
+            "/api/releases",
+            headers={
+                "Authorization": "Bearer client-claim",
+                "cookie": f"{CSRF_COOKIE_NAME}={token}",
+                CSRF_HEADER_NAME: token,
+            },
+        )
+
+        await require_csrf_token(request)
+
     async def test_missing_cookie_rejected(self) -> None:
         with pytest.raises(HTTPException) as exc_info:
             await require_csrf_token(_csrf_request("POST", header="abc"))

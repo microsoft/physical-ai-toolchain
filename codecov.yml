@@ -7,7 +7,9 @@
 # pytest-data-pipeline | pytest-data-pipeline.yml       | repo root                       | logs/coverage-data-pipeline.xml   | --cov=data-pipeline/capture
 # pytest-inference     | pytest-inference.yml           | repo root                       | logs/coverage-inference.xml       | --cov=fleet-deployment/inference
 # pytest-shared-ci     | pytest-shared-ci.yml           | repo root                       | logs/coverage-shared-ci.xml       | --cov=shared/ci
-# pytest-dataviewer    | dataviewer-backend-pytests.yml | data-management/viewer/backend  | logs/coverage.xml                 | --cov=src
+# pytest-dataviewer    | dataviewer-backend-pytests.yml | data-management/viewer/backend  | logs/coverage-dataviewer.xml       | --cov=src
+# pytest-curation      | dataviewer-backend-pytests.yml | data-management/viewer/backend  | logs/coverage-curation.xml         | --cov=../../curation/physical_ai_curation
+# pytest-dataset-io    | dataviewer-backend-pytests.yml | data-management/viewer/backend  | logs/coverage-dataset-io.xml       | --cov=../../dataset-io/physical_ai_dataset_io
 # pytest-evaluation    | evaluation-pytests.yml         | evaluation                      | evaluation/logs/coverage.xml      | --cov=.
 # pytest-fuzz          | fuzz-regression-tests.yml      | repo root                       | logs/coverage.xml                 | --cov=tests --cov=data-management/viewer/backend/src --cov=training
 # pytest-accessibility | accessibility-evidence.yml    | repo root                       | logs/coverage-accessibility.xml  | root accessibility suites and scripts/accessibility
@@ -69,6 +71,14 @@ coverage:
         flags:
           - pytest-dataviewer
         target: 80%
+      pytest-curation:
+        flags:
+          - pytest-curation
+        target: 80%
+      pytest-dataset-io:
+        flags:
+          - pytest-dataset-io
+        target: 80%
       pytest-evaluation:
         flags:
           - pytest-evaluation
@@ -112,6 +122,14 @@ flags:
   pytest-dataviewer:
     paths:
       - data-management/viewer/backend/src/
+    carryforward: true
+  pytest-curation:
+    paths:
+      - data-management/curation/physical_ai_curation/
+    carryforward: true
+  pytest-dataset-io:
+    paths:
+      - data-management/dataset-io/physical_ai_dataset_io/
     carryforward: true
   pytest-fuzz:
     paths:
@@ -235,6 +253,14 @@ component_management:
       name: Fleet Deployment / Inference
       paths:
         - fleet-deployment/inference/**
+    - component_id: data-management-curation
+      name: Data Management / Curation
+      paths:
+        - data-management/curation/physical_ai_curation/**
+    - component_id: data-management-dataset-io
+      name: Data Management / Dataset I/O
+      paths:
+        - data-management/dataset-io/physical_ai_dataset_io/**
     - component_id: dataviewer-backend
       name: Dataviewer Backend
       paths:
