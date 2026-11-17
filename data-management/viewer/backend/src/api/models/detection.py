@@ -7,7 +7,7 @@ endpoints and match the frontend TypeScript type definitions.
 
 from __future__ import annotations
 
-from pydantic import Field, field_validator
+from pydantic import Field, StrictInt, field_validator
 
 from ..validation import SanitizedModel
 
@@ -15,7 +15,7 @@ from ..validation import SanitizedModel
 class DetectionRequest(SanitizedModel):
     """Request parameters for running object detection."""
 
-    frames: list[int] | None = Field(
+    frames: list[StrictInt] | None = Field(
         default=None,
         description="Specific frame indices to process. If None, processes all frames.",
     )

@@ -192,3 +192,117 @@ def test_replayed_authenticated_message_is_rejected_before_handler(monkeypatch) 
     assert handled == [b"authenticated RPC payload"]
     assert messenger.closecalled is True
     client_sock.close()
+
+
+def test_aes_gcm_rejects_new_frames_when_replay_cache_full(monkeypatch: pytest.MonkeyPatch) -> None:
+    key = secrets.token_bytes(32)
+    monkeypatch.setattr(
+        msgsock,
+        "_replay_window",
+        msgsock._ReplayWindow(max_age_seconds=msgsock._MAX_MESSAGE_AGE_SECONDS, max_entries=2),
+    )
+    monkeypatch.setattr(msgsock.time, "monotonic", lambda: 1_000.0)
+    monkeypatch.setattr(msgsock.time, "time", lambda: 1_000.0)
+
+    first = encryptMessage(b"one", key)
+    second = encryptMessage(b"two", key)
+    third = encryptMessage(b"three", key)
+
+    assert decryptMessage(first, key) == b"one"
+    assert decryptMessage(second, key) == b"two"
+    assert decryptMessage(third, key) is None
+    assert decryptMessage(first, key) is None
+    assert decryptMessage(second, key) is None
+
+
+def test_full_replay_cache_rejects_replay_before_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+    key = secrets.token_bytes(32)
+    monkeypatch.setattr(msgsock, "msgkey", key)
+    monkeypatch.setattr(msgsock, "initheartbeat", True)
+    monkeypatch.setattr(
+        msgsock,
+        "_replay_window",
+        msgsock._ReplayWindow(max_age_seconds=msgsock._MAX_MESSAGE_AGE_SECONDS, max_entries=2),
+    )
+    monkeypatch.setattr(msgsock.time, "monotonic", lambda: 1_000.0)
+    monkeypatch.setattr(msgsock.time, "time", lambda: 1_000.0)
+
+    def receive(payloads: list[bytes]) -> list[bytes]:
+        handled = []
+        client_sock, server_sock = socket.socketpair()
+        with client_sock, server_sock:
+            messenger = MessengerTCP(
+                server_sock,
+                "tcp://authenticated-peer:1",
+                handlefn=lambda data, _messenger, _endpoint: handled.append(data),
+            )
+            try:
+                for payload in payloads:
+                    frame = messenger.data + payload
+                    client_sock.sendall(len(frame).to_bytes(4, "big") + frame)
+                client_sock.shutdown(socket.SHUT_WR)
+                messenger.recvthread()
+            finally:
+                messenger.close()
+        return handled
+
+    first = encryptMessage(b"one", key)
+    second = encryptMessage(b"two", key)
+    third = encryptMessage(b"three", key)
+    assert receive([first, second]) == [b"one", b"two"]
+    fresh_handled = receive([third])
+    replay_handled = receive([first])
+    assert replay_handled == []
+    assert fresh_handled == []
+
+
+def test_replay_cache_accepts_new_nonce_after_expiry() -> None:
+    window = msgsock._ReplayWindow(max_age_seconds=300, max_entries=1)
+
+    assert window.register(b"first", 1_000.0)
+    assert not window.register(b"second", 1_299.0)
+    assert window.register(b"second", 1_301.0)
+    assert not window.register(b"second", 1_301.0)
+
+
+def test_replay_rejected_after_wall_clock_regression(monkeypatch: pytest.MonkeyPatch) -> None:
+    key = secrets.token_bytes(32)
+    monkeypatch.setattr(msgsock.time, "time", lambda: 1_000.0)
+    monkeypatch.setattr(msgsock.time, "monotonic", lambda: 500.0)
+    encrypted = encryptMessage(b"payload", key)
+    assert decryptMessage(encrypted, key) == b"payload"
+
+    monkeypatch.setattr(msgsock.time, "time", lambda: 990.0)
+    monkeypatch.setattr(msgsock.time, "monotonic", lambda: 501.0)
+    assert decryptMessage(encrypted, key) is None
+    assert decryptMessage(encryptMessage(b"fresh", key), key) == b"fresh"
+
+
+@pytest.mark.parametrize(
+    ("received_at", "expected"),
+    [(1_300.0, b"payload"), (1_300.001, None), (970.0, b"payload"), (969.999, None)],
+)
+def test_aes_gcm_clock_boundaries(monkeypatch: pytest.MonkeyPatch, received_at: float, expected: bytes | None) -> None:
+    key = secrets.token_bytes(32)
+    monkeypatch.setattr(msgsock.time, "time", lambda: 1_000.0)
+    encrypted = encryptMessage(b"payload", key)
+    monkeypatch.setattr(msgsock.time, "time", lambda: received_at)
+
+    assert decryptMessage(encrypted, key) == expected
+
+
+@pytest.mark.parametrize("received_at", [1_300.001, 969.999])
+def test_aes_gcm_skew_rejection_mentions_clock_sync(monkeypatch: pytest.MonkeyPatch, received_at: float) -> None:
+    key = secrets.token_bytes(32)
+    messages = []
+
+    def capture_error(msg: str, *args, **kwargs) -> None:
+        messages.append(msg % args if args else msg)
+
+    monkeypatch.setattr(msgsock.logger, "error", capture_error)
+    monkeypatch.setattr(msgsock.time, "time", lambda: 1_000.0)
+    encrypted = encryptMessage(b"payload", key)
+    monkeypatch.setattr(msgsock.time, "time", lambda: received_at)
+
+    assert decryptMessage(encrypted, key) is None
+    assert any("Sync peer clocks" in message for message in messages)

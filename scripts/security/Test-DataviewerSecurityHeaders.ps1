@@ -82,9 +82,10 @@ $rootResponse = Invoke-WebRequest -Uri "$BaseUri$rootRoute" -UseBasicParsing
 $expectedHeaders = Get-ExpectedHeaders -Route $rootRoute
 Assert-SecurityHeaders -Route $rootRoute -Response $rootResponse -ExpectedHeaders $expectedHeaders
 
-$assetMatch = [regex]::Match($rootResponse.Content, '<script[^>]+\ssrc=["''](?<path>/assets/[^"'']+\.js)["'']')
+$assetMatch = [regex]::Match($rootResponse.Content, '<script[^>]+\ssrc=["''](?<path>(?:\.?/)?assets/[^"'']+\.js)["'']')
 if (-not $assetMatch.Success) { throw 'Root HTML does not reference a built JS asset via a <script> tag' }
-$assetRoute = $assetMatch.Groups['path'].Value
+# The build emits relative asset URLs so the app also runs under a path prefix; resolve them against the root document.
+$assetRoute = [System.Uri]::new([System.Uri]"$BaseUri$rootRoute", $assetMatch.Groups['path'].Value).AbsolutePath
 
 $routes = @(
     @{ Route = $assetRoute; ExpectedStatus = 200 }

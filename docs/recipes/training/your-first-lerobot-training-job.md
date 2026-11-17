@@ -2,7 +2,7 @@
 title: Your First LeRobot Training Job
 description: Submit and verify a LeRobot behavioral cloning training job on OSMO
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-14
+ms.date: 2026-10-13
 ms.topic: tutorial
 keywords:
   - lerobot

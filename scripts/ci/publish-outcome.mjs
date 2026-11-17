@@ -316,9 +316,10 @@ function structuredCounts(data, spec) {
       Array.isArray(data.allowedHosts) && data.allowedHosts.length > 0 &&
       data.allowedHosts.every(host => typeof host === 'string' && host.length > 0) &&
       Array.isArray(violations) && data.violationCount === violations.length &&
-      violations.every(result => object(result) && typeof result.file === 'string' && result.file.length > 0 &&
-        Number.isSafeInteger(result.line) && result.line > 0 && typeof result.source === 'string' &&
-        typeof result.reason === 'string' && result.reason.length > 0),
+      // Findings omit source values; line 0 marks file-level diagnostics.
+      violations.every(result => object(result) &&
+        ['file', 'rule', 'reason'].every(key => typeof result[key] === 'string' && result[key].trim().length > 0) &&
+        Number.isSafeInteger(result.line) && result.line >= 0),
     'Contradictory public dependency feed results');
     return { findings: violations.length, successful: violations.length === 0 };
   }

@@ -1,6 +1,18 @@
-# Dataset Curation
+---
+title: Dataset Curation
+description: General dataset filtering, splitting, merging, conversion and validation contracts.
+ms.date: 2026-11-03
+ms.topic: reference
+---
 
 Contracts for dataset filtering, splitting, merging, conversion, and validation operations.
+
+Curated release publication is a separate workflow with a narrower supported
+route matrix. Its saved-selection, provenance, immutable package, verification and
+recoverable-job contracts are defined in the
+[Curated Dataset Release specification](curated-dataset-release.specification.md).
+The operations below do not imply that releases support arbitrary merging,
+splitting or format conversion.
 
 ## Operations
 

@@ -22,6 +22,8 @@ mono_crash.*
 [Dd]ebug/
 [Dd]ebugPublic/
 [Rr]elease/
+!data-management/curation/physical_ai_curation/release/
+!data-management/viewer/frontend/src/components/release/
 [Rr]eleases/
 x64/
 x86/
@@ -168,6 +170,7 @@ coverage/
 
 # Visual Studio code coverage results
 *.coverage
+.coverage.*
 *.coveragexml
 
 # NCrunch
@@ -347,6 +350,9 @@ paket-files/
 **/__pycache__/
 **/*.egg-info/
 *.pyc
+/data-management/curation/build/
+/data-management/dataset-io/build/
+/evaluation/vlm_judge/build/
 
 # Hypothesis testing framework cache
 .hypothesis/
@@ -495,7 +501,7 @@ AGENTS.md
 envs/
 
 datasets/
-local/
+/local/
 
 *.etli
 

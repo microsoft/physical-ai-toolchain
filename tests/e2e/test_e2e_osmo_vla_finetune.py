@@ -1,18 +1,25 @@
 """
-End-to-end test for the OSMO VLA (NVIDIA GR00T) LeRobot fine-tuning submission path.
+End-to-end tests for the OSMO VLA fine-tuning paths.
 
-Submits a real OSMO workflow, waits for it to complete, and validates that the
-fine-tuning workflow task succeeded. Generates and stages a minimal synthetic
-GR00T dataset by default, so no dataset needs to be pre-staged; set
-``E2E_VLA_DATASET_BLOB_URL`` to fine-tune against a pre-staged dataset instead.
+``test_osmo_vla_finetune_e2e`` covers NVIDIA GR00T under the azure profile: it submits a real
+OSMO workflow, waits for it to complete, and validates that the fine-tuning workflow task
+succeeded. It generates and stages a minimal synthetic GR00T dataset by default, so no dataset
+needs to be pre-staged; set ``E2E_VLA_DATASET_BLOB_URL`` to fine-tune against a pre-staged dataset.
+
+``test_osmo_smolvla_lifecycle_e2e`` covers SmolVLA under the local profile: it fine-tunes the
+pinned base on a dataset in the data root (``so101-learner``, or the one ``E2E_SMOLVLA_DATASET``
+names), registers the checkpoint in the local MLflow registry, and requires it to beat the
+unadapted base and its carrier image to reproduce the checkpoint's metrics.
 
 ```shell
 uv run pytest -vv -s -m e2e tests/e2e/test_e2e_osmo_vla_finetune.py
+PLATFORM_PROFILE=local uv run pytest -vv -s -m e2e tests/e2e/test_e2e_osmo_vla_finetune.py
 ```
 """
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -27,6 +34,7 @@ from tests.e2e._common import (
     parse_provenance_marker,
     register_cleanup,
 )
+from tests.e2e._lerobot_lifecycle import LeRobotScenario, run_lerobot_lifecycle
 from tests.e2e._mlflow import assert_osmo_vla_has_mlflow_tracking, delete_mlflow_experiment, delete_mlflow_run
 from tests.e2e._osmo import (
     _vla_base_model_args,
@@ -39,8 +47,33 @@ from tests.e2e._osmo import (
     wait_until_osmo_completed,
     wait_until_osmo_started,
 )
+from tests.e2e._platform import E2EPlatform
+from tests.e2e._profile import LOCAL_PROFILE, profile_selected
 
 _VLA_TASK_NAME = "train"
+
+# Points the SO-101 learner cameras at the base model's camera slots. The fine-tuned policy saves the map
+# with its processors; the unadapted base needs it again as the untrained baseline.
+_SMOLVLA_RENAME_MAP = json.dumps(
+    {
+        "observation.images.external": "observation.images.camera1",
+        "observation.images.wrist": "observation.images.camera2",
+    }
+)
+_SMOLVLA_SCENARIO = LeRobotScenario(
+    policy_type="smolvla",
+    training_steps=2000,
+    batch_size=8,
+    save_freq=1000,
+    log_freq=50,
+    learning_rate="1e-4",
+    eval_episodes=3,
+    data_root_dataset="so101-learner",
+    dataset_variable="E2E_SMOLVLA_DATASET",
+    training_args=("--rename-map", _SMOLVLA_RENAME_MAP),
+    baseline_args=("--rename-map", _SMOLVLA_RENAME_MAP),
+    evaluate_carrier=True,
+)
 
 
 def test_vla_base_model_forwards_revision(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -176,3 +209,16 @@ def test_osmo_vla_finetune_e2e(
         required_executions=("osmo_workflow",),
     )
     log_e2e("OSMO VLA fine-tuning e2e test finished successfully")
+
+
+@pytest.mark.e2e
+@pytest.mark.skipif(
+    not profile_selected(LOCAL_PROFILE),
+    reason="SmolVLA fine-tuning runs under the local platform profile; the azure profile covers VLA with GR00T and pi0",
+)
+@pytest.mark.usefixtures("ensure_gpu_nodes_available")
+@pytest.mark.usefixtures("ensure_osmo_cli_available")
+def test_osmo_smolvla_lifecycle_e2e(request: pytest.FixtureRequest, e2e_platform: E2EPlatform) -> None:
+    log_e2e("Starting OSMO VLA (SmolVLA) lifecycle e2e test")
+    run_lerobot_lifecycle(request, e2e_platform, _SMOLVLA_SCENARIO)
+    log_e2e("OSMO SmolVLA lifecycle e2e test finished successfully")

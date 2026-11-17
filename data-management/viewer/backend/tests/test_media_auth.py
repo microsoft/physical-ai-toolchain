@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from src.api import auth
 from src.api.main import app
-from tests.conftest import make_asgi_request
+from tests.conftest import HostedCaller, make_asgi_request
 
 COOKIE = "__Secure-dataviewer-media"
 NOW = 2_000_000_000
@@ -79,16 +79,22 @@ async def test_cookie_never_grants_general_api_access(
     path: str,
 ) -> None:
     provider, token = token_provider
-    request = make_asgi_request(method, path, {"Cookie": f"{COOKIE}={token}"})
+    request = make_asgi_request(method, path, {"Cookie": f"{COOKIE}={token}", "Sec-Fetch-Site": "same-origin"})
     assert await provider.authenticate(request) is None
 
 
-@pytest.mark.parametrize("site", ["cross-site", "same-site"])
+@pytest.mark.parametrize("site", ["cross-site", "same-site", "none", "", "unexpected"])
 async def test_cross_origin_media_cookie_rejected(token_provider: tuple[auth.JwtProvider, str], site: str) -> None:
     provider, token = token_provider
     request = make_asgi_request(
         "GET", "/api/datasets/example/episodes/0/video/front", {"Cookie": f"{COOKIE}={token}", "Sec-Fetch-Site": site}
     )
+    assert await provider.authenticate(request) is None
+
+
+async def test_media_cookie_without_fetch_metadata_rejected(token_provider: tuple[auth.JwtProvider, str]) -> None:
+    provider, token = token_provider
+    request = make_asgi_request("GET", "/api/datasets/example/episodes/0/frames/0", {"Cookie": f"{COOKIE}={token}"})
     assert await provider.authenticate(request) is None
 
 
@@ -101,7 +107,7 @@ async def test_invalid_header_does_not_fall_back_to_cookie(
     request = make_asgi_request(
         "GET",
         "/api/datasets/example/episodes/0/video/front",
-        {"Cookie": f"{COOKIE}={token}", "Authorization": authorization},
+        {"Cookie": f"{COOKIE}={token}", "Authorization": authorization, "Sec-Fetch-Site": "same-origin"},
     )
     assert await provider.authenticate(request) is None
 
@@ -111,7 +117,9 @@ async def test_cookie_signature_is_verified(token_provider: tuple[auth.JwtProvid
     parts = token.split(".")
     parts[2] = ("A" if parts[2][0] != "A" else "B") + parts[2][1:]
     request = make_asgi_request(
-        "GET", "/api/datasets/example/episodes/0/video/front", {"Cookie": f"{COOKIE}={'.'.join(parts)}"}
+        "GET",
+        "/api/datasets/example/episodes/0/video/front",
+        {"Cookie": f"{COOKIE}={'.'.join(parts)}", "Sec-Fetch-Site": "same-origin"},
     )
     assert await provider.authenticate(request) is None
 
@@ -162,7 +170,7 @@ async def test_cookie_requires_valid_expiration_audience_and_issuer(
     request = make_asgi_request(
         "GET",
         "/api/datasets/example/episodes/0/video/front",
-        {"Cookie": f"{COOKIE}={token}"},
+        {"Cookie": f"{COOKIE}={token}", "Sec-Fetch-Site": "same-origin"},
     )
     assert await provider.authenticate(request) is None
 
@@ -192,12 +200,51 @@ def test_session_never_outlives_verified_token(
         assert f"Max-Age={expected}" in response.headers["set-cookie"]
 
 
+HOSTED_MEDIA_PATHS = [
+    "/api/datasets/example/episodes/0/video/front",
+    "/api/datasets/example/episodes/0/frames/0",
+]
+
+
+@pytest.mark.parametrize("path", HOSTED_MEDIA_PATHS)
+def test_hosted_media_cookie_is_not_a_caller_credential(hosted_caller: HostedCaller, path: str) -> None:
+    client = TestClient(app, base_url="https://testserver")
+
+    response = client.get(path, headers={"Cookie": f"{COOKIE}=cookie-value", "Sec-Fetch-Site": "same-origin"})
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Caller authentication required"}
+
+
+@pytest.mark.parametrize("path", HOSTED_MEDIA_PATHS)
+def test_hosted_media_passes_caller_and_principal_gate(hosted_caller: HostedCaller, path: str) -> None:
+    client = TestClient(app, base_url="https://testserver")
+
+    response = client.get(path, headers=hosted_caller.request_headers())
+
+    assert response.status_code not in (401, 403)
+
+
+def test_hosted_media_session_rejects_principal_only_identity(hosted_caller: HostedCaller) -> None:
+    client = TestClient(app, base_url="https://testserver")
+    csrf = client.get("/api/csrf-token", headers=hosted_caller.request_headers()).json()["csrf_token"]
+
+    response = client.post(
+        "/api/auth/media-session",
+        headers=hosted_caller.request_headers(extra=[("X-CSRF-Token", csrf)]),
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "JWT authentication required for native media"}
+    assert "set-cookie" not in response.headers
+
+
 async def test_cookie_accepts_head_requests(token_provider: tuple[auth.JwtProvider, str]) -> None:
     provider, token = token_provider
     request = make_asgi_request(
         "HEAD",
         "/api/datasets/example/episodes/0/video/front",
-        {"Cookie": f"{COOKIE}={token}"},
+        {"Cookie": f"{COOKIE}={token}", "Sec-Fetch-Site": "same-origin"},
     )
     assert await provider.authenticate(request) is not None
 

@@ -20,8 +20,46 @@ from src.api.services.episode_edits import (
     SubtaskSegment,
     TrajectoryAdjustment,
     parse_edit_operations,
+    read_subtask_file,
 )
 from src.api.services.hdf5_exporter import HDF5Exporter
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        None,
+        {"label": 1, "frame_range": [0, 3]},
+        {"label": "  ", "frame_range": [0, 3]},
+        {"label": "pick", "frame_range": "0:3"},
+        {"label": "pick", "frame_range": [0]},
+        {"label": "pick", "frame_range": [False, 3]},
+        {"label": "pick", "frame_range": [-1, 3]},
+        {"label": "pick", "frame_range": [3, 1]},
+        {"label": "pick", "frame_range": [0, 12]},
+    ],
+    ids=[
+        "non-object",
+        "non-string-label",
+        "blank-label",
+        "non-list-range",
+        "short-range",
+        "bool-frame",
+        "negative",
+        "reversed",
+        "outside",
+    ],
+)
+def test_given_invalid_recorded_subtask_when_reading_then_keeps_only_valid_segments(
+    tmp_path: Path, entry: object
+) -> None:
+    path = tmp_path / "episode.subtasks.json"
+    path.write_text(json.dumps([entry, {"label": "pick", "frame_range": [0, 3]}]))
+
+    assert read_subtask_file(path, 12) == [
+        SubtaskSegment(id="recorded-0", label="pick", frame_range=(0, 3), color=None, source="recorded")
+    ]
+
 
 # ============================================================================
 # Helpers

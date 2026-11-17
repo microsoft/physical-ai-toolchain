@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Attach SBOM and an optional OpenVEX attestation to an already-built, signed image in ACR.
-# Decoupled from build-aml-model-image.sh so security/compliance can refresh
+# Decoupled from build-model-image.sh so security/compliance can refresh
 # VEX dispositions without rebuilding.
 set -o errexit -o nounset
 

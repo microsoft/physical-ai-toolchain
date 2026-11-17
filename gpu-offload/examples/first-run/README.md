@@ -97,6 +97,16 @@ installs the controller, and deploys this example. `f-20-verify` runs the checks
 | `d-offload-61-check-gpu-allocation` | GPU only  | Only the generated server Deployment requests a GPU     |
 | `d-offload-62-check-gpu-model`      | GPU only  | The model ran on CUDA and the client sees no GPU device |
 
+The execution checker extracts the JSON object from the latest non-GPU result line
+and verifies both the server pod name and predictions `[1, 4, 9, 16]`. Runtime logs can
+share that line: [`SimpleLog.log()`](../../runtime/remoter/simplelog.py) writes its
+timestamp/level prefix separately from its message, so the client's JSON print can
+land between those writes. A deterministic concurrency regression test reproduces
+this ordering; the original CI failure's exact thread schedule is unknown.
+Missing results report the last client logs after the polling timeout. Malformed or
+truncated JSON reports the offending line; incorrect identity or predictions reports
+the expected and actual values.
+
 Remove the workloads with `mise run f-30-teardown`, or the cluster as well with
 `mise run f-40-teardown-all`.
 

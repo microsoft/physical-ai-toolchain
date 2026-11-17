@@ -2,12 +2,38 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import math
 from collections.abc import AsyncIterator, Iterable
+from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
+from azure.core.exceptions import ResourceNotFoundError
+from physical_ai_curation.release.canonical import serialize_model, sha256_hex
+from physical_ai_curation.release.models import (
+    CHECKSUMS_PATH,
+    INVENTORY_PATH,
+    MANIFEST_PATH,
+    MARKER_PATH,
+    RECEIPT_PATH,
+    EpisodeMapping,
+    FrameMapping,
+    FrozenInput,
+    ReleaseManifest,
+    ReleasePreview,
+)
+from physical_ai_curation.release.packaging import build_inventory
+from physical_ai_curation.release.publication import PublicationAttempt, ownership_bytes
+from physical_ai_curation.release.store import LocalReleaseStore
+from physical_ai_curation.release.verification import build_marker, verify_candidate
+
+from src.api.storage.blob_dataset import BlobDatasetProvider
 
 from .conftest import create_blob_dataset_provider
 
@@ -19,7 +45,7 @@ class _AsyncIter:
         self._items = list(items)
 
     def __aiter__(self) -> AsyncIterator[object]:
-        return self
+        return _AsyncIter(self._items)
 
     async def __anext__(self) -> object:
         if not self._items:
@@ -30,6 +56,7 @@ class _AsyncIter:
 def _make_blob(name: str) -> MagicMock:
     blob = MagicMock()
     blob.name = name
+    blob.etag = '"metadata-one"'
     return blob
 
 
@@ -37,6 +64,452 @@ def _make_directory_blob(name: str) -> MagicMock:
     blob = _make_blob(name)
     blob.metadata = {"hdi_isfolder": "true"}
     return blob
+
+
+async def test_given_reserved_release_when_legacy_discovery_then_not_admitted(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = create_blob_dataset_provider()
+    container = MagicMock()
+    container.walk_blobs.side_effect = lambda **kwargs: _AsyncIter([_make_blob("_releases/")])
+    client = MagicMock()
+    client.get_container_client.return_value = container
+    monkeypatch.setattr(provider, "_get_client", AsyncMock(return_value=client))
+
+    assert await provider.scan_all_dataset_ids(strict=True) == {"lerobot": [], "hdf5": []}
+    assert await provider.dataset_exists("_releases--pkg--attempt") is False
+    with pytest.raises(ValueError, match="reserved"):
+        provider.get_blob_prefix("group--_releases--pkg--attempt")
+
+
+@pytest.mark.parametrize("case", ["metadata", "index", "columns", "location", "path", "bytes", "v3"])
+async def test_given_episode_sync_inputs_when_materializing_then_only_valid_shard_written(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    provider = create_blob_dataset_provider()
+    metadata = tmp_path / "meta" / "episodes"
+    metadata.mkdir(parents=True)
+    template = "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
+    if case == "path":
+        template = "outside/episode_{episode_index:06d}.parquet"
+    (tmp_path / "meta" / "info.json").write_text(json.dumps({"total_episodes": 2, "data_path": template}))
+    rows = [{"episode_index": 0, "data/chunk_index": 1, "data/file_index": 2}]
+    if case == "columns":
+        rows = [{"episode_index": 0}]
+    elif case == "location":
+        rows = [{"episode_index": 1, "data/chunk_index": 1, "data/file_index": 2}]
+    pq.write_table(pa.Table.from_pylist(rows), metadata / "file.parquet")
+    monkeypatch.setattr(provider, "sync_meta_only_to_local", AsyncMock(return_value=case != "metadata"))
+    monkeypatch.setattr(provider, "_read_blob_bytes", AsyncMock(return_value=None if case == "bytes" else b"shard"))
+
+    if case == "path":
+        with pytest.raises(ValueError, match="Invalid episode data path"):
+            await provider.sync_episode_to_local("ds", tmp_path, 0)
+    else:
+        result = await provider.sync_episode_to_local("ds", tmp_path, 2 if case == "index" else 0)
+        assert result is (case == "v3")
+    target = tmp_path / "data" / "chunk-001" / "file-002.parquet"
+    assert target.exists() is (case == "v3")
+    if case == "v3":
+        assert target.read_bytes() == b"shard"
+
+
+@pytest.mark.parametrize("case", ["traversal", "metadata", "absolute", "symlink"])
+async def test_given_escaping_episode_template_when_syncing_then_no_external_write(
+    case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider = create_blob_dataset_provider()
+    local_dir = tmp_path / "dataset"
+    (local_dir / "meta").mkdir(parents=True)
+    outside = tmp_path / "dataset-other"
+    outside.mkdir()
+    templates = {
+        "traversal": "data/../../dataset-other/episode_{episode_index:06d}.parquet",
+        "metadata": "data/../meta/episode_{episode_index:06d}.parquet",
+        "absolute": str(outside / "episode_{episode_index:06d}.parquet"),
+        "symlink": "data/episode_{episode_index:06d}.parquet",
+    }
+    if case == "symlink":
+        (local_dir / "data").symlink_to(outside, target_is_directory=True)
+    (local_dir / "meta" / "info.json").write_text(json.dumps({"total_episodes": 1, "data_path": templates[case]}))
+    monkeypatch.setattr(provider, "sync_meta_only_to_local", AsyncMock(return_value=True))
+    monkeypatch.setattr(provider, "_read_blob_bytes", AsyncMock(return_value=b"untrusted shard"))
+
+    with pytest.raises(ValueError, match="Invalid episode data path"):
+        await provider.sync_episode_to_local("dataset", local_dir, 0)
+
+    assert not list(tmp_path.rglob("*.parquet"))
+
+
+@pytest.mark.parametrize("operation", ["_read_blob_bytes", "get_blob_properties", "sync_hdf5_episode_to_local"])
+async def test_given_provider_failure_when_logging_then_omits_private_text_and_line_breaks(
+    operation: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    provider = create_blob_dataset_provider()
+    monkeypatch.setattr(
+        provider, "_get_client", AsyncMock(side_effect=RuntimeError("private-provider-payload\r\nforged"))
+    )
+
+    if operation == "sync_hdf5_episode_to_local":
+        assert await provider.sync_hdf5_episode_to_local("dataset\r\nforged", tmp_path, 0) is False
+    else:
+        assert await getattr(provider, operation)("dataset/video\r\nforged") is None
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages and all("\r" not in message and "\n" not in message for message in messages)
+    assert "private-provider-payload" not in caplog.text
+
+
+_RELEASE_PACKAGE_ID = "pkg-fixture"
+_RELEASE_PREFIX = "org/plate"
+_OWNER_PATH = "org/_releases/plate.json"
+_FROZEN_PATH = "evidence/frozen-input.json"
+_PREVIEW_PATH = "evidence/preview.json"
+_PAYLOAD_BLOB = f"{_RELEASE_PREFIX}/data/item"
+_MARKER_BLOB = f"{_RELEASE_PREFIX}/{MARKER_PATH}"
+_RECEIPT_BLOB = f"{_RELEASE_PREFIX}/{RECEIPT_PATH}"
+_CHECKSUMS_BLOB = f"{_RELEASE_PREFIX}/{CHECKSUMS_PATH}"
+_REFUSED_CASES = (
+    "missing_marker",
+    "missing_receipt",
+    "missing_checksums",
+    "invalid_owner",
+    "owner_dataset_mismatch",
+    "owner_package_mismatch",
+    "tampered_payload",
+)
+
+
+def _build_finalized_release(root: Path) -> dict[str, bytes]:
+    """Finalize a closed release with the curation core and return its package bytes keyed by blob path."""
+    payload = {"meta/info.json": b'{"total_episodes": 1}', "data/item": b"item-bytes"}
+    frozen = serialize_model(FrozenInput(selected_episode_ids=("ep-000",)))
+    preview = serialize_model(ReleasePreview(frozen_input_sha256=sha256_hex(frozen), episode_count=1))
+    evidence = {_FROZEN_PATH: frozen, _PREVIEW_PATH: preview}
+    inventory = serialize_model(build_inventory({**payload, **evidence}))
+    manifest = serialize_model(
+        ReleaseManifest(
+            package_id=_RELEASE_PACKAGE_ID,
+            producer={
+                "application": {"name": "fixture", "version": "1.0.0"},
+                "adapter": {"name": "fixture-adapter", "version": "1.0.0"},
+                "source_format": {"name": "fixture-source", "version": "1"},
+                "target_format": {"name": "fixture-target", "version": "1"},
+                "tools": (),
+                "settings_json": '{"route":"copy"}',
+            },
+            frozen_input_path=_FROZEN_PATH,
+            frozen_input_sha256=sha256_hex(frozen),
+            preview_path=_PREVIEW_PATH,
+            preview_sha256=sha256_hex(preview),
+            inventory_sha256=sha256_hex(inventory),
+            episode_mappings=(
+                EpisodeMapping(
+                    output_episode_index=0,
+                    source_episode_id="ep-000",
+                    frames=(FrameMapping(output_frame_index=0, source_frame_index=0),),
+                ),
+            ),
+        )
+    )
+    files = {**payload, **evidence, INVENTORY_PATH: inventory, MANIFEST_PATH: manifest}
+    for relative, content in files.items():
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    candidate = verify_candidate(LocalReleaseStore(root))
+    files[RECEIPT_PATH] = candidate.receipt_bytes
+    files[CHECKSUMS_PATH] = candidate.checksums_bytes
+    files[MARKER_PATH] = build_marker(candidate, release_name="plate", source_dataset_id="source-plate")
+    return {f"{_RELEASE_PREFIX}/{relative}": content for relative, content in files.items()}
+
+
+def _refused_package(case: str, blobs: dict[str, bytes]) -> dict[str, bytes]:
+    """Return a package variant that the release admission gate must refuse."""
+    if case == "invalid_owner":
+        return {**blobs, _OWNER_PATH: b"not-json"}
+    if case == "owner_dataset_mismatch":
+        return {
+            **blobs,
+            _OWNER_PATH: ownership_bytes(PublicationAttempt(_RELEASE_PACKAGE_ID, "attempt-a", "other", "source-plate")),
+        }
+    if case == "owner_package_mismatch":
+        return {
+            **blobs,
+            _OWNER_PATH: ownership_bytes(PublicationAttempt("pkg-other", "attempt-a", "plate", "source-plate")),
+        }
+    if case == "tampered_payload":
+        return {**blobs, _PAYLOAD_BLOB: b"ITEM-BYTES"}
+    removed = {"missing_marker": _MARKER_BLOB, "missing_receipt": _RECEIPT_BLOB, "missing_checksums": _CHECKSUMS_BLOB}[
+        case
+    ]
+    return {key: value for key, value in blobs.items() if key != removed}
+
+
+class _FakeBlobService:
+    """Stands in for the async BlobServiceClient."""
+
+    def __init__(self, container: _FakeBlobContainer) -> None:
+        self._container = container
+
+    def get_container_client(self, name: str) -> _FakeBlobContainer:
+        return self._container
+
+
+class _FakeDownload:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    async def readall(self) -> bytes:
+        return self._data
+
+    async def _chunks(self) -> AsyncIterator[bytes]:
+        yield self._data
+
+    def chunks(self) -> AsyncIterator[bytes]:
+        return self._chunks()
+
+
+class _FakeBlobClient:
+    def __init__(self, container: _FakeBlobContainer, name: str) -> None:
+        self._container = container
+        self._name = name
+
+    def _data(self) -> bytes:
+        if self._name in self._container.fail:
+            raise self._container.fail[self._name]
+        if self._name not in self._container.blobs:
+            raise ResourceNotFoundError("blob not found")
+        return self._container.blobs[self._name]
+
+    async def get_blob_properties(self) -> SimpleNamespace:
+        await asyncio.sleep(self._container.delay)
+        data = self._data()
+        return SimpleNamespace(size=len(data), etag='"v1"', copy=None)
+
+    async def download_blob(self, **_: object) -> _FakeDownload:
+        await asyncio.sleep(self._container.delay)
+        return _FakeDownload(self._data())
+
+
+class _FakeBlobContainer:
+    """Async in-memory container with optional per-name failures and latency."""
+
+    def __init__(
+        self,
+        blobs: dict[str, bytes],
+        *,
+        fail: dict[str, Exception] | None = None,
+        delay: float = 0.0,
+    ) -> None:
+        self.blobs = dict(blobs)
+        self.fail = fail or {}
+        self.delay = delay
+
+    def get_blob_client(self, name: str) -> _FakeBlobClient:
+        return _FakeBlobClient(self, name)
+
+    def list_blobs(self, name_starts_with: str = "", include: object = None) -> _AsyncIter:
+        return _AsyncIter(
+            SimpleNamespace(name=name, size=len(data), metadata={}, etag='"v1"', copy=None)
+            for name, data in sorted(self.blobs.items())
+            if name.startswith(name_starts_with)
+        )
+
+    def walk_blobs(self, name_starts_with: str = "", delimiter: str = "/") -> _AsyncIter:
+        children: set[str] = set()
+        for name in self.blobs:
+            if not name.startswith(name_starts_with):
+                continue
+            rest = name[len(name_starts_with) :]
+            suffix = "/" if "/" in rest else ""
+            children.add(name_starts_with + rest.split("/", 1)[0] + suffix)
+        return _AsyncIter(SimpleNamespace(name=child) for child in sorted(children))
+
+
+def _provider_for(container: _FakeBlobContainer, **settings: object) -> BlobDatasetProvider:
+    provider = BlobDatasetProvider(
+        account_name="testaccount",
+        container_name="testcontainer",
+        sas_token="sas-token",
+        **settings,
+    )
+    provider._client = _FakeBlobService(container)
+    return provider
+
+
+def _named_provider(
+    blobs: dict[str, bytes],
+    *,
+    fail: dict[str, Exception] | None = None,
+    delay: float = 0.0,
+    **settings: object,
+) -> BlobDatasetProvider:
+    return _provider_for(_FakeBlobContainer(blobs, fail=fail, delay=delay), **settings)
+
+
+@pytest.fixture
+def named_release_blobs(tmp_path: Path) -> dict[str, bytes]:
+    """Finalized plate release built by the curation core, plus its ownership companion."""
+    blobs = _build_finalized_release(tmp_path / "package")
+    blobs[_OWNER_PATH] = ownership_bytes(PublicationAttempt(_RELEASE_PACKAGE_ID, "attempt-a", "plate", "source-plate"))
+    return blobs
+
+
+@pytest.fixture(autouse=True)
+def _admit_legacy_datasets_unless_named_admission(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skip the ownership companion for legacy mock-based tests.
+
+    Named-admission tests keep the real ownership and verification gate.
+    """
+    if request.cls is not None and request.cls.__name__ == "TestNamedReleaseAdmission":
+        return
+
+    async def _read_ownership(self: BlobDatasetProvider, container: object, prefix: str) -> None:
+        return None
+
+    monkeypatch.setattr(BlobDatasetProvider, "_read_ownership", _read_ownership)
+
+
+class TestNamedReleaseAdmission:
+    """Ownership-bound, verified admission of reserved `_releases` named releases."""
+
+    async def test_given_legacy_dataset_without_ownership_when_exists_then_admitted(self) -> None:
+        provider = _named_provider({"org/legacy/meta/info.json": b"{}"})
+
+        assert await provider.dataset_exists("org--legacy") is True
+
+    async def test_given_finalized_release_when_ordinary_reading_then_excluded(
+        self, named_release_blobs: dict[str, bytes]
+    ) -> None:
+        provider = _named_provider(named_release_blobs)
+
+        assert await provider.dataset_exists("org--plate") is False
+        assert await provider.get_info_json("org--plate") is None
+        assert "org--plate" not in await provider.list_dataset_ids()
+
+    @pytest.mark.parametrize("case", _REFUSED_CASES)
+    async def test_given_refused_release_when_exists_then_refused(
+        self, case: str, named_release_blobs: dict[str, bytes]
+    ) -> None:
+        provider = _named_provider(_refused_package(case, named_release_blobs))
+
+        assert await provider.dataset_exists("org--plate") is False
+
+    @pytest.mark.parametrize("case", _REFUSED_CASES)
+    async def test_given_refused_release_when_direct_reads_then_nothing_served(
+        self, case: str, named_release_blobs: dict[str, bytes], tmp_path: Path
+    ) -> None:
+        provider = _named_provider(_refused_package(case, named_release_blobs))
+        local_dir = tmp_path / "local"
+
+        assert await provider.get_info_json("org--plate") is None
+        assert await provider.resolve_video_blob_path("org--plate", 0, "observation.images.color") is None
+        assert await provider.sync_dataset_to_local("org--plate", local_dir) is False
+        assert await provider.sync_meta_only_to_local("org--plate", local_dir) is False
+        assert await provider.sync_episode_to_local("org--plate", local_dir, 0) is False
+        assert await provider.get_blob_properties(_PAYLOAD_BLOB) is None
+        assert [chunk async for chunk in provider.stream_video(_PAYLOAD_BLOB)] == []
+        assert list(local_dir.rglob("*")) == []
+
+    async def test_given_recorded_release_when_marker_removed_then_still_excluded(
+        self, named_release_blobs: dict[str, bytes]
+    ) -> None:
+        container = _FakeBlobContainer(named_release_blobs)
+        provider = _provider_for(container)
+        assert await provider.dataset_exists("org--plate") is False
+
+        del container.blobs[_MARKER_BLOB]
+
+        assert await provider.dataset_exists("org--plate") is False
+
+    async def test_given_recorded_release_when_payload_changed_then_still_excluded(
+        self, named_release_blobs: dict[str, bytes]
+    ) -> None:
+        container = _FakeBlobContainer(named_release_blobs)
+        provider = _provider_for(container)
+        assert await provider.dataset_exists("org--plate") is False
+
+        container.blobs[_PAYLOAD_BLOB] = b"ITEM-BYTES"
+
+        assert await provider.dataset_exists("org--plate") is False
+
+    async def test_given_ownership_probe_failure_when_exists_then_refused(
+        self, named_release_blobs: dict[str, bytes]
+    ) -> None:
+        provider = _named_provider(named_release_blobs, fail={_OWNER_PATH: RuntimeError("probe failed")})
+
+        assert await provider.dataset_exists("org--plate") is False
+
+    async def test_given_verification_past_deadline_when_exists_then_refused(
+        self, named_release_blobs: dict[str, bytes]
+    ) -> None:
+        provider = _named_provider(named_release_blobs, delay=0.5, release_verify_timeout_seconds=0.1)
+
+        assert await provider.dataset_exists("org--plate") is False
+
+    async def test_given_verification_exceeds_byte_budget_when_exists_then_refused(
+        self, named_release_blobs: dict[str, bytes]
+    ) -> None:
+        provider = _named_provider(named_release_blobs, release_verify_max_bytes=4)
+
+        assert await provider.dataset_exists("org--plate") is False
+
+    async def test_given_mixed_releases_when_scanning_then_only_admitted_listed(
+        self, named_release_blobs: dict[str, bytes]
+    ) -> None:
+        blobs = {
+            **named_release_blobs,
+            "org/legacy/meta/info.json": b"{}",
+            "org/bad/meta/info.json": b"{}",
+            "org/_releases/bad.json": ownership_bytes(PublicationAttempt("bad", "attempt-a", "bad", "source-bad")),
+        }
+        provider = _named_provider(blobs)
+
+        result = await provider.scan_all_dataset_ids()
+
+        assert result == {"lerobot": ["org--legacy"], "hdf5": []}
+
+    @pytest.mark.parametrize(
+        ("setting", "value"),
+        [
+            ("release_verify_timeout_seconds", 0),
+            ("release_verify_timeout_seconds", -1.0),
+            ("release_verify_timeout_seconds", math.nan),
+            ("release_verify_timeout_seconds", math.inf),
+            ("release_verify_max_bytes", 0),
+            ("release_verify_max_bytes", -1),
+            ("release_verify_max_bytes", True),
+            ("release_verify_max_bytes", 1.5),
+        ],
+    )
+    def test_given_invalid_release_setting_when_constructed_then_rejected(self, setting: str, value: object) -> None:
+        with pytest.raises(ValueError):
+            BlobDatasetProvider(
+                account_name="testaccount",
+                container_name="testcontainer",
+                sas_token="sas-token",
+                **{setting: value},
+            )
+
+    def test_given_admission_environment_when_constructed_then_validated_overrides_applied(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CURATION_RELEASE_ADMISSION_TIMEOUT_SECONDS", "120")
+        monkeypatch.setenv("CURATION_RELEASE_ADMISSION_MAX_BYTES", str(8 * 1024**3))
+        provider = _named_provider({})
+        assert provider._release_verify_timeout_seconds == 120
+        assert provider._release_verify_max_bytes == 8 * 1024**3
+
+    @pytest.mark.parametrize("value", ["0", "-1", "inf", "nan", "unknown"])
+    def test_given_invalid_admission_environment_when_constructed_then_refused(
+        self, value: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CURATION_RELEASE_ADMISSION_TIMEOUT_SECONDS", value)
+        with pytest.raises(ValueError):
+            _named_provider({})
 
 
 class TestImportGuard:
@@ -63,6 +536,26 @@ class TestPrefixHelpers:
 
 class TestGetClient:
     """Client construction and caching."""
+
+    @pytest.mark.parametrize("failure", ["client", "walk", "probe"])
+    async def test_strict_catalog_scan_propagates_failure_without_private_logs(
+        self, failure: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        provider = create_blob_dataset_provider()
+        client = MagicMock()
+        container = client.get_container_client.return_value
+        provider._get_client = AsyncMock(return_value=client)
+        error = OSError("private storage details")
+        if failure == "client":
+            provider._get_client.side_effect = error
+        elif failure == "walk":
+            container.walk_blobs.side_effect = error
+        else:
+            container.walk_blobs.return_value = _AsyncIter([_make_blob("dataset/")])
+            container.get_blob_client.return_value.get_blob_properties = AsyncMock(side_effect=error)
+        with pytest.raises(OSError):
+            await provider.scan_all_dataset_ids(strict=True)
+        assert "private storage" not in caplog.text
 
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     @patch("src.api.storage.blob_dataset.BlobServiceClient")
@@ -107,6 +600,19 @@ class TestGetClient:
 
 class TestReadBlobBytes:
     """Blob-backed metadata reads."""
+
+    @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
+    async def test_metadata_replacement_invalidates_info_and_camera_windows(self) -> None:
+        client = MagicMock()
+        blob = _make_blob("org/repo/meta/info.json")
+        client.get_container_client.return_value.list_blobs.side_effect = lambda **kwargs: _AsyncIter([blob])
+        provider = create_blob_dataset_provider(client)
+        provider._read_blob_bytes = AsyncMock(side_effect=[b'{"fps":30}', b'{"fps":24}'])
+        assert await provider.get_info_json("org--repo") == {"fps": 30}
+        provider._episode_video_cache["org--repo"] = {0: {"front": (0, 0, 2.0, 3.0)}}
+        blob.etag = '"metadata-two"'
+        assert await provider.get_info_json("org--repo") == {"fps": 24}
+        assert "org--repo" not in provider._episode_video_cache
 
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_get_info_json_reads_blob_bytes(self) -> None:
@@ -458,7 +964,8 @@ class TestLoadEpisodeVideoMetadata:
         mock_client = MagicMock()
         mock_client.get_container_client.side_effect = RuntimeError("network down")
         provider = create_blob_dataset_provider(mock_client)
-        assert await provider.get_episode_video_window("org--repo", 0, "cam0") is None
+        with pytest.raises(ValueError, match="metadata unavailable"):
+            await provider.get_episode_video_window("org--repo", 0, "cam0")
 
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_window_returns_none_without_parquet_blobs(self) -> None:
@@ -570,6 +1077,54 @@ class TestUploadVideo:
 
 
 class TestSyncDatasetToLocal:
+    @pytest.mark.parametrize(
+        ("template", "selected"),
+        [
+            (
+                "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
+                "data/chunk-001/episode_000003.parquet",
+            ),
+            ("data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet", "data/chunk-002/file-007.parquet"),
+        ],
+    )
+    @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
+    async def test_selected_episode_prepares_only_its_shard(self, tmp_path: Path, template: str, selected: str) -> None:
+        metadata = BytesIO()
+        pq.write_table(
+            pa.table(
+                {
+                    "episode_index": [0, 3],
+                    "data/chunk_index": [0, 2],
+                    "data/file_index": [0, 7],
+                }
+            ),
+            metadata,
+        )
+        payloads = {
+            "org/repo/meta/info.json": json.dumps(
+                {
+                    "total_episodes": 4,
+                    "chunks_size": 2,
+                    "data_path": template,
+                }
+            ).encode(),
+            "org/repo/meta/episodes/chunk-000/file-000.parquet": metadata.getvalue(),
+            f"org/repo/{selected}": b"selected-shard",
+            "org/repo/data/chunk-000/episode_000000.parquet": b"unselected-shard",
+            "org/repo/videos/wrist/chunk-000/file-000.mp4": b"unselected-video",
+        }
+        client = MagicMock()
+        client.get_container_client.return_value.list_blobs.return_value = _AsyncIter(
+            _make_blob(name) for name in payloads
+        )
+        provider = create_blob_dataset_provider(client)
+        with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(side_effect=payloads.get)) as reader:
+            assert await provider.sync_episode_to_local("org--repo", tmp_path, 3)
+            assert (tmp_path / selected).read_bytes() == b"selected-shard"
+            assert list((tmp_path / "data").rglob("*.parquet")) == [tmp_path / selected]
+            assert not (tmp_path / "videos").exists()
+            assert {call.args[0] for call in reader.await_args_list} == set(list(payloads)[:3])
+
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_sync_dataset_skips_videos_and_hdf5(self, tmp_path: Path) -> None:
         names = [
@@ -610,6 +1165,50 @@ class TestSyncDatasetToLocal:
 
 
 class TestSyncMetaOnly:
+    @pytest.mark.parametrize("failed_relative", ["meta/info.json", "meta/episodes/chunk-0.parquet"])
+    async def test_failed_metadata_download_is_not_missing_or_complete(
+        self,
+        tmp_path: Path,
+        failed_relative: str,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        names = ["org/repo/meta/info.json", "org/repo/meta/episodes/chunk-0.parquet"]
+        client = MagicMock()
+        client.get_container_client.return_value.list_blobs.return_value = _AsyncIter(
+            [_make_blob(name) for name in names]
+        )
+        provider = create_blob_dataset_provider(client)
+
+        async def read_blob(blob_path: str) -> bytes | None:
+            return None if blob_path == f"org/repo/{failed_relative}" else b"{}"
+
+        monkeypatch.setattr(provider, "_read_blob_bytes", read_blob)
+        assert not await provider.sync_meta_only_to_local("org--repo", tmp_path)
+        assert "Metadata blob download incomplete" in caplog.text
+        assert "meta/info.json not found" not in caplog.text
+
+        async def retry_blob(blob_path: str) -> bytes:
+            return b"{}"
+
+        monkeypatch.setattr(provider, "_read_blob_bytes", retry_blob)
+        assert await provider.sync_meta_only_to_local("org--repo", tmp_path)
+        assert all((tmp_path / name.removeprefix("org/repo/")).exists() for name in names)
+
+    @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
+    async def test_metadata_cannot_escape_scratch_directory(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.get_container_client.return_value.list_blobs.return_value = _AsyncIter(
+            [
+                _make_blob("org/repo/meta/episodes/../../../escaped.json"),
+            ]
+        )
+        provider = create_blob_dataset_provider(client)
+        with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=b"{}")) as reader:
+            assert not await provider.sync_meta_only_to_local("org--repo", tmp_path / "scratch")
+            assert not (tmp_path / "escaped.json").exists()
+            reader.assert_not_awaited()
+
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_sync_meta_only_filters_to_allowed_blobs(self, tmp_path: Path) -> None:
         names = [
@@ -651,7 +1250,7 @@ class TestSyncMetaOnly:
 
 class TestSyncHdf5Dataset:
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
-    async def test_sync_hdf5_downloads_json_touches_hdf5_streams_video(self, tmp_path: Path) -> None:
+    async def test_sync_hdf5_downloads_config_without_cached_videos(self, tmp_path: Path) -> None:
         names = [
             "team/proj/dataset_config.json",
             "team/proj/episode_000000.hdf5",
@@ -675,7 +1274,8 @@ class TestSyncHdf5Dataset:
             assert (local_dir / "dataset_config.json").read_bytes() == b"json-bytes"
             assert (local_dir / "episode_000000.hdf5").exists()
             video_path = local_dir / "meta" / "videos" / "cam0" / "episode_000000.mp4"
-            assert video_path.read_bytes() == b"v1v2"
+            assert not video_path.exists()
+            mock_blob.download_blob.assert_not_awaited()
 
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_sync_hdf5_returns_false_on_error(self, tmp_path: Path) -> None:
@@ -687,7 +1287,7 @@ class TestSyncHdf5Dataset:
 
 class TestSyncHdf5Episode:
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
-    async def test_sync_hdf5_episode_streams_to_disk(self, tmp_path: Path) -> None:
+    async def test_sync_hdf5_episode_streams_to_disk(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         names = ["team/proj/episode_000003.hdf5"]
         mock_download = MagicMock()
         mock_download.chunks = MagicMock(return_value=_AsyncIter([b"chunk1", b"chunk2"]))
@@ -700,9 +1300,14 @@ class TestSyncHdf5Episode:
         mock_client.get_container_client.return_value = mock_container
         provider = create_blob_dataset_provider(mock_client)
 
-        result = await provider.sync_hdf5_episode_to_local("team--proj", tmp_path, 3)
+        caplog.set_level("INFO", logger="src.api.storage.blob_dataset")
+
+        result = await provider.sync_hdf5_episode_to_local("team--proj\r\nforged", tmp_path, 3)
+
         assert result is True
         assert (tmp_path / "episode_000003.hdf5").read_bytes() == b"chunk1chunk2"
+        assert "Downloaded HDF5 episode 3" in caplog.text
+        assert all("\r" not in record.getMessage() and "\n" not in record.getMessage() for record in caplog.records)
 
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_sync_hdf5_episode_short_circuits_when_present(self, tmp_path: Path) -> None:

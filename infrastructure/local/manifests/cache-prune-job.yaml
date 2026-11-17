@@ -1,0 +1,37 @@
+# Empties the job-owned cache directory on the host. Job containers write it as root, so pruning it from a
+# pod keeps cleanup free of sudo. Rendered by cleanup/uninstall-local.sh; only LOCAL_ placeholders change.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cache-prune
+  namespace: ${LOCAL_PLATFORM_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: cache-prune
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cache-prune
+        app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      containers:
+        - name: prune
+          image: ${LOCAL_UTILITY_IMAGE}
+          command: ["/bin/sh", "-c", "find /cache -mindepth 1 -delete && echo Cache directory emptied"]
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: cache
+              mountPath: /cache
+      volumes:
+        - name: cache
+          hostPath:
+            path: ${LOCAL_CACHE_DIR}
+            type: Directory

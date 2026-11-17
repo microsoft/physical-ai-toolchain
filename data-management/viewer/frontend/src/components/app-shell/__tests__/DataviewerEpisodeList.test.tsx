@@ -59,6 +59,22 @@ describe('DataviewerEpisodeList', () => {
     expect(screen.getByText(/error: boom/i)).toBeInTheDocument()
   })
 
+  it('marks only episodes whose labels differ from the saved labels', () => {
+    mockEpisodesResult = { data: sampleEpisodes, isLoading: false, error: null }
+    useLabelStore.setState({
+      episodeLabels: { 0: ['SUCCESS'], 1: ['PARTIAL'] },
+      savedEpisodeLabels: { 0: ['SUCCESS'] },
+    })
+
+    render(
+      <DataviewerEpisodeList datasetId="ds-1" onSelectEpisode={noopSelect} selectedIndex={0} />,
+    )
+
+    const unsaved = screen.getAllByText(/unsaved labels/i)
+    expect(unsaved).toHaveLength(1)
+    expect(unsaved[0].closest('button')).toHaveTextContent('Episode 1')
+  })
+
   it('renders the toolbar, total count, and one row per episode on success', () => {
     mockEpisodesResult = { data: sampleEpisodes, isLoading: false, error: null }
 

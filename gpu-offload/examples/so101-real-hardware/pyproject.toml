@@ -6,3 +6,8 @@ requires-python = ">=3.12"
 dependencies = [
     "lerobot[core-scripts,feetech,training,evaluation,smolvla,pusht]==0.6.1",
 ]
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true

@@ -238,12 +238,12 @@ function Get-PinShellHeredocDeclarations {
                 break
             }
         }
-        if (
-            $character -ne '<' -or
-            $index + 1 -ge $Line.Length -or
-            $Line[$index + 1] -ne '<' -or
-            ($index + 2 -lt $Line.Length -and $Line[$index + 2] -eq '<')
-        ) {
+        if ($character -ne '<' -or $index + 1 -ge $Line.Length -or $Line[$index + 1] -ne '<') {
+            continue
+        }
+        if ($index + 2 -lt $Line.Length -and $Line[$index + 2] -eq '<') {
+            # A here-string has no body; skip all three markers so the next two are not read as a heredoc.
+            $index += 2
             continue
         }
 

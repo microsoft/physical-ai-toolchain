@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Workflow Permissions
 description: GitHub Actions permission scopes and OSSF Scorecard Token-Permissions exception rationale
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-05
+ms.date: 2026-10-28
 ms.topic: reference
 keywords:
   - security
@@ -56,9 +56,11 @@ aggregate checks out the tested `github.sha`, verifies an immutable change
 range, and runs all selectors when it cannot prove that range.
 
 Merge-group execution changes OIDC claims such as `event_name`, `ref`, and
-`sub`. Before enabling the hosted queue, map every queue-reachable
-`id-token: write` grant to its consuming step and provider. Retain dated
-provider evidence for these restrictions:
+`sub`. Before enabling the hosted queue, refresh the inventory of every
+queue-reachable `id-token: write` grant, its consuming step, provider, audience,
+and reusable workflow identity. The existing Codecov integration follows the
+compatibility requirements below. For other OIDC consumers, retain dated provider
+evidence for these restrictions:
 
 | Claim or boundary   | Required evidence                                       |
 |---------------------|---------------------------------------------------------|
@@ -72,7 +74,55 @@ provider evidence for these restrictions:
 Use a provider configuration export, screenshot, or administrator attestation.
 If the provider cannot express the required boundary, change the workflow so
 the queue does not reach that token consumer and rerun the CI contracts.
-Inaccessible provider policy blocks hosted activation.
+For consumers outside the existing Codecov integration, inaccessible provider
+policy blocks hosted activation.
+
+### Existing Codecov integration
+
+For the existing Codecov integration only, replace the blanket requirement for
+provider-administrator evidence with repository configuration checks and a
+controlled live compatibility test. This policy revision must be approved and
+merged to `main` in a documentation-only PR before activation under these
+requirements. Research, plan approval, or a successful upload in another
+repository does not supersede the current policy.
+
+The [pinned Codecov action's OIDC instructions](https://github.com/codecov/codecov-action/blob/303a32d7a59b442fa8d48b6a1cc6825c09c847a5/README.md#using-oidc)
+specify `use_oidc: true` and `id-token: write`; they do not establish a separate
+`merge_group` registration requirement. An
+[observed hve-core merge-group upload](https://github.com/microsoft/hve-core/actions/runs/40540525436/job/122317364734)
+obtained an OIDC token and was accepted for processing. This supports testing the
+existing integration, but proves neither this repository's compatibility nor
+enforcement of provider-side claim restrictions. Those restrictions remain
+unknown unless independently verified.
+
+Retain the following safeguards:
+
+- Keep existing SHA-pinned actions, `use_oidc`, caller and callee permission
+  grants, and upload failure semantics unchanged. Add no secrets, write scopes,
+  event bypasses, or queue upload exclusions.
+- Preserve tests, coverage generation, local coverage thresholds, JUnit and
+  report artifacts, strict publication checks, selected-work requirements,
+  fail-safe full selection, and current-attempt execution receipts.
+- Recognize that steps in jobs granting `id-token: write` remain capable of
+  requesting OIDC tokens. This policy does not establish token-free validation
+  or rejection of out-of-scope identities by Codecov.
+
+After the revised policy merges, verify current `main` and hosted settings,
+prepare rollback, and use the
+[activation and rollback procedure](../contributing/pull-request-process.md#activation-and-rollback).
+The controlled queue run must provide non-secret evidence that the existing
+action obtained an OIDC token and Codecov accepted the upload associated with the
+merge-group SHA. A green job alone is insufficient because some uploads tolerate
+errors; acceptance for processing is not proof of final report processing.
+Existing strict publication checks must still succeed.
+
+An authentication rejection, candidate-association failure, or identified
+provider restriction requires targeted investigation. Do not bypass a known
+restriction, fall back to a long-lived token, expand permissions, or generalize
+this exception to another OIDC consumer. Follow the rollback criteria in the
+activation procedure; any integration redesign requires separate review.
+
+### Shared CI safeguards
 
 The CI contract rejects secret references in workflows reachable from the
 aggregate PR Validation workflow. Add no merge-group-reachable secret or

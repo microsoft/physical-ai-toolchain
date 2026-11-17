@@ -1,0 +1,156 @@
+{
+  "categories": {
+    "sceneDetails": {
+      "weatherType": {
+        "source_keys": [
+          "weather",
+          "weather_condition",
+          "weather type",
+          "weatherType"
+        ],
+        "expected_values": [
+          "sunny",
+          "rainy",
+          "snowy",
+          "foggy",
+          "cloudy"
+        ],
+        "weight": 1.0,
+        "threshold": 0.9,
+        "recommendation": "Generate driving scenes during {value} weather."
+      },
+      "timeOfDay": {
+        "source_keys": [
+          "timeOfDay",
+          "time_of_day",
+          "time of day"
+        ],
+        "expected_values": [
+          "morning",
+          "evening",
+          "noon",
+          "night"
+        ],
+        "weight": 1.0,
+        "threshold": 0.85,
+        "recommendation": "Include more {value} time-of-day scenarios."
+      }
+    },
+    "roadDetails": {
+      "roadParameters": {
+        "source_keys": [
+          "roadParameters",
+          "road_width"
+        ],
+        "expected_values": [
+          "narrow",
+          "medium",
+          "wide"
+        ],
+        "weight": 1.0,
+        "threshold": 0.75,
+        "recommendation": "Collect scenes with {value} lanes."
+      },
+      "roadSurface": {
+        "source_keys": [
+          "roadSurface",
+          "road_surface",
+          "road surface"
+        ],
+        "expected_values": [
+          "asphalt",
+          "concrete"
+        ],
+        "weight": 1.0,
+        "threshold": 0.75,
+        "recommendation": "Collect driving scenes with {value} road surface."
+      }
+    },
+    "dynamicAgentDetails": {
+      "any_vehicle_lane_change": {
+        "source_keys": [
+          "AgentLaneChange",
+          "lane_change_agent"
+        ],
+        "expected_values": [
+          "yes",
+          "no"
+        ],
+        "weight": 1.0,
+        "threshold": 0.8,
+        "recommendation": "Collect scenes where dynamic agents perform lane changes."
+      },
+      "any_vehicle_cut_in": {
+        "source_keys": [
+          "AgentCutIn",
+          "cut_in_agent"
+        ],
+        "expected_values": [
+          "yes",
+          "no"
+        ],
+        "weight": 1.0,
+        "threshold": 0.8,
+        "recommendation": "Collect scenes with dynamic agent cut-ins."
+      }
+    },
+    "otherAgentDetails": {
+      "pedestrianDetails": {
+        "source_keys": [
+          "pedestrianDetails",
+          "pedestrian_present",
+          "has_pedestrians"
+        ],
+        "expected_values": [
+          "yes",
+          "no"
+        ],
+        "weight": 1.0,
+        "threshold": 0.8,
+        "recommendation": "Collect scenes with pedestrians present."
+      }
+    }
+  },
+  "synonyms": {
+    "changing_lane_leftright": "changing_lane_left_right",
+    "lane_change_leftright": "lane_change_left_right",
+    "acceleratingdecelerating": "accelerating_decelerating",
+    "inclinedecline": "incline_decline",
+    "sunny": "sunny",
+    "rainy": "rainy",
+    "snowy": "snowy",
+    "foggy": "foggy",
+    "cloudy": "cloudy",
+    "windy": "windy",
+    "hazy": "hazy",
+    "stormy": "stormy",
+    "yes": "yes",
+    "no": "no",
+    "none": "no",
+    "one_lane": "1",
+    "two_lanes": "2",
+    "three_lanes": "3",
+    "four_lanes": "4_plus",
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4_plus",
+    "four_or_more": "4_plus",
+    "close": "close",
+    "too_close": "too_close",
+    "safe": "safe",
+    "caution": "caution",
+    "cautious": "caution",
+    "asphalt": "asphalt",
+    "concrete": "concrete"
+  },
+  "score_weights": {
+    "completeness": 0.3,
+    "coverage": 0.35,
+    "entropy": 0.35
+  },
+  "underrepresentation": {
+    "fraction": 0.02,
+    "min_count": 2
+  }
+}

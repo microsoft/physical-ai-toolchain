@@ -99,6 +99,7 @@ def _clear_lineage_env(monkeypatch):
         "JOB_NAME",
         "POLICY_TYPE",
         "REGISTER_CHECKPOINT",
+        "DATASET_DIR",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -180,6 +181,21 @@ class TestRegisterModelLineage:
         assert tags["dataset_repo_id"] == "user/ds"
         lineage = json.loads((tmp_path / "azureml_lineage.json").read_text())
         assert lineage["dataset_repo_id"] == "user/ds"
+
+    def test_local_dataset_dir(
+        self, azure_env: None, fake_azure_modules: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        _clear_lineage_env(monkeypatch)
+        monkeypatch.setenv("DATASET_REPO_ID", "local/so101-pick")
+        monkeypatch.setenv("DATASET_DIR", "/mnt/datasets/so101/pick")
+        monkeypatch.setenv("REGISTER_CHECKPOINT", "m")
+
+        _CHECKPOINTS._register_model_via_aml(tmp_path, "ckpt-001")
+        tags = fake_azure_modules.model_cls.call_args.kwargs["tags"]
+        assert tags["dataset_source"] == "local"
+        assert tags["dataset_uri"] == "file:///mnt/datasets/so101/pick"
+        lineage = json.loads((tmp_path / "azureml_lineage.json").read_text())
+        assert lineage["dataset_source"] == "local"
 
     def test_malformed_dataset_assets_falls_back_gracefully(
         self, azure_env, fake_azure_modules, monkeypatch, tmp_path, capsys

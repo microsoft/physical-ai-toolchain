@@ -531,6 +531,36 @@ class TestLeRobotExports:
         cls.assert_called_once_with(dataset_dir, base / "ds-1-edited", dataset_id="ds-1")
 
     @pytest.mark.parametrize("endpoint", ["export", "export/stream"])
+    def test_relative_output_paths_name_a_dataset_in_the_datasets_directory(
+        self,
+        client: TestClient,
+        override_service: MagicMock,
+        dataset_layout: tuple[Path, Path, Path],
+        monkeypatch: pytest.MonkeyPatch,
+        endpoint: str,
+    ) -> None:
+        base, dataset_dir, _output = dataset_layout
+        override_service.dataset_is_lerobot.return_value = True
+        cls, _instance = _patch_lerobot_exporter(monkeypatch)
+
+        _post_export(client, endpoint, {"episodeIndices": [0], "outputPath": "ds-1-curated"})
+
+        cls.assert_called_once_with(dataset_dir, base / "ds-1-curated", dataset_id="ds-1")
+
+    @pytest.mark.parametrize("endpoint", ["export", "export/stream"])
+    def test_relative_output_paths_cannot_leave_the_datasets_directory(
+        self, client: TestClient, override_service: MagicMock, monkeypatch: pytest.MonkeyPatch, endpoint: str
+    ) -> None:
+        override_service.dataset_is_lerobot.return_value = True
+        cls, _instance = _patch_lerobot_exporter(monkeypatch)
+
+        resp = client.post(f"/api/datasets/ds-1/{endpoint}", json={"episodeIndices": [0], "outputPath": "../escaped"})
+
+        assert resp.status_code == 400
+        assert "traversal" in resp.json()["detail"].lower()
+        cls.assert_not_called()
+
+    @pytest.mark.parametrize("endpoint", ["export", "export/stream"])
     @pytest.mark.parametrize("include", [True, False, None], ids=["included", "left-out", "by-default"])
     def test_lerobot_exports_get_the_latest_saved_language_instruction_unless_left_out(
         self,
@@ -555,6 +585,56 @@ class TestLeRobotExports:
             "Pick up the gear", ("Grab the gear",), ("Approach",), "annotator-b", "2026-10-01T12:00:00+00:00"
         )
         assert instance.export_episodes.call_args.kwargs["language"] == ({} if include is False else {0: latest})
+
+    @pytest.mark.parametrize("endpoint", ["export", "export/stream"])
+    def test_given_stable_subtask_ids_when_exporting_then_writes_plan_text_without_changing_saved_steps(
+        self,
+        client: TestClient,
+        override_service,
+        saved_annotations,
+        dataset_layout: tuple[Path, Path, Path],
+        endpoint: str,
+    ) -> None:
+        import pyarrow.parquet as pq
+
+        from src.api.models.annotations import (
+            EpisodeAnnotationFile,
+            LanguageInstructionAnnotation,
+            SubtaskInstruction,
+        )
+
+        from .test_annotation_service import _build_annotation
+
+        base, dataset_dir, _output = dataset_layout
+        write_source(dataset_dir)
+        source_before = _contents(dataset_dir)
+        override_service.dataset_is_lerobot.return_value = True
+        annotation = _build_annotation("annotator-b").model_copy(
+            update={
+                "language_instruction": LanguageInstructionAnnotation(
+                    instruction="Pick up the gear",
+                    source="human",
+                    subtask_instructions=[
+                        SubtaskInstruction(id="step-b", text="Approach"),
+                        SubtaskInstruction(id="step-a", text="Grasp"),
+                    ],
+                )
+            }
+        )
+        saved_annotations.get_annotation.side_effect = None
+        saved_annotations.get_annotation.return_value = EpisodeAnnotationFile(
+            episode_index=0, dataset_id="ds-1", annotations=[annotation]
+        )
+        annotation_before = annotation.model_dump(mode="json")
+        output = base / "edited"
+
+        _post_export(client, endpoint, {"episodeIndices": [0], "outputPath": str(output)})
+
+        table = pq.read_table(output / "data/chunk-000/file-000.parquet")
+        language_rows = table.column("language_persistent").to_pylist()[0]
+        assert [row["content"] for row in language_rows if row["style"] == "plan"] == ["1. Approach\n2. Grasp"]
+        assert annotation.model_dump(mode="json") == annotation_before
+        assert _contents(dataset_dir) == source_before
 
     @pytest.mark.parametrize("endpoint", ["export", "export/stream"])
     def test_hdf5_exports_ignore_the_language_option(

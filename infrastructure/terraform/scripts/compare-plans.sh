@@ -78,7 +78,7 @@ semantic_plan() {
   jq -c '
     def record: {actions, before, after, after_unknown, before_sensitive, after_sensitive, replace_paths};
     [.resource_changes[]? | select(.change.actions != ["no-op"])
-      | {key: "resource \(.address)", value: (.change | record) + {action_reason}}]
+      | {key: "resource \(.address)", value: ((.change | record) + {action_reason})}]
     + [(.output_changes // {}) | to_entries[] | select(.value.actions != ["no-op"])
       | {key: "output \(.key)", value: (.value | record)}]
     | from_entries'

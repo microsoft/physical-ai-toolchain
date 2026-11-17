@@ -1,10 +1,15 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const defaultsFixture = vi.hoisted(() => ({
+  data: { datasetId: '_defaults', labels: { '0': 'Original' }, groups: [] },
+  etag: '"original"',
+}))
+
 vi.mock('@/hooks/use-joint-config', () => ({
-  useJointConfigDefaults: () => ({ data: undefined }),
+  useJointConfigDefaults: () => defaultsFixture,
   useSaveJointConfig: () => ({ save: vi.fn() }),
-  useSaveJointConfigDefaults: () => ({ mutate: vi.fn(), isPending: false }),
+  useSaveJointConfigDefaults: () => ({ mutate: vi.fn(), isPending: false, reset: vi.fn() }),
 }))
 
 import { useTrajectoryPlotState } from '@/components/episode-viewer/useTrajectoryPlotState'
@@ -13,6 +18,8 @@ import { useJointConfigStore } from '@/stores/joint-config-store'
 
 describe('useTrajectoryPlotState', () => {
   beforeEach(() => {
+    defaultsFixture.data = { datasetId: '_defaults', labels: { '0': 'Original' }, groups: [] }
+    defaultsFixture.etag = '"original"'
     useEpisodeStore.getState().reset()
     useEditStore.getState().clear()
     useJointConfigStore.getState().reset()
@@ -40,6 +47,22 @@ describe('useTrajectoryPlotState', () => {
         },
       ],
     })
+  })
+
+  it('keeps the dialog data and revision fixed while refreshed defaults arrive', () => {
+    const { result, rerender } = renderHook(() => useTrajectoryPlotState({}))
+    act(() => result.current.setDefaultsOpen(true))
+    defaultsFixture.data = { datasetId: '_defaults', labels: { '0': 'Remote' }, groups: [] }
+    defaultsFixture.etag = '"remote"'
+    rerender()
+
+    expect(result.current.defaults?.labels['0']).toBe('Original')
+    expect(result.current.defaultsEtag).toBe('"original"')
+
+    act(() => result.current.setDefaultsOpen(false))
+    act(() => result.current.setDefaultsOpen(true))
+    expect(result.current.defaults?.labels['0']).toBe('Remote')
+    expect(result.current.defaultsEtag).toBe('"remote"')
   })
 
   it('defaults normalization on and switches to raw data when toggled off', () => {

@@ -34,6 +34,17 @@ DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE="${DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE:-nvcr.i
 _isaac_ref="${DEFAULT_ISAAC_LAB_IMAGE%@*}"
 DEFAULT_ISAAC_LAB_IMAGE_VERSION="${DEFAULT_ISAAC_LAB_IMAGE_VERSION:-${_isaac_ref##*:}}"
 unset _isaac_ref
+# Hugging Face policy checkpoints are pinned to an immutable commit SHA like images are pinned
+# to digests. SmolVLA's base is ungated (Apache-2.0); training fine-tunes it and evaluation uses
+# it unadapted as the untrained baseline.
+DEFAULT_SMOLVLA_BASE_MODEL="${DEFAULT_SMOLVLA_BASE_MODEL:-lerobot/smolvla_base}"
+DEFAULT_SMOLVLA_BASE_REVISION="${DEFAULT_SMOLVLA_BASE_REVISION:-5e8d12a6e2975b0e5e5fce7c8caf47c371d257b6}"
+export DEFAULT_SMOLVLA_BASE_MODEL DEFAULT_SMOLVLA_BASE_REVISION
+
+# VLM judge model for OSMO judge workflows, pinned to an immutable Hub commit (Apache-2.0, ungated).
+DEFAULT_VLM_JUDGE_MODEL="${DEFAULT_VLM_JUDGE_MODEL:-Qwen/Qwen3-VL-4B-Instruct}"
+DEFAULT_VLM_JUDGE_MODEL_REVISION="${DEFAULT_VLM_JUDGE_MODEL_REVISION:-ebb281ec70b05090aa6165b016eac8ec08e71b17}"
+export DEFAULT_VLM_JUDGE_MODEL DEFAULT_VLM_JUDGE_MODEL_REVISION
 export DEFAULT_ISAAC_LAB_IMAGE DEFAULT_ISAAC_LAB_IMAGE_VERSION
 export DEFAULT_LEROBOT_TRAIN_IMAGE DEFAULT_LEROBOT_EVAL_IMAGE DEFAULT_GROOT_IMAGE DEFAULT_AZUREML_SMOKE_IMAGE
 export DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE
@@ -418,6 +429,59 @@ kube_cluster_identity() {
   printf '%s\n' "$(printf '%s\n%s\n' "$server" "$namespace_uid" | calculate_sha256 /dev/stdin)"
 }
 
+# Print each kube-system Deployment and DaemonSet that has not finished rolling out, one per line, or a note
+# when there are none yet. Prints nothing when all have rolled out; fails when they cannot be listed.
+# Usage: kube_system_pending_workloads <kubectl command...>, for example: sudo /usr/local/bin/k3s kubectl
+kube_system_pending_workloads() {
+  local workloads
+  workloads=$("$@" get deployments,daemonsets --namespace kube-system --output json) || return 1
+  jq -r '
+    if (.items | length) == 0 then "no Deployments or DaemonSets yet"
+    else
+      .items[]
+      | select(
+          ((.status.observedGeneration // 0) < (.metadata.generation // 0))
+          or (if .kind == "DaemonSet" then
+                (.status.desiredNumberScheduled // 0) as $want
+                | (.status.updatedNumberScheduled // 0) != $want or (.status.numberAvailable // 0) != $want
+              else
+                (.spec.replicas // 1) as $want
+                | (.status.updatedReplicas // 0) != $want
+                  or (.status.replicas // 0) != $want
+                  or (.status.availableReplicas // 0) != $want
+              end))
+      | "\(.kind)/\(.metadata.name)"
+    end' <<< "$workloads"
+}
+
+# Wait until kube-system Deployments and DaemonSets have rolled out on two consecutive checks, so status left
+# from before a restart cannot pass alone. On timeout, reports the label and what the last check found.
+# Usage: wait_for_kube_system_workloads <label> <timeout-seconds> <interval-seconds> <kubectl command...>
+wait_for_kube_system_workloads() {
+  local label="${1:?label required}" timeout="${2:?timeout required}" interval="${3:?interval required}"
+  shift 3
+  local deadline=$((SECONDS + timeout)) settled=0 pending last_check
+  while true; do
+    if pending=$(kube_system_pending_workloads "$@"); then
+      if [[ -z "$pending" ]]; then
+        (( ++settled < 2 )) || return 0
+        last_check="they were ready on the last check, which a second check had not yet confirmed"
+      else
+        settled=0
+        last_check="${pending//$'\n'/, }"
+      fi
+    else
+      settled=0
+      last_check="the workloads could not be listed"
+    fi
+    if (( SECONDS >= deadline )); then
+      error "$label: kube-system workloads did not finish rolling out within ${timeout}s: $last_check"
+      return 1
+    fi
+    sleep "$interval"
+  done
+}
+
 # Validate that a context is reachable and represents the declared cluster role.
 # Usage: verify_kube_target <kubeconfig> <context> <aks|k3s>
 verify_kube_target() {
@@ -703,6 +767,21 @@ detect_service_url() {
   echo "$url"
 }
 
+# Print the service URL the OSMO CLI in a config directory is logged in to, or nothing.
+# Usage: osmo_login_url <osmo-config-dir>
+osmo_login_url() {
+  local login_file="${1:?OSMO config directory required}/login.yaml"
+  [[ -f "$login_file" ]] || return 0
+  awk '$1 == "url:" {print $2; exit}' "$login_file"
+}
+
+# Return 0 when the OSMO service the CLI is logged in to holds a credential with this name.
+# Usage: osmo_has_credential <name>
+osmo_has_credential() {
+  local name="${1:?credential name required}"
+  osmo credential list 2>/dev/null | awk '{print $1}' | grep -Fxq -- "$name"
+}
+
 # Log in to an OSMO service with the method it supports. A service with an identity
 # provider publishes a device endpoint for code login. A service deployed without
 # authentication, as 03-deploy-osmo.sh deploys it, publishes none and accepts only a
@@ -825,13 +904,22 @@ require_protected_file() {
 # OSMO Preflight Validation
 # // ===================================================================
 
+helm_list_all_releases() {
+  local args=(list)
+
+  if helm list --help 2>&1 | grep -q -- '--all[[:space:]]'; then
+    args+=(--all)
+  fi
+  helm "${args[@]}" "$@"
+}
+
 # List installed pre-6.3 OSMO releases as "<release>\t<chart>" lines: separate service, router,
 # or web-ui chart releases, or an osmo release on an older chart line than the pinned one.
 # Releases uninstalled with --keep-history own no resources and are skipped.
 # Usage: osmo_legacy_releases <namespace> <pinned-chart-version>
 osmo_legacy_releases() {
   local namespace="${1:?namespace required}" pinned="${2:?pinned chart version required}"
-  helm list --all -n "$namespace" -o json | jq -r --arg pinned "$pinned" '
+  helm_list_all_releases -n "$namespace" -o json | jq -r --arg pinned "$pinned" '
     def minor_line: capture("^(?<major>[0-9]+)\\.(?<minor>[0-9]+)") | [(.major | tonumber), (.minor | tonumber)];
     .[] | select(.status != "uninstalled")
     | (.chart | capture("^(?<name>.+)-(?<version>[0-9]+\\.[0-9]+\\.[0-9]+.*)$")) as $chart

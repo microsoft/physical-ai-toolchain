@@ -9,7 +9,7 @@
 set -euo pipefail
 
 echo "=== LeRobot Inference Workflow ==="
-echo "Policy: ${POLICY_REPO_ID:-none}"
+echo "Policy: ${POLICY_URI:-${POLICY_REPO_ID:-none}}"
 echo "Policy Type: ${POLICY_TYPE}"
 echo "Dataset: ${DATASET_REPO_ID:-${DATASET_DIR:-none}}"
 echo "Eval Episodes: ${EVAL_EPISODES}"
@@ -70,15 +70,41 @@ echo "Runtime payload unpacked to ${PAYLOAD_ROOT} from ${ARCHIVE_PATH}"
 
 EVAL_SCRIPTS="${PAYLOAD_ROOT}/evaluation/sil/scripts"
 
-# Install runtime dependencies directly from the committed frozen lock.
-# The lerobot lock already provides av, pyarrow, matplotlib, mlflow-skinny,
+# Install runtime dependencies directly from the committed frozen lock: the IL lock by default, or the
+# VLA lock that carries the smolvla extra. Each lock provides av, pyarrow, matplotlib, mlflow-skinny,
 # azureml-mlflow, and the azure SDKs the evaluation and its helpers need.
-LEROBOT_PROJECT="${PAYLOAD_ROOT}/training/il/lerobot"
-if [[ ! -f "${LEROBOT_PROJECT}/uv.lock" ]]; then
-  echo "ERROR: LeRobot lockfile not found at ${LEROBOT_PROJECT}/uv.lock" >&2
+LEROBOT_PROJECT_DIR="${LEROBOT_PROJECT:-training/il/lerobot}"
+case "${LEROBOT_PROJECT_DIR}" in
+  /*|../*|*/../*|*/..)
+    echo "ERROR: LEROBOT_PROJECT must be a repo-relative path without parent traversal: ${LEROBOT_PROJECT_DIR}" >&2
+    exit 1
+    ;;
+esac
+LEROBOT_PROJECT_PATH="${PAYLOAD_ROOT}/${LEROBOT_PROJECT_DIR}"
+if [[ ! -f "${LEROBOT_PROJECT_PATH}/uv.lock" ]]; then
+  echo "ERROR: LeRobot lockfile not found at ${LEROBOT_PROJECT_PATH}/uv.lock" >&2
   exit 1
 fi
-uv sync --active --frozen --no-config --no-install-project --project "${LEROBOT_PROJECT}"
+uv sync --active --frozen --no-config --no-install-project --project "${LEROBOT_PROJECT_PATH}"
+
+# Download a policy registered with the tracking backend (models:/ or runs:/). The URI travels in the
+# environment, never in Python source.
+if [[ -n "${POLICY_URI:-}" && "${POLICY_URI}" != "none" ]]; then
+  echo "Downloading ${POLICY_URI} through the ${TRACKING_BACKEND:-azureml} tracking backend..."
+  POLICY_DOWNLOAD_DIR=/workspace/policy python3 - << 'TRACKED_POLICY'
+import os
+from pathlib import Path
+
+from training.utils.tracking import create_tracking_backend
+
+backend = create_tracking_backend(experiment_name=os.environ.get("EXPERIMENT_NAME") or "lerobot-eval")
+local_path = backend.download_artifacts(os.environ["POLICY_URI"], Path(os.environ["POLICY_DOWNLOAD_DIR"]))
+Path("/tmp/policy_path").write_text(str(local_path))
+TRACKED_POLICY
+  POLICY_REPO_ID="$(< /tmp/policy_path)"
+  export POLICY_REPO_ID
+  echo "Using the downloaded policy at: ${POLICY_REPO_ID}"
+fi
 
 # Download policy from the AzureML model registry if requested.
 if [[ -n "${AML_MODEL_NAME:-}" && "${AML_MODEL_NAME}" != "none" && -n "${AML_MODEL_VERSION:-}" && "${AML_MODEL_VERSION}" != "none" ]]; then
@@ -116,7 +142,7 @@ fi
 if [[ "${BUILTIN_POLICY:-false}" == "true" ]]; then
   echo "Minting built-in ${POLICY_TYPE} base policy from dataset..."
   if [[ -z "${DATASET_DIR:-}" || ! -d "${DATASET_DIR:-}" ]]; then
-    echo "ERROR: --builtin-policy requires a local dataset; set --from-blob-dataset." >&2
+    echo "ERROR: --builtin-policy requires a local dataset; set --from-blob-dataset or --local-dataset." >&2
     exit 1
   fi
 
@@ -166,10 +192,16 @@ else
   echo "Warning: HF_TOKEN not set, skipping HuggingFace authentication"
 fi
 
-# Bootstrap Azure ML MLflow tracking.
+# Configure MLflow tracking for the selected backend; TRACKING_BACKEND=none keeps results in OUTPUT_DIR.
+tracking_backend="$(printf '%s' "${TRACKING_BACKEND:-azureml}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${MLFLOW_ENABLE:-false}" == "true" && "${tracking_backend}" == "none" ]]; then
+  echo "Tracking disabled (TRACKING_BACKEND=none); evaluation results stay in ${OUTPUT_DIR}"
+  export MLFLOW_ENABLE=false
+fi
 if [[ "${MLFLOW_ENABLE:-false}" == "true" ]]; then
-  echo "Configuring Azure ML MLflow tracking..."
-  if [[ -z "${AZURE_SUBSCRIPTION_ID:-}" || -z "${AZURE_RESOURCE_GROUP:-}" || -z "${AZUREML_WORKSPACE_NAME:-}" ]]; then
+  echo "Configuring MLflow tracking for the ${tracking_backend} backend..."
+  if [[ "${tracking_backend}" == "azureml" ]] \
+    && [[ -z "${AZURE_SUBSCRIPTION_ID:-}" || -z "${AZURE_RESOURCE_GROUP:-}" || -z "${AZUREML_WORKSPACE_NAME:-}" ]]; then
     echo "ERROR: MLflow requires AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, and AZUREML_WORKSPACE_NAME" >&2
     exit 1
   fi
@@ -191,7 +223,9 @@ echo "=== Evaluation Complete ==="
 # Register model to Azure ML if requested.
 if [[ -n "${REGISTER_MODEL:-}" && "${REGISTER_MODEL}" != "none" ]]; then
   echo "=== Registering Model to Azure ML ==="
-  if [[ -z "${AZURE_SUBSCRIPTION_ID:-}" || -z "${AZURE_RESOURCE_GROUP:-}" || -z "${AZUREML_WORKSPACE_NAME:-}" ]]; then
+  if [[ "${tracking_backend}" != "azureml" ]]; then
+    echo "Warning: post-evaluation registration targets the Azure ML registry; skipping for the ${tracking_backend} backend"
+  elif [[ -z "${AZURE_SUBSCRIPTION_ID:-}" || -z "${AZURE_RESOURCE_GROUP:-}" || -z "${AZUREML_WORKSPACE_NAME:-}" ]]; then
     echo "Warning: Azure ML variables not set, skipping registration"
   else
     python3 "${PAYLOAD_ROOT}/workflows/azureml/scripts/register_model.py"

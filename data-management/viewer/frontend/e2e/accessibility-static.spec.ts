@@ -8,6 +8,7 @@ import { expect, test } from '@playwright/test'
 import {
   attachJson,
   openEmptyViewer,
+  openReleaseDialog,
   openViewer,
   riskComponentRegistry,
 } from './accessibility-fixture'
@@ -43,6 +44,24 @@ test('V02 through V18 loaded workspace has no axe violations', async ({ page }, 
   expect(errors.pageErrors).toEqual([])
 })
 
+test('V20 and V21 release workspace and selection states have no axe violations', async ({
+  page,
+}, testInfo) => {
+  const { dialog, opener, consoleErrors, pageErrors } = await openReleaseDialog(page, testInfo)
+  await expectNoAxeViolations(page, testInfo, 'release-open', ['V21'])
+  await dialog.getByRole('checkbox', { name: 'Episode 0', exact: true }).click()
+  await dialog.getByRole('checkbox', { name: 'REVIEWED (1)' }).click()
+  await expectNoAxeViolations(page, testInfo, 'release-filtered', ['V21'])
+  await dialog.getByRole('checkbox', { name: 'Selected only' }).click()
+  await expect(dialog.locator('#release-selection-status')).toContainText('No selected episodes')
+  await expectNoAxeViolations(page, testInfo, 'release-empty', ['V21'])
+  await page.keyboard.press('Escape')
+  await expect(opener).toBeFocused()
+  await expectNoAxeViolations(page, testInfo, 'release-workspace', ['V20'])
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
+})
+
 test('V02 V03 and V04 empty shell has no axe violations', async ({ page }, testInfo) => {
   const errors = await openEmptyViewer(page, testInfo)
   await expectNoAxeViolations(page, testInfo, 'empty-shell', ['V02', 'V03', 'V04'])
@@ -66,12 +85,12 @@ test('V05 and V15 analyzer state has no axe violations', async ({ page }, testIn
 
 test('V02 dataset chooser has no axe violations', async ({ page }, testInfo) => {
   const errors = await openViewer(page, testInfo)
-  await page.getByRole('button', { name: 'Dataset' }).click()
-  await expect(page.getByRole('dialog', { name: 'Select dataset' })).toBeVisible()
+  await page.getByRole('button', { name: /^Dataset: / }).click()
+  await expect(page.getByRole('main', { name: 'Dataset catalog' })).toBeVisible()
   await attachJson(testInfo, 'state-proof-dataset-open', {
     journeyIds: ['V02'],
     expected: 'Dataset chooser is open and focused',
-    observed: 'Select dataset dialog is visible',
+    observed: 'Dataset catalog landmark is visible',
   })
   await expectNoAxeViolations(page, testInfo, 'dataset-open', ['V02'])
   expect(errors.consoleErrors).toEqual([])
@@ -101,9 +120,11 @@ test('V02 V05 and V18 expose exact page and component semantics', async ({ page 
   await expect(page.getByRole('complementary')).toBeVisible()
   await expect(page.getByRole('main')).toBeVisible()
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Robotic Training Data Analysis')
-  await expect(page.getByRole('heading', { level: 2 })).toHaveText('Episode 0')
+  await expect(
+    page.getByRole('heading', { level: 2, name: 'Episode 0', exact: true }),
+  ).toBeVisible()
 
-  const datasetButton = page.getByRole('button', { name: 'Dataset' })
+  const datasetButton = page.getByRole('button', { name: /^Dataset: / })
   await expect(datasetButton).toHaveAttribute('aria-expanded', 'false')
   await datasetButton.click()
   await expect(datasetButton).toHaveAttribute('aria-expanded', 'true')

@@ -1,7 +1,7 @@
 import type { Locator, Page, TestInfo } from '@playwright/test'
 import { expect, test } from '@playwright/test'
 
-import { attachJson, openEmptyViewer, openViewer } from './accessibility-fixture'
+import { attachJson, openEmptyViewer, openReleaseDialog, openViewer } from './accessibility-fixture'
 
 const interactiveSelector = [
   'a[href]',
@@ -82,6 +82,70 @@ async function assertNoLayoutLoss(page: Page, testInfo: TestInfo, state: string)
   expect(findings.clipped, `${state} clipped content`).toEqual([])
 }
 
+test('V21 release dialog preserves reflow text spacing and unclipped focus', async ({
+  page,
+}, testInfo) => {
+  for (const state of [
+    { name: 'desktop', width: 1280, scale: 1, spacing: false },
+    { name: 'reflow-320', width: 320, scale: 1, spacing: false },
+    { name: 'resize-200', width: 1280, scale: 2, spacing: false },
+    { name: 'text-spacing', width: 320, scale: 1, spacing: true },
+  ]) {
+    await page.setViewportSize({ width: state.width, height: 900 })
+    const { dialog, consoleErrors, pageErrors } = await openReleaseDialog(page, testInfo)
+    await page.addStyleTag({
+      content: `
+      html { font-size: ${state.scale * 100}% !important; }
+      ${state.spacing ? '* { line-height: 1.5 !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important; } p { margin-bottom: 2em !important; }' : ''}
+    `,
+    })
+    const name = dialog.getByRole('textbox', { name: 'Release name', exact: true })
+    await name.focus()
+    await page.keyboard.press('ArrowRight')
+    const focus = await name.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      const gaps = []
+      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor)
+        const bounds = ancestor.getBoundingClientRect()
+        if (style.overflowX !== 'visible')
+          gaps.push(rect.left - bounds.left, bounds.right - rect.right)
+        if (style.overflowY !== 'visible')
+          gaps.push(rect.top - bounds.top, bounds.bottom - rect.bottom)
+      }
+      return { gaps, shadow: getComputedStyle(element).boxShadow }
+    })
+    await attachJson(testInfo, `release-${state.name}-focus`, { journeyIds: ['V21'], ...focus })
+    expect(Math.min(...focus.gaps)).toBeGreaterThanOrEqual(4)
+    expect(focus.shadow).not.toBe('none')
+    const layout = await dialog.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      const clipped = [...element.querySelectorAll<HTMLElement>('*')]
+        .filter((child) => child.checkVisibility({ checkVisibilityCSS: true }))
+        .filter((child) => {
+          const rect = child.getBoundingClientRect()
+          return rect.width > 0 && (rect.left < bounds.left - 1 || rect.right > bounds.right + 1)
+        })
+        .map((child) => child.getAttribute('aria-label') ?? child.textContent?.trim().slice(0, 60))
+      return { clipped, left: bounds.left, right: bounds.right, width: innerWidth }
+    })
+    await attachJson(testInfo, `release-${state.name}-layout`, { journeyIds: ['V21'], ...layout })
+    expect(layout.left).toBeGreaterThanOrEqual(0)
+    expect(layout.right).toBeLessThanOrEqual(layout.width)
+    expect(layout.clipped).toEqual([])
+    for (const action of ['Cancel', 'Preview release', 'Submit release']) {
+      await expect(dialog.getByRole('button', { name: action, exact: true })).toBeInViewport()
+    }
+    await testInfo.attach(`release-${state.name}`, {
+      body: await page.screenshot(),
+      contentType: 'image/png',
+    })
+    expect(consoleErrors).toEqual([])
+    expect(pageErrors).toEqual([])
+    await page.keyboard.press('Escape')
+  }
+})
+
 test('V19 preserves loaded and transient content under adaptive rendering', async ({
   page,
 }, testInfo) => {
@@ -107,7 +171,7 @@ test('V19 preserves loaded and transient content under adaptive rendering', asyn
       1,
     )
     await assertNoLayoutLoss(page, testInfo, `text-resize-${scale * 100}`)
-    const datasetButton = page.getByRole('button', { name: 'Dataset' })
+    const datasetButton = page.getByRole('button', { name: /^Dataset: / })
     await datasetButton.click()
     await expect(page.getByPlaceholder('Filter datasets')).toBeVisible()
     await page.keyboard.press('Escape')
@@ -131,7 +195,7 @@ test('V19 preserves loaded and transient content under adaptive rendering', asyn
   await expect(page.getByRole('heading', { name: 'Episode 0' })).toBeVisible()
   await page.setViewportSize({ width: 320, height: 720 })
   await assertNoLayoutLoss(page, testInfo, 'reflow-loaded')
-  await page.getByRole('button', { name: 'Dataset' }).click()
+  await page.getByRole('button', { name: /^Dataset: / }).click()
   await assertNoLayoutLoss(page, testInfo, 'reflow-dataset-open')
   await page.keyboard.press('Escape')
   const exportButton = page.getByRole('button', { name: 'Export', exact: true })
@@ -210,14 +274,15 @@ test('V02 V03 V05 and V19 primary focus stops stay visible and unobscured', asyn
 }, testInfo) => {
   const errors = await openViewer(page, testInfo)
   const stops = [
-    page.getByRole('button', { name: 'Dataset' }),
+    page.getByRole('button', { name: /^Dataset: / }),
     page.getByRole('button', { name: 'Toggle Diagnostics' }),
     page.getByRole('link', { name: 'Help' }),
     page.getByRole('link', { name: 'Report problem' }),
     page.getByRole('button', { name: /Episode 0/ }),
     page.getByRole('button', { name: /Episode 1/ }),
     page.getByRole('button', { name: 'Export', exact: true }),
-    page.getByRole('button', { name: 'Save & Next Episode' }),
+    page.getByRole('button', { name: 'Save Episode', exact: true }),
+    page.getByRole('button', { name: 'Next Episode', exact: true }),
     page.getByRole('tab', { name: 'Trajectory Viewer' }),
   ]
   const findings = []
@@ -232,7 +297,7 @@ test('V02 V03 V05 and V19 primary focus stops stay visible and unobscured', asyn
   ]
   for (const stop of diagnosticsStops) findings.push(await focusFinding(stop))
 
-  await page.getByRole('button', { name: 'Dataset' }).click()
+  await page.getByRole('button', { name: /^Dataset: / }).click()
   findings.push(await focusFinding(page.getByRole('combobox', { name: 'Filter datasets' })))
   await page.keyboard.press('Escape')
 
@@ -241,7 +306,7 @@ test('V02 V03 V05 and V19 primary focus stops stay visible and unobscured', asyn
   await exportTrigger.press('Enter')
   const exportDialog = page.getByRole('dialog', { name: 'Export Episodes' })
   const exportStops = [
-    exportDialog.getByPlaceholder('/path/to/exports'),
+    exportDialog.getByRole('textbox', { name: 'Output Directory' }),
     exportDialog.getByRole('checkbox', { name: 'Apply crop, resize, and frame removal' }),
     exportDialog.getByRole('checkbox', { name: 'Include subtask metadata' }),
     exportDialog.getByRole('button', { name: 'Cancel' }),
@@ -339,12 +404,18 @@ test('V08 V09 and V19 targets satisfy size or spacing and pointer cancellation',
   await page.getByRole('menuitem', { name: 'Move right' }).click()
   expect(await jointOrder()).toEqual(['target_joint', 'shoulder_joint'])
 
-  const nativeSlider = page.locator('input[type="range"]').first()
+  const pause = page.getByRole('button', { name: 'Pause playback', exact: true })
+  if (await pause.isVisible()) await pause.click()
+  const nativeSlider = page.getByRole('slider', { name: 'Playback frame', exact: true })
   const initialSliderValue = await nativeSlider.inputValue()
+  const minimum = Number(await nativeSlider.getAttribute('min'))
   const sliderBox = await nativeSlider.boundingBox()
   expect(sliderBox).not.toBeNull()
   await nativeSlider.click({
-    position: { x: 2, y: (sliderBox?.height ?? 10) / 2 },
+    position: {
+      x: Number(initialSliderValue) === minimum ? sliderBox!.width - 2 : 2,
+      y: sliderBox!.height / 2,
+    },
   })
   expect(await nativeSlider.inputValue()).not.toBe(initialSliderValue)
   expect(errors.consoleErrors).toEqual([])

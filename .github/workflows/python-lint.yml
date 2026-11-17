@@ -48,7 +48,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
           version: '0.12.20'
           checksum: '6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f'
@@ -61,7 +61,7 @@ jobs:
         run: |
           # Tee-Object creates no file when a clean run emits no output.
           New-Item ruff-check-results.txt -ItemType File -Force | Out-Null
-          uvx --from ruff==0.16.7 ruff check . --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
+          uvx --from ruff==0.17.1 ruff check . --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
             'RUFF_CHECK_FAILED=true' >> $env:GITHUB_ENV
@@ -72,7 +72,7 @@ jobs:
         id: ruff-format
         continue-on-error: true
         run: |
-          uvx --from ruff==0.16.7 ruff format --check --diff . 2>&1 | Tee-Object -FilePath ruff-format-results.txt
+          uvx --from ruff==0.17.1 ruff format --check --diff . 2>&1 | Tee-Object -FilePath ruff-format-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
             'RUFF_FORMAT_FAILED=true' >> $env:GITHUB_ENV
@@ -92,7 +92,7 @@ jobs:
 
       - name: Upload results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-lint-results
           path: |
@@ -103,7 +103,7 @@ jobs:
       - name: Fail job if errors found
         if: (env.RUFF_CHECK_FAILED == 'true' || env.RUFF_FORMAT_FAILED == 'true' || env.HF_PINS_FAILED == 'true') && !inputs.soft-fail
         run: |
-          Write-Output "::error::Python lint violations detected. Run 'uvx --from ruff==0.16.7 ruff check --fix .', 'uvx --from ruff==0.16.7 ruff format .', and 'npm run lint:hfpins' locally."
+          Write-Output "::error::Python lint violations detected. Run 'uvx --from ruff==0.17.1 ruff check --fix .', 'uvx --from ruff==0.17.1 ruff format .', and 'npm run lint:hfpins' locally."
           exit 1
 
       - name: Publish execution evidence

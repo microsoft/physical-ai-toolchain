@@ -11,8 +11,10 @@ interface AnnotationWorkspaceTopBarProps {
   onResetAllClick: () => void
   onOpenExportDialog: () => void
   canGoNextEpisode: boolean
-  canSaveAndNextEpisode: boolean
-  onSaveAndNextEpisode: () => void
+  canSaveEpisode: boolean
+  onSaveEpisode: () => void
+  onNextEpisode?: () => void
+  isSaving: boolean
   saveStatusMessage: string | null
 }
 
@@ -24,8 +26,10 @@ export function AnnotationWorkspaceTopBar({
   onResetAllClick,
   onOpenExportDialog,
   canGoNextEpisode,
-  canSaveAndNextEpisode,
-  onSaveAndNextEpisode,
+  canSaveEpisode,
+  onSaveEpisode,
+  onNextEpisode,
+  isSaving,
   saveStatusMessage,
 }: AnnotationWorkspaceTopBarProps) {
   return (
@@ -46,7 +50,7 @@ export function AnnotationWorkspaceTopBar({
               variant="outline"
               size="icon"
               onClick={onPreviousEpisode}
-              disabled={!canGoPreviousEpisode || !onPreviousEpisode}
+              disabled={isSaving || !canGoPreviousEpisode || !onPreviousEpisode}
               aria-label="Previous Episode"
               title="Previous Episode"
             >
@@ -55,22 +59,36 @@ export function AnnotationWorkspaceTopBar({
             <Button
               variant="outline"
               onClick={onResetAllClick}
-              disabled={!hasPendingEpisodeChanges}
+              disabled={isSaving || !hasPendingEpisodeChanges}
             >
               <RotateCcw className="mr-2 h-4 w-4" />
-              Reset All
+              Discard changes
             </Button>
             <Button variant="outline" onClick={onOpenExportDialog}>
               <Download className="mr-2 h-4 w-4" />
               Export
             </Button>
-            <Button onClick={onSaveAndNextEpisode} disabled={!canSaveAndNextEpisode}>
-              {canGoNextEpisode ? (
-                <SkipForward className="mr-2 h-4 w-4" />
-              ) : (
-                <Save className="mr-2 h-4 w-4" />
-              )}
-              {canGoNextEpisode ? 'Save & Next Episode' : 'Save Episode'}
+            <Button
+              onClick={() => {
+                if (canSaveEpisode && !isSaving) onSaveEpisode()
+              }}
+              disabled={!canSaveEpisode && !isSaving}
+              aria-disabled={!canSaveEpisode || isSaving}
+              aria-busy={isSaving}
+              className="aria-disabled:opacity-50"
+            >
+              <Save className="mr-2 h-4 w-4" />
+              Save Episode
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={onNextEpisode}
+              disabled={isSaving || !canGoNextEpisode || !onNextEpisode}
+              aria-label="Next Episode"
+              title="Next Episode"
+            >
+              <SkipForward className="h-4 w-4" />
             </Button>
           </div>
           <div

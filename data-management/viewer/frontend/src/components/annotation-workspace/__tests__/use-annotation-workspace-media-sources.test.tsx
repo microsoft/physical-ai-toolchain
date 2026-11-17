@@ -1,5 +1,5 @@
-import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act, render, renderHook, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useAnnotationWorkspaceMediaSources } from '@/components/annotation-workspace/useAnnotationWorkspaceMediaSources'
 import type { DatasetInfo, EpisodeData } from '@/types'
@@ -38,6 +38,102 @@ function defaultOptions(episode: EpisodeData) {
 }
 
 describe('useAnnotationWorkspaceMediaSources camera override', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('blends inserted frames using adjusted neighbors and cleans image callbacks on unmount', () => {
+    const images: Array<{
+      width: number
+      height: number
+      src: string
+      onload: (() => void) | null
+    }> = []
+    class FrameImage {
+      width = 16
+      height = 16
+      src = ''
+      onload: (() => void) | null = null
+      constructor() {
+        images.push(this)
+      }
+    }
+    vi.stubGlobal('Image', FrameImage)
+    const context = { globalAlpha: 1, drawImage: vi.fn() }
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+      context as unknown as CanvasRenderingContext2D,
+    )
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(
+      'data:image/jpeg;base64,preview',
+    )
+    const options = {
+      ...defaultOptions(buildEpisode(['wrist'])),
+      originalFrameIndex: null,
+      currentFrame: 4,
+      removedFrames: new Set([0]),
+      insertedFrames: new Map([
+        [1, { afterFrameIndex: 1, interpolationFactor: 0.25 }],
+        [3, { afterFrameIndex: 3, interpolationFactor: 0.75 }],
+        [9, { afterFrameIndex: 9, interpolationFactor: 0.5 }],
+      ]),
+    }
+    function Preview() {
+      const media = useAnnotationWorkspaceMediaSources(options)
+      return (
+        <>
+          <canvas ref={media.canvasRef} />
+          <output>{media.interpolatedImageUrl ?? 'unavailable'}</output>
+        </>
+      )
+    }
+    const { unmount } = render(<Preview />)
+    expect(images.map((image) => image.src)).toEqual([
+      '/api/datasets/dataset-1/episodes/0/frames/3?camera=wrist',
+      '/api/datasets/dataset-1/episodes/0/frames/4?camera=wrist',
+    ])
+    act(() => images.forEach((image) => image.onload?.()))
+    expect(screen.getByRole('status')).toHaveTextContent('data:image/jpeg;base64,preview')
+    expect(context.drawImage).toHaveBeenCalledTimes(2)
+    unmount()
+    expect(images.every((image) => image.onload === null)).toBe(true)
+  })
+
+  it('does not generate frame requests without saved episode context and ignores invalid camera choices', () => {
+    const options = defaultOptions(buildEpisode(['wrist']))
+    const initialProps: Parameters<typeof useAnnotationWorkspaceMediaSources>[0] = {
+      ...options,
+      currentDataset: null,
+    }
+    const { result, rerender } = renderHook(
+      (props: Parameters<typeof useAnnotationWorkspaceMediaSources>[0]) =>
+        useAnnotationWorkspaceMediaSources(props),
+      { initialProps },
+    )
+    expect(result.current.frameImageUrls).toEqual({})
+    act(() => result.current.setCameraName(null))
+    act(() => result.current.setSelectedCameras(['missing', 'wrist', 'wrist']))
+    expect(result.current.selectedCameras).toEqual(['wrist'])
+    rerender({ ...options, currentEpisode: null })
+    expect(result.current.cameraName).toBeNull()
+    expect(result.current.frameImageUrl).toBeNull()
+  })
+
+  it('retains a selected camera and preserves multi-view selection on refresh', () => {
+    const episode = buildEpisode(['wrist', 'overhead', 'front'])
+    const { result, rerender } = renderHook(
+      (props: ReturnType<typeof defaultOptions>) => useAnnotationWorkspaceMediaSources(props),
+      { initialProps: defaultOptions(episode) },
+    )
+    expect(result.current.selectedCameras).toEqual(['wrist'])
+    act(() => result.current.setSelectedCameras(['wrist', 'overhead']))
+    expect(result.current.selectedCameras).toEqual(['wrist', 'overhead'])
+    act(() => result.current.setSelectedCameras([]))
+    expect(result.current.selectedCameras).toEqual(['wrist', 'overhead'])
+    rerender(defaultOptions({ ...episode }))
+    expect(result.current.selectedCameras).toEqual(['wrist', 'overhead'])
+  })
+
   it('returns cameras[0] synchronously on first render', () => {
     const episode = buildEpisode(['wrist', 'overhead'])
 

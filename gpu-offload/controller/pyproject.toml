@@ -11,8 +11,13 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-    "pytest==9.1.1",
+    "pytest==9.2.0",
 ]
 
 [tool.uv]
 package = false
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true

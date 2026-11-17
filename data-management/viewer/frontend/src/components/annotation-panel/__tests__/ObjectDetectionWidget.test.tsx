@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -72,6 +72,125 @@ describe('ObjectDetectionWidget', () => {
     useAnnotationStore.getState().clear()
     useDatasetStore.getState().reset()
     useEpisodeStore.getState().reset()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('accepts comma, tab and blur labels, deduplicates them and removes the last label with Backspace', async () => {
+    const user = userEvent.setup()
+    render(<ObjectDetectionWidget />)
+    const input = screen.getByRole('textbox')
+    await user.type(input, 'cube,')
+    await user.type(input, 'cube{Enter}')
+    expect(screen.getAllByRole('button', { name: 'Remove label cube' })).toHaveLength(1)
+    await user.type(input, 'gripper')
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'Remove label gripper' })).toBeVisible()
+    await user.click(input)
+    await user.keyboard('{Backspace}')
+    expect(screen.queryByRole('button', { name: 'Remove label gripper' })).not.toBeInTheDocument()
+    await user.type(input, 'table')
+    fireEvent.blur(input)
+    expect(screen.getByRole('button', { name: 'Remove label table' })).toBeVisible()
+  })
+
+  it('runs a labelled reference frame, saves its model and clears only the selected saved frame', async () => {
+    const user = userEvent.setup()
+    runDetectionMock.mockResolvedValue({
+      detectionsByFrame: [{ ...successSummary.detectionsByFrame[0], frame: 2 }],
+    })
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    render(<ObjectDetectionWidget />)
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Reference frame' }), {
+      target: { value: '2' },
+    })
+    await user.type(screen.getByRole('textbox'), 'cube{Enter}')
+    await user.click(screen.getByRole('button', { name: 'Detect' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('frame 2')
+    expect(runDetectionMock).toHaveBeenCalledWith('ds', 0, {
+      frames: [2],
+      labels: ['cube'],
+      model: 'yolov8s-world',
+      camera: 'front',
+    })
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(useAnnotationStore.getState().currentAnnotation?.objectDetections?.[0]).toMatchObject({
+      frameIndex: 2,
+      queriedLabels: ['cube'],
+      model: 'yolov8s-world',
+    })
+    await user.click(screen.getByRole('button', { name: 'Remove saved' }))
+    expect(useAnnotationStore.getState().currentAnnotation?.objectDetections).toEqual([])
+    await user.click(screen.getByTitle('Reset to first frame'))
+    expect(screen.getByRole('spinbutton', { name: 'Reference frame' })).toHaveValue(0)
+  })
+
+  it('reports empty and pending detections and clears a previous result without saving', async () => {
+    const user = userEvent.setup()
+    let finish!: (value: unknown) => void
+    runDetectionMock.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    )
+    render(<ObjectDetectionWidget />)
+    await user.type(screen.getByRole('textbox'), 'cube{Enter}')
+    await user.click(screen.getByRole('button', { name: 'Detect' }))
+    expect(screen.getByRole('button', { name: /Detecting/ })).toBeDisabled()
+    await act(async () => finish({ detectionsByFrame: [] }))
+    expect(screen.getByText(/No matches for the supplied labels/)).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Clear' }))
+    expect(screen.queryByText(/No matches/)).not.toBeInTheDocument()
+    expect(useAnnotationStore.getState().currentAnnotation?.objectDetections).toBeUndefined()
+  })
+
+  it('draws loaded detections at preview scale and ignores image callbacks after unmount', async () => {
+    const user = userEvent.setup()
+    const images: Array<{
+      width: number
+      height: number
+      onload: (() => void) | null
+      onerror: (() => void) | null
+    }> = []
+    class PreviewImage {
+      width = 100
+      height = 50
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      constructor() {
+        images.push(this)
+      }
+    }
+    vi.stubGlobal('Image', PreviewImage)
+    const context = {
+      drawImage: vi.fn(),
+      strokeRect: vi.fn(),
+      measureText: vi.fn(() => ({ width: 40 })),
+      fillRect: vi.fn(),
+      fillText: vi.fn(),
+      clearRect: vi.fn(),
+    }
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+      context as unknown as CanvasRenderingContext2D,
+    )
+    runDetectionMock.mockResolvedValue(successSummary)
+    const { unmount } = render(<ObjectDetectionWidget />)
+    await user.click(screen.getByRole('button', { name: 'Detect' }))
+    await screen.findByRole('status')
+    const loaded = images.at(-1)!
+    act(() => loaded.onload?.())
+    expect(screen.getByRole('status')).toHaveTextContent('100×50px')
+    expect(context.strokeRect).toHaveBeenCalledWith(0, 0, 32, 32)
+    act(() => images.at(-1)!.onerror?.())
+    expect(context.clearRect).toHaveBeenCalled()
+    unmount()
+    context.drawImage.mockClear()
+    loaded.onload?.()
+    expect(context.drawImage).not.toHaveBeenCalled()
   })
 
   it('shows the empty state without a dataset or episode', () => {

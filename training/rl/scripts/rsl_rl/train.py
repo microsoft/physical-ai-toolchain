@@ -1,4 +1,4 @@
-"""RSL-RL training orchestration with Isaac Lab environments and Azure MLflow integration.
+"""RSL-RL training orchestration with Isaac Lab environments and MLflow tracking.
 
 This module provides the main training loop for reinforcement learning agents using
 the RSL-RL library with Isaac Lab simulation environments. It handles:
@@ -6,7 +6,7 @@ the RSL-RL library with Isaac Lab simulation environments. It handles:
 - Checkpoint loading and model registration
 - MLflow metric logging and artifact tracking
 - Video recording of training rollouts
-- Integration with Azure ML workspaces
+- Tracking and registration through the selected backend (Azure ML or an MLflow server)
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from isaaclab.app import AppLauncher
 from training.rl import cli_args
 from training.rl.simulation_shutdown import prepare_for_shutdown
 from training.stream import install_ansi_stripping
+from training.utils.tracking import TRACKING_BACKENDS, TrackingBackend, create_tracking_backend
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
@@ -62,16 +63,23 @@ parser.add_argument(
     help="Export IO descriptors.",
 )
 parser.add_argument(
-    "--disable_azure",
-    action="store_true",
-    default=False,
-    help="Disable Azure ML integration for training.",
+    "--tracking_backend",
+    choices=TRACKING_BACKENDS,
+    default=None,
+    help="Where runs and checkpoints go: azureml, mlflow (MLFLOW_TRACKING_URI), or none. "
+    "Defaults to TRACKING_BACKEND, then azureml.",
 )
 parser.add_argument(
-    "--azure_primary_rank_only",
+    "--tracking_all_ranks",
     action="store_true",
-    default=True,
-    help="Only primary rank logs to Azure (default: True).",
+    default=False,
+    help="Track runs from every rank in distributed training instead of only the primary rank.",
+)
+parser.add_argument(
+    "--register_checkpoint",
+    type=str,
+    default=None,
+    help="Register the final checkpoint under this model name in the tracking backend's registry.",
 )
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
@@ -155,16 +163,11 @@ except ImportError:
     print("[WARNING] Custom tasks module (isaaclab_aeon) not found")
 
 
-# Import Azure utilities
 try:
-    from training.utils import AzureConfigError, bootstrap_azure_ml
     from training.utils.metrics import SystemMetricsCollector
 except ImportError:
-    AzureConfigError = None
-    AzureMLContext = None
-    bootstrap_azure_ml = None
     SystemMetricsCollector = None
-    print("[WARNING] Azure utilities not available. Training will proceed without Azure integration.")
+    print("[WARNING] System metrics collector not available. Training will log without system metrics.")
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -247,15 +250,38 @@ def _resolve_env_count(env_cfg: object) -> int | None:
     return getattr(env_cfg, "num_envs", None)
 
 
+def _connect_tracking(backend_name: str | None, *, experiment_name: str) -> TrackingBackend | None:
+    """Create and connect the selected tracking backend, or return None to train untracked.
+
+    Tracking failures never stop training; the run continues with local outputs only.
+    """
+    try:
+        tracking = create_tracking_backend(backend_name, experiment_name=experiment_name)
+        if not tracking.enabled:
+            print("[INFO] Tracking disabled; training writes local outputs only.")
+            return None
+        # Reading the URI connects to the backend (Azure ML bootstraps its workspace here).
+        tracking_uri = tracking.tracking_uri
+    except Exception as exc:
+        print(f"[WARNING] Tracking backend unavailable: {exc}")
+        print("[INFO] Training will proceed without tracking.")
+        return None
+
+    print(f"[INFO] Tracking backend '{tracking.name}' connected: {tracking_uri}")
+    if tracking.storage:
+        print("[INFO] Azure Storage enabled for checkpoint uploads")
+    return tracking
+
+
 def _start_mlflow_run(
     *,
-    context: Any,
+    context: TrackingBackend,
     experiment_name: str,
     run_name: str,
     tags: dict[str, str],
     params: dict[str, Any],
 ) -> tuple[Any | None, bool]:
-    """Start an MLflow run and return the module with activation state."""
+    """Start an MLflow run on the tracking backend and return the module with activation state."""
     try:
         import mlflow
     except ImportError as exc:
@@ -263,8 +289,7 @@ def _start_mlflow_run(
         return None, False
 
     try:
-        mlflow.set_tracking_uri(context.tracking_uri)
-        mlflow.set_experiment(experiment_name)
+        context.configure_mlflow(mlflow, experiment_name=experiment_name)
         mlflow.start_run(run_name=run_name)
         if tags:
             mlflow.set_tags(tags)
@@ -345,20 +370,22 @@ def _sync_logs_to_storage(
 
 def _register_final_model(
     *,
-    context: Any | None,
+    context: TrackingBackend | None,
     model_path: str,
     model_name: str,
     tags: dict[str, str],
     properties: dict[str, str] | None = None,
+    artifact_uri: str | None = None,
 ) -> bool:
-    """Register a trained model in Azure ML if dependencies are available.
+    """Register a trained model in the tracking backend's model registry.
 
     Args:
-        context: Azure ML context with client.
+        context: Tracking backend responsible for model registration.
         model_path: Path to model file or directory.
         model_name: Name for registered model.
         tags: Model tags (task, framework, etc.).
         properties: Model properties (success_threshold, etc.).
+        artifact_uri: Run artifact URI of the already-logged model, so MLflow registers it without a second upload.
 
     Returns:
         True if registration succeeded, False otherwise.
@@ -367,26 +394,24 @@ def _register_final_model(
         return False
 
     try:
-        from azure.ai.ml.entities import Model
-    except ImportError as exc:
-        print(f"[WARNING] azure-ai-ml not available for model registration: {exc}")
-        return False
-
-    try:
-        model = Model(
+        registered = context.register_checkpoint(
             name=model_name,
-            path=model_path,
-            type="custom_model",
-            description="RSL-RL checkpoint registered via Azure ML",
+            local_path=Path(model_path),
+            artifact_uri=artifact_uri,
+            description="Isaac Lab RSL-RL checkpoint",
             tags=tags,
             properties=properties or {},
         )
-        context.client.models.create_or_update(model)
-        print(f"[INFO] Registered final model '{model_name}' with Azure ML")
-        return True
+    except ImportError as exc:
+        print(f"[WARNING] Registry SDK not available for model registration: {exc}")
+        return False
     except Exception as exc:
         print(f"[WARNING] Failed to register final model '{model_name}': {exc}")
         return False
+    if registered is None:
+        return False
+    print(f"[INFO] Registered final model '{model_name}' as {registered.uri}")
+    return True
 
 
 def _create_enhanced_log(
@@ -501,7 +526,7 @@ def _create_enhanced_save(
     model_name: str,
     runner: Any,
 ):
-    """Create wrapped save function that uploads checkpoints to MLflow and Azure Storage."""
+    """Create wrapped save function that logs checkpoints to MLflow and uploads them to Azure Storage when set."""
 
     def enhanced_save(path, *args, **kwargs):
         result = original_save(path, *args, **kwargs)
@@ -543,9 +568,9 @@ def main(
 ):
     """Train with RSL-RL agent."""
     is_primary_process = _is_primary_rank(args_cli, app_launcher)
-    azure_enabled = not args_cli.disable_azure and (not args_cli.azure_primary_rank_only or is_primary_process)
+    tracking_requested = args_cli.tracking_all_ranks or is_primary_process
 
-    azure_context: Any | None = None
+    tracking: TrackingBackend | None = None
     mlflow_module: Any | None = None
     mlflow_run_active = False
 
@@ -566,22 +591,8 @@ def main(
         env_cfg.seed = seed
         agent_cfg.seed = seed
 
-    if azure_enabled and bootstrap_azure_ml is not None:
-        try:
-            azure_context = bootstrap_azure_ml(experiment_name=agent_cfg.experiment_name)
-            if azure_context is None:
-                print("[WARNING] Azure ML bootstrap returned None - missing or invalid configuration.")
-                print("[INFO] Training will proceed without Azure integration.")
-            else:
-                print(f"[INFO] Azure ML workspace connected: {azure_context.workspace_name}")
-                if azure_context.storage:
-                    print("[INFO] Azure Storage enabled for checkpoint uploads")
-        except Exception as exc:
-            if AzureConfigError and isinstance(exc, AzureConfigError):
-                print(f"[WARNING] Azure ML bootstrap failed: {exc}")
-            else:
-                print(f"[WARNING] Unexpected error during Azure bootstrap: {exc}")
-            azure_context = None
+    if tracking_requested:
+        tracking = _connect_tracking(args_cli.tracking_backend, experiment_name=agent_cfg.experiment_name)
 
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
     log_root_path = os.path.abspath(log_root_path)
@@ -596,7 +607,7 @@ def main(
     if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
         resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
-    if azure_context is not None:
+    if tracking is not None:
         env_count = _resolve_env_count(env_cfg)
         algorithm_name = getattr(
             getattr(agent_cfg, "algorithm", None),
@@ -621,18 +632,18 @@ def main(
             "task": args_cli.task or "",
             "distributed": str(args_cli.distributed).lower(),
             "log_dir": log_dir,
-            "azureml_workspace": azure_context.workspace_name,
+            **tracking.run_tags(),
         }
 
         if correlation_id := os.environ.get("MLFLOW_CORRELATION_ID", "").strip():
             tags["correlation_id"] = correlation_id
 
-        if azure_context.storage:
-            tags["storage_container"] = azure_context.storage.container_name
+        if tracking.storage:
+            tags["storage_container"] = tracking.storage.container_name
 
         run_name = Path(log_dir).name
         mlflow_module, mlflow_run_active = _start_mlflow_run(
-            context=azure_context,
+            context=tracking,
             experiment_name=agent_cfg.experiment_name,
             run_name=run_name,
             tags=tags,
@@ -643,8 +654,8 @@ def main(
                 mlflow_module.set_tag("resume_checkpoint_path", str(resume_path))
             mlflow_module.set_tag("is_primary_rank", str(is_primary_process).lower())
 
-    storage_context = azure_context.storage if azure_context else None
-    if azure_context and storage_context is None:
+    storage_context = tracking.storage if tracking else None
+    if tracking is not None and tracking.name == "azureml" and storage_context is None:
         print("[INFO] Azure Storage account not configured; checkpoint uploads will be skipped")
 
     # set the IO descriptors export flag if requested
@@ -708,7 +719,7 @@ def main(
 
     install_ansi_stripping()
 
-    if is_primary_process and azure_context is not None:
+    if is_primary_process and tracking is not None:
         runner.log = _create_enhanced_log(runner.log, mlflow_module, mlflow_run_active, runner)
 
         runner.save = _create_enhanced_save(
@@ -720,7 +731,7 @@ def main(
             f"{args_cli.task}_{agent_cfg.experiment_name}",
             runner,
         )
-        print("[INFO] Primary rank will stream metrics, checkpoints to Azure and MLflow")
+        print(f"[INFO] Primary rank will stream metrics and checkpoints to the {tracking.name} tracking backend")
 
     training_outcome = "success"
     try:
@@ -750,6 +761,7 @@ def main(
                     print(f"[WARNING] Failed to upload training logs: {exc}")
 
             final_model_path = None
+            final_artifact_uri = None
             model_candidates = list(Path(log_dir).glob("**/model_*.pt"))
             if not model_candidates:
                 model_candidates = list(Path(log_dir).glob("**/policy_*.pt"))
@@ -771,13 +783,20 @@ def main(
                 if mlflow_module and mlflow_run_active:
                     try:
                         mlflow_module.log_artifact(final_model_path, artifact_path="checkpoints/final")
+                        active_run = mlflow_module.active_run()
+                        if active_run is not None:
+                            final_artifact_uri = (
+                                f"runs:/{active_run.info.run_id}/checkpoints/final/{Path(final_model_path).name}"
+                            )
                     except Exception as exc:
                         print(f"[WARNING] Failed to log final model artifact to MLflow: {exc}")
 
+            if final_model_path and args_cli.register_checkpoint:
                 _register_final_model(
-                    context=azure_context,
+                    context=tracking,
                     model_path=final_model_path,
-                    model_name=f"rsl_rl_model_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+                    model_name=args_cli.register_checkpoint,
+                    artifact_uri=final_artifact_uri,
                     tags={
                         "task": args_cli.task or "",
                         "framework": "rsl_rl",

@@ -30,7 +30,9 @@ Extracts the following metric categories from SKRL agents:
 
 **Additional Metrics:**
 All entries in agent.tracking_data dict are extracted, supporting custom metrics
-from different SKRL algorithms (PPO, SAC, TD3, DDPG, A2C, etc.).
+from different SKRL algorithms (PPO, SAC, TD3, DDPG, A2C, etc.). Names keep to the
+characters every MLflow server accepts: skrl's units lose their parentheses, so
+``Stats / Algorithm update time (ms)`` logs as ``Stats / Algorithm update time ms``.
 
 **System Metrics:**
 Collected via psutil and pynvml with system/ prefix:
@@ -51,7 +53,7 @@ Metric Filtering
 ----------------
 Use the metric_filter parameter to control which metrics are logged:
 - None (default): Log all available metrics
-- set of str: Only log metrics whose names are in the set
+- set of str: Only log metrics whose logged names are in the set
 - Useful for reducing MLflow API load in production environments
 
 Usage Example

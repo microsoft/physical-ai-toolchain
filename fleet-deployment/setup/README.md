@@ -6,9 +6,10 @@ Build, sign, and attest inference container images for the robot fleet.
 
 | Tool                                       | Purpose                                   | Required for                  |
 |--------------------------------------------|-------------------------------------------|-------------------------------|
-| `az` CLI                                   | Azure auth, `az ml`, `az acr login`       | All steps                     |
+| `az` CLI                                   | Azure auth, `az ml`, `az acr login`       | AzureML models, ACR pushes    |
 | `docker` (with `buildx`)                   | Local image build + push to ACR           | Build                         |
 | `jq`                                       | Terraform output parsing, buildx metadata | Build                         |
+| `uv`, `curl`                               | MLflow model lookup and download          | MLflow models                 |
 | `cosign` ≥2.2                              | Image signing + attestation               | `sigstore` mode               |
 | `syft`                                     | SBOM generation                           | Attest (unless `--skip-sbom`) |
 | `notation` ≥1.1 + `notation-azure-kv` ≥1.1 | AKV-backed image signing                  | `notation` mode               |
@@ -23,19 +24,19 @@ that blocks large baked-in models does not apply.
 
 ## 📂 Files
 
-| File                              | Purpose                                                                                  |
-|-----------------------------------|------------------------------------------------------------------------------------------|
-| `build-aml-model-image.sh`        | Download AML model, `docker buildx build --push`, sign image, self-verify                |
-| `attest-image.sh`                 | Attach an SBOM and an optional OpenVEX attestation to an already-built image             |
-| `Dockerfile.inference`            | `scratch` carrier: `COPY model/` only — no runtime, mounted via OCI image volume         |
-| `defaults.conf`                   | Centralized defaults consumed by both scripts                                            |
-| `tests/test-model-image-pod.yaml` | Smoke-test pod that mounts a built model image via OCI image volume and lists `/policy/` |
+| File                              | Purpose                                                                                   |
+|-----------------------------------|-------------------------------------------------------------------------------------------|
+| `build-model-image.sh`            | Package a model from AzureML, MLflow, or a checkpoint directory; push; sign ACR images    |
+| `attest-image.sh`                 | Attach an SBOM and an optional OpenVEX attestation to an already-built image              |
+| `Dockerfile.inference`            | Carrier: `COPY model/ /policy/` on `scratch`, or on a runtime base for a runnable carrier |
+| `defaults.conf`                   | Centralized defaults consumed by both scripts                                             |
+| `tests/test-model-image-pod.yaml` | Smoke-test pod that mounts a built model image via OCI image volume and lists `/policy/`  |
 
 ## 🚀 Quick Start
 
 ```bash
 # 1. Build and sign (one pass, no rebuild needed for attestations)
-fleet-deployment/setup/build-aml-model-image.sh \
+fleet-deployment/setup/build-model-image.sh \
   --model-name lerobot-act-pickplace
 
 # Build prints the digest-pinned reference, e.g.
@@ -52,8 +53,8 @@ The build script prints the exact `attest-image.sh` invocation to run next.
 
 ```text
                  ┌──────────────────────┐
-                 │ build-aml-model-image│  build + push + cosign sign
-                 │       .sh            │  + verify-image.sh self-check
+                 │ build-model-image.sh │  build + push + cosign sign
+                 │                      │  + verify-image.sh self-check
                  └──────────┬───────────┘
                             │  emits digest-pinned image ref
                             ▼
@@ -114,6 +115,18 @@ fleet-deployment/setup/attest-image.sh \
   --vex-file <path/to/document.openvex.json>
 ```
 
+## 💻 Local Profile
+
+On a workstation running the [local OSMO profile](../../infrastructure/local/README.md), `--profile local` packages a model from the local MLflow registry and pushes it to the loopback registry that K3s pulls from:
+
+```bash
+fleet-deployment/setup/build-model-image.sh --profile local --model-name lerobot-act-pickplace
+```
+
+The build needs no Azure login and skips signing and attestation, because only this host's K3s pulls from that registry. `--model-path` packages a checkpoint directory instead of a registered model, on either profile.
+
+OSMO chooses pod templates per platform, so an OSMO workflow cannot mount a carrier it names at submit time. To evaluate a containerized policy on OSMO, build a runnable carrier on the evaluation runtime image with `--base-image`; the evaluation runs that image as its task image and reads the policy from `/policy/`. Kubernetes deployments outside OSMO mount the `scratch` carrier as an image volume.
+
 ## 🏗️ Base Image Pinning
 
 `DEFAULT_INFERENCE_BASE_IMAGE` in [`defaults.conf`](defaults.conf) is `scratch`.
@@ -122,8 +135,9 @@ OCI image volumes (KEP-4639) and is never executed, so it has no OS, no
 packages, and no scannable CVE surface. OpenVEX requires vulnerability
 statements, so the default attestation flow skips VEX.
 
-If a future variant of the image needs to execute (e.g. an embedded runtime
-for on-node inference), bump the base intentionally:
+`--base-image` builds a runnable carrier for one build, such as the local
+evaluation images. To publish runnable carriers to ACR by default (e.g. an
+embedded runtime for on-node inference), bump the base intentionally:
 
 1. Pick the new base digest (e.g. `crane digest mcr.microsoft.com/azureml/minimal-py312-inference:1.x`).
 2. Update `DEFAULT_INFERENCE_BASE_IMAGE` in `defaults.conf`.
@@ -133,16 +147,18 @@ for on-node inference), bump the base intentionally:
 
 ## 🔧 Common Overrides
 
-| Override                                         | Effect                                                 |
-|--------------------------------------------------|--------------------------------------------------------|
-| `--tf-dir none`                                  | Skip Terraform discovery; values from flags/env only   |
-| `--model-version 7`                              | Build a specific AML model version (default: `latest`) |
-| `--image-tag 7-sha-abc1234`                      | Override the auto-derived tag                          |
-| `--verify-mode notation` + `--akv-key-id`        | Use AKV-backed Notation signing instead of sigstore    |
-| `--acr-name`/`--acr-tenant`/`--acr-subscription` | Required in cross-tenant or no-Terraform mode          |
-| `INFERENCE_BASE_IMAGE=…` env var                 | One-off base override without editing `defaults.conf`  |
-| `--skip-sbom` / `--skip-vex`                     | Selective attestation refresh                          |
-| `--vex-file PATH`                                | Attach an explicit OpenVEX document                    |
+| Override                                         | Effect                                                |
+|--------------------------------------------------|-------------------------------------------------------|
+| `--tf-dir none`                                  | Skip Terraform discovery; values from flags/env only  |
+| `--profile local`                                | MLflow model to the local registry, unsigned          |
+| `--model-path DIR`                               | Package a checkpoint directory instead of a registry  |
+| `--model-version 7`                              | Build a specific model version (default: `latest`)    |
+| `--image-tag 7-sha-abc1234`                      | Override the auto-derived tag                         |
+| `--verify-mode notation` + `--akv-key-id`        | Use AKV-backed Notation signing instead of sigstore   |
+| `--acr-name`/`--acr-tenant`/`--acr-subscription` | Required in cross-tenant or no-Terraform mode         |
+| `--base-image IMAGE`, `INFERENCE_BASE_IMAGE=…`   | One-off base override without editing `defaults.conf` |
+| `--skip-sbom` / `--skip-vex`                     | Selective attestation refresh                         |
+| `--vex-file PATH`                                | Attach an explicit OpenVEX document                   |
 
 Build scripts resolve values in this order: **Terraform output → CLI flag →
 `DEFAULT_*` env var → `defaults.conf` literal → fatal**.
@@ -152,10 +168,20 @@ flags, `DEFAULT_*` values, and `defaults.conf`.
 
 ## 🧩 Enabling OCI Image Volumes on k3s
 
-Consumer pods mount the model carrier via OCI image volumes (KEP-4639). This
-is beta and default-on in Kubernetes 1.33+. On k3s clusters running 1.31 or
-1.32, enable the `ImageVolume` feature gate on both the apiserver and the
-kubelet via `/etc/rancher/k3s/config.yaml`:
+Consumer pods mount the model carrier via OCI image volumes (KEP-4639). Two
+things must hold on every node that runs them:
+
+| Requirement                | When it is met                                                                                                     |
+|----------------------------|--------------------------------------------------------------------------------------------------------------------|
+| `ImageVolume` feature gate | On by default from Kubernetes 1.35 and locked on in 1.36; enable it yourself on 1.31 to 1.34                       |
+| containerd 2.1 or newer    | Every current K3s patch line; earlier 1.32 patches, such as v1.32.6 with containerd 2.0.5, cannot mount the volume |
+
+The repository's K3s installer, `data-pipeline/setup/hil/01-install-k3s.sh`,
+pins a 1.35 release, which meets both. Check the runtime in the
+`CONTAINER-RUNTIME` column of `kubectl get nodes -o wide`.
+
+On 1.31 to 1.34, enable the gate on both the apiserver and the kubelet via
+`/etc/rancher/k3s/config.yaml`:
 
 ```yaml
 kube-apiserver-arg:

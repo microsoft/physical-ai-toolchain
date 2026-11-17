@@ -1,0 +1,16 @@
+ARG CARLA_IMAGE=carlasim/carla:0.9.15
+FROM ${CARLA_IMAGE}
+
+WORKDIR /home/carla
+
+ARG CARLA_MAPS_URL=https://carla-releases.s3.eu-west-3.amazonaws.com/Linux/AdditionalMaps_0.9.15.tar.gz
+USER root
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
+USER carla
+RUN mkdir -p Import && \
+    curl --fail --location --retry 3 --output Import/AdditionalMaps_0.9.15.tar.gz "${CARLA_MAPS_URL}" && \
+    bash ./ImportAssets.sh && \
+    rm Import/AdditionalMaps_0.9.15.tar.gz

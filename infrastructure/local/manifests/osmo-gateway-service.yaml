@@ -1,0 +1,22 @@
+# Pins the OSMO gateway to a fixed ClusterIP. The chart's own gateway Service gets a new address on every
+# reinstall; this one selects the same envoy pods at the address the platform profile publishes.
+# Rendered by 02-deploy-osmo.sh, which substitutes only LOCAL_ placeholders.
+apiVersion: v1
+kind: Service
+metadata:
+  name: osmo-gateway-local
+  namespace: ${LOCAL_OSMO_CONTROL_PLANE_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: osmo-gateway-local
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  type: ClusterIP
+  clusterIP: ${LOCAL_OSMO_GATEWAY_CLUSTER_IP}
+  selector:
+    app.kubernetes.io/name: osmo-gateway
+    app.kubernetes.io/instance: osmo
+    app.kubernetes.io/component: envoy
+  ports:
+    - name: http
+      port: 80
+      targetPort: envoy-http

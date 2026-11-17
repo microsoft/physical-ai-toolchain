@@ -18,21 +18,22 @@ Evaluate trained robotics policies using local environments, Azure ML compute, o
 
 ## 📖 Evaluation Guides
 
-| Guide                                                  | Description                                              |
-|--------------------------------------------------------|----------------------------------------------------------|
-| [LeRobot ACT Policy Evaluation](lerobot-evaluation.md) | Run LeRobot ACT policies locally with ROS2 deployment    |
-| [OSMO Evaluation Workflows](osmo-evaluation.md)        | Execute Isaac Lab and LeRobot evaluation via NVIDIA OSMO |
-| [HiL Evaluation](hil-evaluation.md)                    | Run CPU and independently no-command HiL gates           |
+| Guide                                                                                                       | Description                                                                  |
+|-------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------|
+| [LeRobot ACT Policy Evaluation](lerobot-evaluation.md)                                                      | Run LeRobot ACT policies locally with ROS2 deployment                        |
+| [OSMO Evaluation Workflows](osmo-evaluation.md)                                                             | Execute Isaac Lab and LeRobot evaluation via NVIDIA OSMO                     |
+| [HiL Evaluation](hil-evaluation.md)                                                                         | Run CPU and independently no-command HiL gates                               |
+| [VLM-as-Judge](https://github.com/microsoft/physical-ai-toolchain/blob/main/evaluation/vlm_judge/README.md) | Score episodes and rollout videos with a VLM, locally or as an OSMO workflow |
 
 ## ⚖️ Evaluation Comparison
 
-| Feature              | Local / Azure ML        | OSMO                        |
-|----------------------|-------------------------|-----------------------------|
-| Orchestration        | Manual or Azure ML jobs | OSMO workflow engine        |
-| Checkpoint source    | MLflow, HuggingFace     | MLflow, Azure Blob, HTTP(S) |
-| Supported frameworks | LeRobot                 | Isaac Lab, LeRobot          |
-| GPU management       | User-managed            | KAI Scheduler               |
-| Monitoring           | Local logs              | `osmo workflow logs`        |
+| Feature              | Local / Azure ML        | OSMO                                              |
+|----------------------|-------------------------|---------------------------------------------------|
+| Orchestration        | Manual or Azure ML jobs | OSMO workflow engine                              |
+| Checkpoint source    | MLflow, HuggingFace     | MLflow, Azure Blob, HTTP(S), policy carrier image |
+| Supported frameworks | LeRobot                 | Isaac Lab, LeRobot                                |
+| GPU management       | User-managed            | KAI Scheduler                                     |
+| Monitoring           | Local logs              | `osmo workflow logs`                              |
 
 ## 🚀 Quick Start
 
@@ -44,13 +45,15 @@ python lerobot/scripts/eval.py \
   -p lerobot/configs/policy/act.yaml
 ```
 
-OSMO evaluation submission:
+OSMO evaluation submission, gated on the policy's success rate:
 
 ```bash
-osmo workflow submit \
-  --file evaluation/sil/workflows/osmo/eval.yaml \
-  --set checkpoint_uri=<checkpoint-uri>
+evaluation/sil/scripts/submit-osmo-eval.sh \
+  --checkpoint-uri <checkpoint-uri> \
+  --task Isaac-Cartpole-v0
 ```
+
+Add `--profile local` to run it on a workstation with the [local OSMO profile](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/local/README.md).
 
 ## 📚 Related Documentation
 

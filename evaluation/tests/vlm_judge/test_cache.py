@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
-from vlm_judge.cache import JudgeCache
+
+from evaluation.vlm_judge.cache import JudgeCache
+from evaluation.vlm_judge.service import BackendConfig, JudgeService, ServiceConfig
 
 
 def _touch(path: Path, size_bytes: int = 64) -> Path:
@@ -14,6 +18,72 @@ def _touch(path: Path, size_bytes: int = 64) -> Path:
 
 
 class TestJudgeCache:
+    def test_given_nonfinite_result_when_writing_then_preserves_previous_entry_and_removes_temporary_file(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "cache"
+        cache = JudgeCache(root)
+        cache.put("result", {"confidence": 0.8})
+
+        with pytest.raises(ValueError):
+            cache.put("result", {"confidence": float("nan")})
+
+        assert cache.get("result") == {"confidence": 0.8}
+        assert sorted(path.name for path in root.iterdir()) == ["result.json"]
+
+    def test_legacy_payload_cannot_match_new_identity(self, tmp_path: Path) -> None:
+        video = _touch(tmp_path / "ep.mp4")
+        legacy = {
+            "videos": [
+                {
+                    "view": "front",
+                    "path": str(video),
+                    "size": video.stat().st_size,
+                    "mtime_ns": video.stat().st_mtime_ns,
+                }
+            ],
+            "time_window": {"from_s": None, "to_s": None},
+            "instruction": "pick cube",
+            "judge_model": "echo",
+            "prompt_version": "v1",
+            "agent_config": None,
+        }
+        legacy_key = hashlib.sha256(json.dumps(legacy, sort_keys=True).encode()).hexdigest()
+        current = JudgeCache(None).key(
+            video_paths={"front": video}, instruction="pick cube", judge_model="echo", prompt_version="v1"
+        )
+        assert current != legacy_key
+
+    def test_explicit_local_locator_is_canonical(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "model").mkdir()
+        relative = JudgeService(ServiceConfig(backend=BackendConfig(model_id="./model")))
+        absolute = JudgeService(ServiceConfig(backend=BackendConfig(model_id=str(tmp_path / "model"))))
+        arguments = {"video_paths": {}, "instruction": "x", "prompt_version": "v1"}
+
+        assert relative.execution_config == absolute.execution_config
+        assert relative.cache_for().key(**arguments, judge_model=relative.model_id) == absolute.cache_for().key(
+            **arguments, judge_model=absolute.model_id
+        )
+
+    def test_backend_and_normalized_revision_separate_cache_entries(self, tmp_path: Path) -> None:
+        arguments = {
+            "video_paths": {"front": _touch(tmp_path / "ep.mp4")},
+            "instruction": "pick cube",
+            "judge_model": "owner/model",
+            "prompt_version": "v1",
+        }
+        keys = []
+        for kind, revision in (("echo", "a"), ("qwen3-vl", "a"), ("qwen3-vl", "b"), ("qwen3-vl", "A")):
+            service = JudgeService(
+                ServiceConfig(backend=BackendConfig(kind=kind, model_id="owner/model", revision=revision * 40))
+            )
+            keys.append(service.cache_for(tmp_path / "cache").key(**arguments))
+        echo, native, changed, normalized = keys
+
+        assert len({echo, native, changed}) == 3
+        assert native == normalized
+
     def test_disabled_when_root_is_none(self) -> None:
         cache = JudgeCache(None)
         assert cache.enabled is False

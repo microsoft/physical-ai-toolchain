@@ -5,7 +5,9 @@
  * support for modifier keys and input field filtering.
  */
 
-import { useCallback, useEffect } from 'react'
+import { createContext, useCallback, useContext, useEffect } from 'react'
+
+export const KeyboardShortcutsContext = createContext(true)
 
 export interface KeyboardShortcut {
   /** Key to listen for */
@@ -49,7 +51,9 @@ export function useKeyboardShortcuts(
   shortcuts: KeyboardShortcut[],
   options: UseKeyboardShortcutsOptions = {},
 ) {
-  const { enabled = true, preventDefault = true } = options
+  const contextEnabled = useContext(KeyboardShortcutsContext)
+  const enabled = contextEnabled && (options.enabled ?? true)
+  const preventDefault = options.preventDefault ?? true
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
