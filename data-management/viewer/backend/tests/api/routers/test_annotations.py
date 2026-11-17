@@ -128,6 +128,29 @@ def real_edit_services(accessibility_dataset_path: Path, tmp_path: Path) -> Iter
         app.dependency_overrides.pop(require_principal_context, None)
 
 
+def test_given_local_no_auth_when_annotation_saved_and_reloaded_then_author_is_localuser(
+    client: TestClient,
+    real_edit_services: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.api.main import app
+    from src.api.services.annotation_service import AnnotationService, get_annotation_service
+
+    app.dependency_overrides.pop(require_principal_context, None)
+    monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "true")
+    monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "apikey")
+    url = "/api/datasets/a11y-synthetic/episodes/0/annotations"
+
+    saved = client.put(url, json=_make_annotation().model_dump(mode="json"), headers={"If-None-Match": "*"})
+    app.dependency_overrides[get_annotation_service] = lambda: AnnotationService(base_path=str(tmp_path))
+    reloaded = client.get(url)
+
+    assert saved.status_code == 200
+    assert reloaded.status_code == 200
+    assert [item["annotator_id"] for item in reloaded.json()["annotations"]] == ["localuser"]
+
+
 def test_given_cached_episode_when_source_replaced_then_edit_validation_uses_current_metadata(
     client: TestClient,
     real_edit_services: dict[str, str],

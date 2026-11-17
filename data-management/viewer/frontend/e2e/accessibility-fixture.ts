@@ -3,6 +3,12 @@ import { expect } from '@playwright/test'
 
 export const riskComponentRegistry = [
   {
+    id: 'viewer-risk-release-selection',
+    category: 'checkbox-disclosure',
+    sourcePaths: ['release/ReleaseDialog.tsx', 'release/ReleaseWorkspace.tsx'],
+    mappedEvidence: 'e2e/accessibility-keyboard.spec.ts',
+  },
+  {
     id: 'viewer-risk-dialogs',
     category: 'dialog',
     sourcePaths: [
@@ -10,6 +16,7 @@ export const riskComponentRegistry = [
       'annotation-workspace/DraftConflictDialog.tsx',
       'episode-viewer/JointConfigDefaultsEditor.tsx',
       'export/ExportDialog.tsx',
+      'release/ReleaseDialog.tsx',
     ],
     mappedEvidence: 'e2e/accessibility-keyboard.spec.ts',
   },
@@ -80,6 +87,8 @@ export const riskComponentRegistry = [
       'annotation-workspace/AnnotationWorkspaceTopBar.tsx',
       'app-shell/DataviewerEpisodeViewer.tsx',
       'export/ExportProgress.tsx',
+      'release/ReleaseDialog.tsx',
+      'release/ReleaseWorkspace.tsx',
       'frame-editor/TrajectoryEditor.tsx',
       'vlm-judge/JudgePanel.tsx',
     ],
@@ -234,6 +243,40 @@ export async function installApiFixture(page: Page, options: ApiFixtureOptions =
     if (path === '/api/csrf-token') return json({ csrf_token: 'synthetic-csrf' })
     if (path === '/api/auth/context') {
       return json({ scope_id: 'a11y-local-scope', auth_mode: 'local' })
+    }
+    if (path === '/api/releases/v1/capabilities') {
+      return json({
+        schema: 'curated-release-api/v1',
+        job_store: true,
+        planning: true,
+        destinations: [{ alias: 'local' }],
+        operations: ['preview', 'submit'],
+        target: { name: 'lerobot', version: 'v3.0' },
+        routes: ['local-to-local'],
+        capacity: 'unknown',
+      })
+    }
+    if (path.startsWith('/api/releases/v1/inventory/')) {
+      return json({
+        schema: 'curated-release-api/v1',
+        total: 2,
+        next_cursor: null,
+        items: [0, 1].map((episode_index) => ({
+          episode_index,
+          resources: [],
+          annotation: false,
+          edits: false,
+          labels: episode_index === 1 ? ['REVIEWED'] : [],
+          provenance: null,
+          judge: null,
+        })),
+      })
+    }
+    if (
+      path === '/api/releases/v1/jobs' ||
+      /^\/api\/releases\/v1\/sources\/[^/]+\/releases$/.test(path)
+    ) {
+      return json({ schema: 'curated-release-api/v1', items: [], next_cursor: null })
     }
     if (path === '/api/datasets') return json(activeDatasets)
     if (path === '/api/datasets/catalog') {
@@ -480,6 +523,27 @@ export async function openViewer(page: Page, testInfo: TestInfo, options: ApiFix
     observed: 'Banner and Episode 0 heading are visible',
   })
   return { consoleErrors, pageErrors }
+}
+
+/** Opens a fixture-backed release dialog using keyboard activation, without publishing data. */
+export async function openReleaseDialog(page: Page, testInfo: TestInfo) {
+  const errors = await openViewer(page, testInfo)
+  const tab = page.getByRole('tab', { name: 'Releases', exact: true })
+  await tab.focus()
+  await tab.press('Enter')
+  const opener = page.getByRole('button', { name: 'Create release', exact: true })
+  await opener.focus()
+  await opener.press('Enter')
+  const dialog = page.getByRole('dialog', { name: 'Release curated dataset' })
+  await expect(dialog.getByRole('checkbox', { name: 'Episode 0', exact: true })).toBeVisible()
+  await attachJson(testInfo, 'release-state-proof', {
+    journeyIds: ['V20', 'V21'],
+    route: '/',
+    fixture: 'a11y-synthetic',
+    expected: 'Release workspace and creation dialog expose the full source inventory',
+    observed: 'Keyboard activation opens the dialog with two source episodes',
+  })
+  return { ...errors, dialog, opener }
 }
 
 export async function openEmptyViewer(page: Page, testInfo: TestInfo) {

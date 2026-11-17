@@ -90,6 +90,249 @@ class TestAnnotationServiceConstruction:
 
 
 class TestContributionLedger:
+    @pytest.mark.parametrize("field", ["labels/SUCCESS", "analysis/pick_from"])
+    @pytest.mark.parametrize(
+        "scenario", ["human_conflict", "retained_fallback", "legacy_fallback", "unlisted_current", "accepted_removal"]
+    )
+    def test_given_withdrawal_overlay_when_previewed_then_owned_or_unlisted_values_are_not_guessed_removable(
+        self, field: str, scenario: str
+    ) -> None:
+        from physical_ai_curation.models import (
+            Contribution,
+            ContributionLedger,
+            DatasetLabelsFile,
+            EpisodeAnalysisRecord,
+            MachineOrigin,
+        )
+        from physical_ai_curation.storage import plan_withdrawal
+
+        current = True if field.startswith("labels/") else "current"
+        previous = True if field.startswith("labels/") else "previous"
+        ledger = ContributionLedger()
+        entries = []
+        if scenario == "legacy_fallback":
+            entries.append(("legacy", "legacy-unknown", previous, 0, None))
+        elif scenario in {"retained_fallback", "unlisted_current"}:
+            entries.append(("retained", "machine", previous, 1, None))
+        if scenario != "unlisted_current":
+            entries.append(("removed", "machine", current, 2, None))
+        if scenario == "human_conflict":
+            entries.extend([("alice", "human", current, 3, "alice"), ("bob", "human", previous, 4, "bob")])
+        for identifier, origin, value, sequence, author in entries:
+            ledger.record(
+                Contribution(
+                    id=identifier,
+                    field=field,
+                    origin=origin,
+                    value=value,
+                    sequence=sequence,
+                    author_id=author,
+                    timestamp="2026-10-07T12:00:00Z",
+                    machine=MachineOrigin(
+                        run_id="removed-run" if identifier == "removed" else "retained-run",
+                        result_id=identifier,
+                        run_order=sequence,
+                        source_revision="source",
+                        input_revision="input",
+                        config_revision="config",
+                    )
+                    if origin == "machine"
+                    else None,
+                )
+            )
+        if scenario == "accepted_removal":
+            ledger.accept("removed", "alice")
+        labels = DatasetLabelsFile(
+            dataset_id="dataset",
+            episodes={"0": ["SUCCESS"]} if field.startswith("labels/") else {},
+            analysis={"0": EpisodeAnalysisRecord(pick_from=current)} if field.startswith("analysis/") else {},
+            provenance={"0": ledger},
+        )
+        before = labels.model_dump_json()
+
+        projected, summary = plan_withdrawal(labels, {"removed-run"})
+
+        assert labels.model_dump_json() == before
+        if scenario in {"human_conflict", "retained_fallback", "unlisted_current"}:
+            assert summary["conflicts"] == 1
+            assert projected.episodes == labels.episodes
+            assert projected.analysis == labels.analysis
+            detail = summary["fields"][0]
+            assert detail["reason"] == (
+                "multiple_human_authors" if scenario == "human_conflict" else "unlisted_machine_run"
+            )
+        elif scenario == "legacy_fallback":
+            assert summary["legacy_unknown"] == 1
+            if field.startswith("analysis/"):
+                assert projected.analysis["0"].pick_from == previous
+            else:
+                assert projected.episodes == labels.episodes
+        else:
+            assert summary["accepted_unchanged"] == 1
+            assert summary["removable_fields"] == 1
+            if field.startswith("analysis/"):
+                assert projected.analysis["0"].pick_from is None
+            else:
+                assert projected.episodes["0"] == []
+
+    @pytest.mark.parametrize("damage", ["human_without_author", "machine_without_run", "human_with_machine"])
+    def test_given_unbound_authorship_when_contribution_validated_then_origin_is_refused(self, damage: str) -> None:
+        from src.api.models.contributions import Contribution
+
+        payload = {
+            "id": "contribution",
+            "field": "instruction",
+            "origin": "human",
+            "value": "Move",
+            "sequence": 1,
+            "timestamp": "2026-10-07T12:00:00Z",
+        }
+        if damage == "machine_without_run":
+            payload["origin"] = "machine"
+        elif damage == "human_with_machine":
+            payload.update(
+                author_id="alice",
+                machine={
+                    "run_id": "run",
+                    "result_id": "result",
+                    "run_order": 1,
+                    "source_revision": "source",
+                    "input_revision": "input",
+                    "config_revision": "config",
+                },
+            )
+
+        with pytest.raises(ValueError, match=r"require|authorship"):
+            Contribution.model_validate(payload)
+
+    @pytest.mark.parametrize("damage", ["duplicate", "unknown_acceptance", "unknown_withdrawal", "future_derivation"])
+    def test_given_invalid_ledger_relationship_when_restored_then_no_identity_is_inferred(self, damage: str) -> None:
+        from src.api.models.contributions import ContributionLedger
+
+        entry = {
+            "id": "contribution",
+            "field": "instruction",
+            "origin": "human",
+            "author_id": "alice",
+            "value": "Move",
+            "sequence": 1,
+            "timestamp": "2026-10-07T12:00:00Z",
+        }
+        payload = {"contributions": [entry]}
+        if damage == "duplicate":
+            payload["contributions"].append(dict(entry))
+        elif damage == "unknown_acceptance":
+            payload["acceptances"] = {"unknown": ["alice"]}
+        elif damage == "unknown_withdrawal":
+            payload["withdrawn"] = ["unknown"]
+        else:
+            entry["derived_from"] = ["future"]
+
+        with pytest.raises(ValueError, match=r"identity|identities"):
+            ContributionLedger.model_validate(payload)
+
+    @pytest.mark.parametrize(
+        "operation",
+        [
+            "missing_derivation",
+            "missing_promotion",
+            "withdrawn_promotion",
+            "blank_acceptance",
+            "unknown_acceptance",
+            "withdrawn_acceptance",
+            "unknown_withdrawal",
+            "foreign_author",
+        ],
+    )
+    def test_given_unowned_ledger_operation_when_requested_then_history_is_unchanged(self, operation: str) -> None:
+        from src.api.models.contributions import Contribution, ContributionLedger
+
+        contribution = Contribution(
+            id="source",
+            field="instruction",
+            origin="human",
+            author_id="alice",
+            value="Move",
+            sequence=1,
+            timestamp="2026-10-07T12:00:00Z",
+        )
+        ledger = ContributionLedger(contributions=[contribution])
+        if operation.startswith("withdrawn"):
+            ledger.withdraw([contribution.id])
+        before = ledger.model_dump_json()
+
+        with pytest.raises(ValueError):
+            if operation == "missing_derivation":
+                ledger.record(contribution.model_copy(update={"id": "derived", "derived_from": ["unknown"]}))
+            elif operation in {"missing_promotion", "withdrawn_promotion"}:
+                ledger.derive("unknown" if operation == "missing_promotion" else "source", "labels/SUCCESS", True)
+            elif operation == "blank_acceptance":
+                ledger.accept("source", " ")
+            elif operation == "unknown_acceptance":
+                ledger.accept("unknown", "alice")
+            elif operation == "withdrawn_acceptance":
+                ledger.accept("source", "alice")
+            elif operation == "unknown_withdrawal":
+                ledger.withdraw(["unknown"])
+            else:
+                ledger.resolve("instruction", human_author_id="bob")
+
+        assert ledger.model_dump_json() == before
+
+    def test_given_replayed_promotion_and_acceptance_when_applied_then_history_is_idempotent(self) -> None:
+        from src.api.models.contributions import Contribution, ContributionLedger
+
+        contribution = Contribution(
+            id="source",
+            field="instruction",
+            origin="human",
+            author_id="alice",
+            value="Move",
+            sequence=1,
+            timestamp="2026-10-07T12:00:00Z",
+        )
+        ledger = ContributionLedger(contributions=[contribution])
+        derived = ledger.derive("source", "labels/SUCCESS", True)
+        ledger.accept(derived, "alice")
+        before = ledger.model_dump_json()
+
+        ledger.record(contribution)
+        assert ledger.derive("source", "labels/SUCCESS", True) == derived
+        ledger.accept(derived, "alice")
+
+        assert ledger.model_dump_json() == before
+        assert ledger.resolve("labels/SUCCESS", human_author_id="alice").value is True
+
+    @pytest.mark.parametrize("change", ["value", "provenance"])
+    def test_given_replayed_machine_delta_when_value_or_provenance_changes_then_origin_is_immutable(
+        self, change: str
+    ) -> None:
+        from src.api.models.contributions import ContributionLedger, MachineOrigin
+
+        origin = MachineOrigin(
+            run_id="run",
+            result_id="result",
+            run_order=1,
+            source_revision="source",
+            input_revision="input",
+            config_revision="config",
+        )
+        ledger = ContributionLedger()
+        ledger.record_changes({}, {"instruction": "Move"}, author_id="worker", machine_origin=origin)
+        before = ledger.model_dump_json()
+
+        with pytest.raises(ValueError, match="immutable"):
+            ledger.record_changes(
+                {},
+                {"instruction": "changed" if change == "value" else "Move"},
+                author_id="worker",
+                machine_origin=origin.model_copy(update={"input_revision": "changed"})
+                if change == "provenance"
+                else origin,
+            )
+
+        assert ledger.model_dump_json() == before
+
     def test_given_equal_human_and_machine_values_when_machine_withdrawn_then_human_survives(self) -> None:
         from src.api.models.contributions import Contribution, ContributionLedger, MachineOrigin
 
