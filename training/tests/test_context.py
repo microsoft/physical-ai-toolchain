@@ -440,6 +440,42 @@ def test_build_storage_context_swallows_resource_exists(
     assert result.container_name == "custom-container"
 
 
+def test_build_storage_context_tolerates_container_scoped_403_when_container_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AZURE_STORAGE_ACCOUNT_NAME", "acct1")
+    monkeypatch.setenv("AZURE_STORAGE_CONTAINER_NAME", "models")
+
+    class _ResourceExistsError(Exception):
+        pass
+
+    class _AzureError(Exception):
+        def __init__(self, msg: str, status_code: int | None = None) -> None:
+            super().__init__(msg)
+            self.status_code = status_code
+
+    container_client = Mock()
+    container_client.create_container.side_effect = _AzureError("AuthorizationPermissionMismatch", status_code=403)
+    container_client.exists.return_value = True
+    blob_client_instance = Mock()
+    blob_client_instance.get_container_client.return_value = container_client
+    blob_service_client = Mock(return_value=blob_client_instance)
+
+    previous = _install_storage_blob_modules(
+        blob_service_client=blob_service_client,
+        azure_error_cls=_AzureError,
+        resource_exists_cls=_ResourceExistsError,
+    )
+    try:
+        result = context_module._build_storage_context(credential="cred")
+    finally:
+        _restore_modules(previous)
+
+    assert result is not None
+    assert result.container_name == "models"
+    container_client.exists.assert_called_once_with()
+
+
 def test_build_storage_context_raises_azure_config_error_on_azure_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

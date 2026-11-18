@@ -11,7 +11,6 @@ Optional: ``azure-storage-blob`` (for blob uploads via
 
 from __future__ import annotations
 
-import contextlib
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -239,8 +238,15 @@ def _build_storage_context(credential: Any) -> AzureStorageContext | None:
     try:
         blob_client = BlobServiceClient(account_url=account_url, credential=credential)
         container_client = blob_client.get_container_client(container_name)
-        with contextlib.suppress(ResourceExistsError):
+        try:
             container_client.create_container()
+        except ResourceExistsError:
+            pass
+        except AzureError as create_exc:
+            if getattr(create_exc, "status_code", None) == 403 and container_client.exists() is True:
+                pass
+            else:
+                raise
         return AzureStorageContext(blob_client=blob_client, container_name=container_name)
     except AzureError as exc:
         raise AzureConfigError(

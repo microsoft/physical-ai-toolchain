@@ -1192,6 +1192,8 @@ rtol
 rubrik
 runbooks
 Rundeck
+runhook
+runhooks
 runtime
 runtimes
 rustc
@@ -1263,6 +1265,7 @@ sloc
 slos
 slowapi
 slsa
+slurmd
 smartctl
 smes
 smita

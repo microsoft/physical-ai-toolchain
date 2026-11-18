@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
+import json
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -39,15 +42,19 @@ def _bootstrap_azure_ml(experiment_name: str | None = None, **_: object) -> _Azu
 
 
 _fake_utils = ModuleType("training.utils")
+_fake_utils.__path__ = [str(Path(__file__).resolve().parents[1] / "utils")]
 _fake_utils.AzureConfigError = _AzureConfigError
 _fake_utils.AzureMLContext = _AzureMLContext
 _fake_utils.bootstrap_azure_ml = _bootstrap_azure_ml
+sys.modules.setdefault("training.utils", _fake_utils)
 
 _fake_utils_context = ModuleType("training.utils.context")
 _fake_utils_context.AzureStorageContext = _AzureStorageContext
+sys.modules.setdefault("training.utils.context", _fake_utils_context)
 
 _fake_launch = ModuleType("training.rl.scripts.launch")
 _fake_launch._ensure_dependencies = MagicMock()
+sys.modules.setdefault("training.rl.scripts.launch", _fake_launch)
 
 _fake_azure = ModuleType("azure")
 _fake_azure_identity = ModuleType("azure.identity")
@@ -60,6 +67,8 @@ class _DefaultAzureCredential:
 
 _fake_azure_identity.DefaultAzureCredential = _DefaultAzureCredential
 _fake_azure.identity = _fake_azure_identity
+sys.modules.setdefault("azure", _fake_azure)
+sys.modules.setdefault("azure.identity", _fake_azure_identity)
 
 _fake_mlflow = MagicMock(name="mlflow")
 
@@ -76,25 +85,23 @@ class _RunCtx:
 
 
 _fake_mlflow.start_run = MagicMock(return_value=_RunCtx())
-with pytest.MonkeyPatch.context() as imports:
-    for name, module in {
-        "training.utils": _fake_utils,
-        "training.utils.context": _fake_utils_context,
-        "training.rl.scripts.launch": _fake_launch,
-        "azure": _fake_azure,
-        "azure.identity": _fake_azure_identity,
-        "mlflow": _fake_mlflow,
-    }.items():
-        imports.setitem(sys.modules, name, module)
-    _MOD = load_training_module(
-        "training_rl_scripts_smoke_test_azure",
-        "training/rl/scripts/smoke_test_azure.py",
-    )
+sys.modules.setdefault("mlflow", _fake_mlflow)
+
+
+_MOD = load_training_module(
+    "training_rl_scripts_smoke_test_azure",
+    "training/rl/scripts/smoke_test_azure.py",
+)
 
 
 @pytest.fixture(autouse=True)
 def _clear_identity_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in ("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_FEDERATED_TOKEN_FILE"):
+    for var in (
+        "AZURE_CLIENT_ID",
+        "AZURE_TENANT_ID",
+        "AZURE_FEDERATED_TOKEN_FILE",
+        *_MOD._FORBIDDEN_STATIC_SECRET_VARS,
+    ):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -341,7 +348,198 @@ class TestMain:
         def boom(**_: object) -> _AzureMLContext:
             raise _MOD.AzureConfigError("bad config")
 
-        monkeypatch.setattr(_MOD, "_test_credential_acquisition", lambda: True)
+        monkeypatch.setattr(_MOD, "_test_credential_acquisition", lambda **_: True)
         monkeypatch.setattr(_MOD, "bootstrap_azure_ml", boom)
         with pytest.raises(SystemExit, match="bad config"):
             _MOD.main([])
+
+    def test_forbid_static_secrets_exits_when_secret_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch_common(monkeypatch)
+        monkeypatch.setenv("AZURE_CLIENT_SECRET", "do-not-print")
+        with pytest.raises(SystemExit, match="AZURE_CLIENT_SECRET") as exc_info:
+            _MOD.main(["--forbid-static-secrets"])
+        assert "do-not-print" not in str(exc_info.value)
+
+    def test_require_workload_identity_checks_nonempty_token_file(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        self._patch_common(monkeypatch)
+        with pytest.raises(SystemExit, match="Workload identity required"):
+            _MOD.main(["--require-workload-identity"])
+
+        empty_tok = tmp_path / "empty-token"
+        empty_tok.write_text("")
+        monkeypatch.setenv("AZURE_CLIENT_ID", "cid")
+        monkeypatch.setenv("AZURE_TENANT_ID", "tid")
+        monkeypatch.setenv("AZURE_FEDERATED_TOKEN_FILE", str(empty_tok))
+        with pytest.raises(SystemExit, match="empty"):
+            _MOD.main(["--require-workload-identity"])
+
+        empty_tok.write_text("projected-jwt")
+        _MOD.main(["--require-workload-identity"])
+
+    def test_require_artifact_upload_raises_on_log_dict_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        mlflow = MagicMock()
+        mlflow.start_run.return_value = _RunCtx("run-fail")
+        mlflow.log_dict.side_effect = RuntimeError("blob 403")
+        monkeypatch.setattr(_MOD, "_load_mlflow", lambda: mlflow)
+        ctx = _AzureMLContext(workspace_name="ws", storage=None)
+        args = _MOD._parse_args(["--require-artifact-upload"])
+        with pytest.raises(RuntimeError, match="blob 403"):
+            _MOD._start_run(ctx, args, {}, {})
+
+    def test_verify_all_scopes_and_jwt_claims_never_leak_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        payload = {"tid": "tenant-1", "oid": "obj-1", "appid": "app-1", "exp": 1893456000}
+        b64_payload = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+        fake_jwt = f"eyJhbGciOiJSUzI1NiJ9.{b64_payload}.secret-signature"
+
+        cred = MagicMock()
+        cred.get_token.return_value = SimpleNamespace(token=fake_jwt)
+        fake_identity = SimpleNamespace(DefaultAzureCredential=MagicMock(return_value=cred))
+        monkeypatch.setattr(_MOD.importlib, "import_module", lambda name: fake_identity)
+
+        diag: dict[str, object] = {}
+        assert _MOD._test_credential_acquisition(verify_all_scopes=True, token_diagnostics=diag) is True
+        assert cred.get_token.call_count == 2
+        assert diag["oid"] == "obj-1"
+        assert diag["tid"] == "tenant-1"
+        assert "secret-signature" not in json.dumps(diag)
+
+    def test_network_truth_table_enforces_private_link_on_data_plane(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AZURE_STORAGE_ACCOUNT_NAME", "smoke01")
+
+        def _fake_probe(role: str, host: str, *, timeout_s: float = 10.0) -> dict[str, object]:
+            is_priv = host.endswith((".api.azureml.ms", ".blob.core.windows.net"))
+            return {
+                "role": role,
+                "host": host,
+                "resolved_ips": ["10.240.1.15"] if is_priv else ["20.190.159.0"],
+                "private_link_ip": is_priv,
+                "via_proxy": False,
+                "tls_reachable": True,
+                "tls_ms": 4.2,
+                "error": None,
+            }
+
+        monkeypatch.setattr(_MOD, "_probe_single_endpoint", _fake_probe)
+        routes = _MOD._probe_network_truth_table(
+            tracking_uri="azureml://eastus.api.azureml.ms/mlflow/v1.0/subscriptions/s",
+            dataset_blob_url="https://datasets01.blob.core.windows.net/datasets/so101/v1",
+            require_private_link=True,
+        )
+        assert len(routes) == 5
+
+        def _public_leak_probe(role: str, host: str, *, timeout_s: float = 10.0) -> dict[str, object]:
+            return {
+                "role": role,
+                "host": host,
+                "resolved_ips": ["52.239.1.10"],
+                "private_link_ip": False,
+                "via_proxy": False,
+                "tls_reachable": True,
+                "tls_ms": 18.0,
+                "error": None,
+            }
+
+        monkeypatch.setattr(_MOD, "_probe_single_endpoint", _public_leak_probe)
+        with pytest.raises(SystemExit, match="Private Link required"):
+            _MOD._probe_network_truth_table(
+                tracking_uri="azureml://eastus.api.azureml.ms/mlflow/v1.0/subscriptions/s",
+                require_private_link=True,
+            )
+
+    def test_dataset_hydration_preflight_resolves_asset_and_blocks_sas(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_client = SimpleNamespace(
+            data=SimpleNamespace(
+                get=lambda name, version: SimpleNamespace(
+                    path="https://datasets01.blob.core.windows.net/datasets/releases/so101/v1",
+                    properties={"manifest_sha256": "abc123"},
+                )
+            )
+        )
+        with pytest.raises(SystemExit, match="SAS query string forbidden"):
+            _MOD._probe_dataset_hydration_source(
+                client=fake_client,
+                dataset_asset=None,
+                dataset_blob_url="https://datasets01.blob.core.windows.net/datasets/so101?sv=2024-01-01&sig=secret",
+                forbid_static_secrets=True,
+            )
+
+        fake_container = MagicMock()
+        fake_container.list_blobs.return_value = [
+            SimpleNamespace(name="releases/so101/v1/meta/info.json"),
+            SimpleNamespace(name="releases/so101/v1/.published.json"),
+            SimpleNamespace(name="releases/so101/v1/checksums.sha256"),
+        ]
+        fake_identity = SimpleNamespace(DefaultAzureCredential=MagicMock(return_value=MagicMock()))
+        fake_blob_mod = SimpleNamespace(ContainerClient=MagicMock(return_value=fake_container))
+        monkeypatch.setattr(
+            _MOD.importlib,
+            "import_module",
+            lambda name: fake_identity if name == "azure.identity" else fake_blob_mod,
+        )
+
+        receipt = _MOD._probe_dataset_hydration_source(
+            client=fake_client,
+            dataset_asset="azureml:so101_pick_place:2026.11.17",
+            dataset_blob_url=None,
+            forbid_static_secrets=True,
+        )
+        assert receipt["dataset_asset"]["manifest_sha256"] == "abc123"
+        assert receipt["dataset_blob"]["has_meta_info_json"] is True
+        assert receipt["dataset_blob"]["has_published_marker"] is True
+
+    def test_storage_upload_verifies_sha256_readback_and_detects_tamper(self) -> None:
+        blob_client = MagicMock()
+        blob_client.download_blob.return_value.readall.return_value = b"azure storage smoke test payload"
+        blob_service = MagicMock()
+        blob_service.get_blob_client.return_value = blob_client
+        storage = SimpleNamespace(
+            container_name="checkpoints",
+            upload_checkpoint=MagicMock(return_value="smoke-test/blob.chkpt"),
+            blob_client=blob_service,
+        )
+
+        res = _MOD._test_storage_upload(storage)
+        assert res["readback_verified"] is True
+        blob_client.delete_blob.assert_called_once()
+
+        blob_client.download_blob.return_value.readall.return_value = b"corrupted-bytes"
+        with pytest.raises(RuntimeError, match="SHA-256 mismatch"):
+            _MOD._test_storage_upload(storage)
+
+    def test_probe_single_endpoint_proxy_and_asset_ref_parsing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        with pytest.raises(ValueError, match="immutable version"):
+            _MOD._parse_dataset_asset_ref("azureml:ds@latest")
+        assert _MOD._parse_dataset_asset_ref(
+            "azureml://subscriptions/s/resourceGroups/r/providers/Microsoft.MachineLearningServices/"
+            "workspaces/w/data/my_ds/versions/7"
+        ) == ("my_ds", "7")
+
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.internal:8080")
+        monkeypatch.setenv("NO_PROXY", "localhost,.internal")
+        assert _MOD._proxy_applies("service.internal") is False
+        assert _MOD._proxy_applies("datasets01.blob.core.windows.net") is True
+
+        monkeypatch.setattr(
+            _MOD.socket,
+            "getaddrinfo",
+            lambda *_a, **_kw: [(0, 0, 0, "", ("10.10.1.5", 443))],
+        )
+        proxied = _MOD._probe_single_endpoint("blob", "datasets01.blob.core.windows.net")
+        assert proxied["private_link_ip"] is True
+        assert proxied["via_proxy"] is True
+        assert proxied["tls_reachable"] is True
+
+        monkeypatch.delenv("HTTPS_PROXY")
+        fake_sock = MagicMock()
+        fake_sock.__enter__.return_value = fake_sock
+        fake_ssl_ctx = MagicMock()
+        fake_ssl_ctx.wrap_socket.return_value.__enter__.return_value = MagicMock()
+        monkeypatch.setattr(_MOD.socket, "create_connection", lambda *_a, **_kw: fake_sock)
+        monkeypatch.setattr(_MOD.ssl, "create_default_context", lambda: fake_ssl_ctx)
+        direct = _MOD._probe_single_endpoint("blob", "datasets01.blob.core.windows.net")
+        assert direct["tls_reachable"] is True
+        assert direct["tls_ms"] is not None

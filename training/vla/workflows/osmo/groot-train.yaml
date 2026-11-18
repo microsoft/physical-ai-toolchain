@@ -40,24 +40,32 @@ workflow:
           exec bash /tmp/train.sh
       environment:
         BLOB_URL: "{{blob_url}}"
+        AZUREML_DATASET_ASSET: "{{dataset_asset}}"
         DATASET_PATH: "{{dataset_path}}"
         OUTPUT_ROOT: "/outputs"
         DATA_CONFIG: "{{data_config}}"
         BASE_MODEL: "{{base_model}}"
         BASE_MODEL_REVISION: "{{base_model_revision}}"
+        BASE_MODEL_BLOB_URL: "{{base_model_blob_url}}"
         BATCH_SIZE: "{{batch_size}}"
         MAX_STEPS: "{{max_steps}}"
         SAVE_STEPS: "{{save_steps}}"
+        LOGGING_STEPS: "{{logging_steps}}"
         DATALOADER_WORKERS: "{{dataloader_workers}}"
         EMBODIMENT_TAG: "{{embodiment_tag}}"
         ISAAC_GROOT_REF: "{{isaac_groot_ref}}"
+        SKIP_RUNTIME_BOOTSTRAP: "{{skip_runtime_bootstrap}}"
         RUN_ID_OVERRIDE: "{{run_id_override}}"
         RESUME: "{{resume}}"
         AZURE_UPLOAD: "{{azure_upload}}"
+        AZURE_UPLOAD_STRICT: "{{azure_upload_strict}}"
         AZURE_SUBSCRIPTION_ID: "{{azure_subscription_id}}"
         AZUREML_RESOURCE_GROUP: "{{azureml_resource_group}}"
         AZUREML_WORKSPACE_NAME: "{{azureml_workspace_name}}"
         AZUREML_MODEL_NAME: "{{azureml_model_name}}"
+        CHECKPOINT_BLOB_URL: "{{checkpoint_blob_url}}"
+        RUNHOOK_URL: "{{runhook_url}}"
+        PROJECT_ID: "{{project_id}}"
         DATA_CONFIG_B64: "{{data_config_b64}}"
         MODALITY_CONFIG_B64: "{{modality_config_b64}}"
         ACR_REGISTRY: "{{acr_registry}}"
@@ -84,6 +92,7 @@ default-values:
   storage: 200Gi
   platform: gpu_platform
   blob_url: ""
+  dataset_asset: ""
   dataset_path: "/data/dataset"
   data_config: ""
   data_config_b64: ""
@@ -93,19 +102,26 @@ default-values:
   train_script_b64: ""
   base_model: ""
   base_model_revision: ""
+  base_model_blob_url: ""
   batch_size: 4
   max_steps: 500
   save_steps: 100
+  logging_steps: 10
   dataloader_workers: 0
   embodiment_tag: new_embodiment
   isaac_groot_ref: 23ace64f17aa5015259b8609d371eb61a357c776
+  skip_runtime_bootstrap: "false"
   run_id_override: ""
   resume: "false"
   azure_upload: "false"
+  azure_upload_strict: "false"
   azure_subscription_id: ""
   azureml_resource_group: ""
   azureml_workspace_name: ""
   azureml_model_name: "groot-model"
+  checkpoint_blob_url: ""
+  runhook_url: ""
+  project_id: ""
   acr_registry: ""
   acr_model_repo: "models/groot"
   hf_token: ""

@@ -274,3 +274,306 @@ class TestMain:
 
         register_call = _fake_registry_client.create_model_version.call_args
         assert register_call is not None
+
+    def test_trainer_state_fallback_and_ready_seal(
+        self,
+        _env_vars: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        import json
+
+        monkeypatch.setenv("AZUREML_EXPERIMENT_NAME", "groot-smoke")
+        monkeypatch.setenv("PROJECT_ID", "prj-robot")
+        monkeypatch.setenv("EXTERNAL_JOB_ID", "ext-trn-001")
+        monkeypatch.setenv("AML_EXTRA_TAGS", "scheduler.queue=gpu-high")
+
+        ckpt = _env_vars / "checkpoint-2"
+        ckpt.mkdir()
+        (ckpt / "model.safetensors").write_bytes(b"groot-weights")
+        (ckpt / "config.json").write_text('{"arch": "groot-n1.7"}', encoding="utf-8")
+        (ckpt / "trainer_state.json").write_text(
+            json.dumps(
+                {
+                    "log_history": [
+                        {"step": 1, "loss": 1.25, "grad_norm": 0.85, "learning_rate": 1e-4},
+                        {"step": 2, "loss": 0.98, "grad_norm": 0.72, "learning_rate": 1e-4},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        captured_staged_files: dict[str, str] = {}
+
+        def _inspect_staged(path_str: str, *, artifact_path: str = "") -> None:
+            if artifact_path == "model":
+                staged_dir = Path(path_str)
+                for p in staged_dir.iterdir():
+                    if p.is_file():
+                        captured_staged_files[p.name] = p.read_text(encoding="utf-8", errors="ignore")
+
+        _fake_mlflow.log_artifacts.side_effect = _inspect_staged
+        monkeypatch.setattr(_MOD, "mlflow", _fake_mlflow)
+
+        try:
+            result = _MOD.main()
+        finally:
+            _fake_mlflow.log_artifacts.side_effect = None
+
+        assert result == 0
+        _fake_mlflow.set_experiment.assert_called_once_with("groot-smoke")
+        assert "checksums.sha256" in captured_staged_files
+        assert "model.safetensors" in captured_staged_files["checksums.sha256"]
+        assert "ready.json" in captured_staged_files
+        tag_calls = {c.args[0]: c.args[1] for c in _fake_mlflow.set_tag.call_args_list}
+        assert tag_calls["project_id"] == "prj-robot"
+        assert tag_calls["external.job_id"] == "ext-trn-001"
+        assert tag_calls["scheduler.queue"] == "gpu-high"
+        assert tag_calls["checkpoint.name"] == "checkpoint-2"
+        out = capsys.readouterr().out
+        assert '"metrics_logged": 6' in out
+
+    def test_emit_runhook_and_checkpoint_blob_ready_last_readback(
+        self,
+        _env_vars: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import json
+
+        monkeypatch.setenv("PROJECT_ID", "prj-robotics")
+        monkeypatch.setenv("SLURM_JOB_ID", "9912")
+        (_env_vars / "hydration-receipt.json").write_text(
+            json.dumps(
+                {
+                    "dataset_version": "2026.11.17-rc1",
+                    "manifest_sha256": "deadbeef" * 8,
+                    "source_kind": "aml_data_asset",
+                    "throughput_mb_s": 412.5,
+                    "elapsed_s": 8.4,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        posted: list[tuple[str, dict[str, str], dict[str, object]]] = []
+
+        class _FakeResp:
+            status = 200
+
+            def __enter__(self) -> _FakeResp:
+                return self
+
+            def __exit__(self, *_: object) -> None:
+                return None
+
+        def _fake_urlopen(req: object, timeout: int = 15) -> _FakeResp:
+            headers = {k.lower(): v for k, v in req.header_items()}  # type: ignore[attr-defined]
+            body = json.loads(req.data.decode("utf-8"))  # type: ignore[attr-defined]
+            posted.append((req.full_url, headers, body))  # type: ignore[attr-defined]
+            return _FakeResp()
+
+        monkeypatch.setenv("RUNHOOK_URL", "https://ca-pai.internal/v1/projects/prj-robotics/runs:record")
+        monkeypatch.setattr(_MOD.urllib.request, "urlopen", _fake_urlopen)
+
+        rc = _MOD.main(["--emit-runhook", "--phase", "RUNNING", "--hydrate-s", "8.4"])
+        assert rc == 0
+        manifest = json.loads((_env_vars / "run-manifest.json").read_text(encoding="utf-8"))
+        assert manifest["status"] == "RUNNING"
+        assert manifest["dataset"]["dataset_version"] == "2026.11.17-rc1"
+        assert len(posted) == 1
+        assert posted[0][1]["idempotency-key"] == "run-42-running-1"
+
+        ckpt = _env_vars / "checkpoint-2"
+        ckpt.mkdir()
+        (ckpt / "model.safetensors").write_bytes(b"groot-weights")
+        (ckpt / "trainer_state.json").write_text(
+            json.dumps({"log_history": [{"step": 2, "loss": 0.42}]}),
+            encoding="utf-8",
+        )
+
+        uploaded_blobs: dict[str, bytes] = {}
+        upload_order: list[str] = []
+
+        class _FakeContainerClient:
+            def __init__(self, *_: object, **__: object) -> None:
+                pass
+
+            def upload_blob(self, *, name: str, data: object, overwrite: bool = False) -> None:
+                raw = data.read()  # type: ignore[attr-defined]
+                upload_order.append(name)
+                uploaded_blobs[name] = raw
+
+            def download_blob(self, name: str) -> SimpleNamespace:
+                return SimpleNamespace(chunks=lambda: iter([uploaded_blobs[name]]))
+
+        fake_storage_pkg = ModuleType("azure.storage")
+        fake_blob_pkg = ModuleType("azure.storage.blob")
+        fake_blob_pkg.ContainerClient = _FakeContainerClient  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "azure.storage", fake_storage_pkg)
+        monkeypatch.setitem(sys.modules, "azure.storage.blob", fake_blob_pkg)
+        monkeypatch.setenv("CHECKPOINT_BLOB_URL", "https://models01.blob.core.windows.net/models/prj-robotics/run-42")
+        monkeypatch.setattr(_MOD, "mlflow", _fake_mlflow)
+
+        assert _MOD.main() == 0
+        assert upload_order[-1].endswith("/ready.json")
+        tag_calls = {c.args[0]: c.args[1] for c in _fake_mlflow.set_tag.call_args_list}
+        assert tag_calls["dataset.version"] == "2026.11.17-rc1"
+        assert tag_calls["checkpoint.blob_readback_verified"] == "true"
+        final_manifest = json.loads((_env_vars / "run-manifest.json").read_text(encoding="utf-8"))
+        assert final_manifest["status"] == "COMPLETED"
+        assert final_manifest["aml"]["model_version"] == "3"
+
+
+class TestGrootDownloadBlobHydration:
+    def test_verify_hydrated_dataset_validates_checksums_and_manifest_pin(self, tmp_path: Path) -> None:
+        import hashlib
+        import json
+
+        dl_mod = load_training_module(
+            "training_vla_groot_download_blob",
+            "training/vla/scripts/groot/download_blob.py",
+        )
+        ds = tmp_path / "so101_v1"
+        (ds / "meta").mkdir(parents=True)
+        (ds / "metadata").mkdir(parents=True)
+        info_bytes = json.dumps({"robot_type": "so101", "total_episodes": 12, "total_frames": 3600}).encode()
+        (ds / "meta" / "info.json").write_bytes(info_bytes)
+        manifest_bytes = json.dumps({"schema_version": "6.0", "release_name": "2026.11.17"}).encode()
+        (ds / "metadata" / "release-manifest.json").write_bytes(manifest_bytes)
+        (ds / ".published.json").write_text("{}", encoding="utf-8")
+
+        info_sha = hashlib.sha256(info_bytes).hexdigest()
+        manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+        (ds / "checksums.sha256").write_text(
+            f"{info_sha}  meta/info.json\n{manifest_sha}  metadata/release-manifest.json\n",
+            encoding="utf-8",
+        )
+
+        receipt_path = tmp_path / "hydration-receipt.json"
+        rc = dl_mod.main(
+            [
+                "--verify-only",
+                "--dataset-path",
+                str(ds),
+                "--expected-manifest-sha256",
+                manifest_sha,
+                "--receipt-out",
+                str(receipt_path),
+            ]
+        )
+        assert rc == 0
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        assert receipt["checksums_verified"] == 2
+        assert receipt["published_marker_present"] is True
+        assert receipt["robot_type"] == "so101"
+
+        (ds / "meta" / "info.json").write_bytes(b'{"robot_type": "tampered"}')
+        with pytest.raises(SystemExit, match="Corrupt dataset file"):
+            dl_mod.verify_hydrated_dataset(ds, expected_manifest_sha256=manifest_sha)
+
+    def test_resolve_aml_data_asset_datastore_uri(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        dl_mod = load_training_module(
+            "training_vla_groot_download_blob_arm",
+            "training/vla/scripts/groot/download_blob.py",
+        )
+        monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", "sub-test")
+        monkeypatch.setenv("AZURE_RESOURCE_GROUP", "rg-test")
+        monkeypatch.setenv("AZUREML_WORKSPACE_NAME", "mlw-test")
+
+        def _fake_arm_get(url: str, _cred: object) -> dict[str, object]:
+            if "/data/pick_place_ds/versions/1?" in url:
+                return {
+                    "properties": {
+                        "dataUri": "azureml://datastores/workspaceblobstore/paths/exports/releases/pick_place_ds/v1/",
+                        "properties": {"manifest_sha256": "facefeed" * 8, "release_id": "pick-place-v1"},
+                    }
+                }
+            if "/datastores/workspaceblobstore?" in url:
+                return {
+                    "properties": {
+                        "accountName": "datasets01",
+                        "containerName": "datasets",
+                        "endpoint": "core.windows.net",
+                    }
+                }
+            raise AssertionError(f"unexpected ARM URL: {url}")
+
+        monkeypatch.setattr(dl_mod, "_arm_get_json", _fake_arm_get)
+        resolved = dl_mod.resolve_aml_data_asset_to_blob_url("azureml:pick_place_ds:1", credential=MagicMock())
+        assert (
+            resolved["blob_url"]
+            == "https://datasets01.blob.core.windows.net/datasets/exports/releases/pick_place_ds/v1"
+        )
+        assert resolved["manifest_sha256"] == "facefeed" * 8
+        assert resolved["release_id"] == "pick-place-v1"
+
+    def test_download_from_blob_url_filters_traversal_and_enforces_no_sas(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        dl_mod = load_training_module(
+            "training_vla_groot_download_blob_dl",
+            "training/vla/scripts/groot/download_blob.py",
+        )
+        fake_core = ModuleType("azure.core")
+        fake_exc = ModuleType("azure.core.exceptions")
+
+        class _HttpResponseError(Exception):
+            def __init__(self, error_code: str = "") -> None:
+                super().__init__(error_code)
+                self.error_code = error_code
+
+        fake_exc.HttpResponseError = _HttpResponseError  # type: ignore[attr-defined]
+        fake_storage = ModuleType("azure.storage")
+        fake_blob = ModuleType("azure.storage.blob")
+
+        blobs = [
+            SimpleNamespace(name="releases/v1/meta/info.json"),
+            SimpleNamespace(name="releases/v1/../../escape.txt"),
+            SimpleNamespace(name="releases/v1/.cache/temp"),
+        ]
+
+        class _Container:
+            def __init__(self, *_: object, **__: object) -> None:
+                pass
+
+            def list_blobs(self, *, name_starts_with: str) -> list[SimpleNamespace]:
+                assert name_starts_with == "releases/v1/"
+                return blobs
+
+            def download_blob(self, _blob: object) -> SimpleNamespace:
+                return SimpleNamespace(chunks=lambda: iter([b'{"robot_type": "so101"}']))
+
+        fake_blob.ContainerClient = _Container  # type: ignore[attr-defined]
+        fake_id = ModuleType("azure.identity")
+        fake_id.DefaultAzureCredential = MagicMock(return_value=MagicMock())  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "azure.identity", fake_id)
+        monkeypatch.setitem(sys.modules, "azure.core", fake_core)
+        monkeypatch.setitem(sys.modules, "azure.core.exceptions", fake_exc)
+        monkeypatch.setitem(sys.modules, "azure.storage", fake_storage)
+        monkeypatch.setitem(sys.modules, "azure.storage.blob", fake_blob)
+        monkeypatch.setenv("AZURE_CLIENT_ID", "cid-1")
+
+        with pytest.raises(SystemExit, match="SAS token query string is forbidden"):
+            dl_mod.download_from_blob_url(
+                "https://datasets01.blob.core.windows.net/datasets/releases/v1?sig=abc",
+                tmp_path / "blocked",
+                forbid_static_secrets=True,
+            )
+
+        dest = tmp_path / "hydrated"
+        receipt_out = tmp_path / "receipt.json"
+        rc = dl_mod.main(
+            [
+                "--blob-url",
+                "https://datasets01.blob.core.windows.net/datasets/releases/v1",
+                "--dataset-path",
+                str(dest),
+                "--forbid-static-secrets",
+                "--receipt-out",
+                str(receipt_out),
+            ]
+        )
+        assert rc == 0
+        assert (dest / "meta" / "info.json").is_file()
+        assert not (tmp_path / "escape.txt").exists()

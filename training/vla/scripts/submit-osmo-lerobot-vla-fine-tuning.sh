@@ -43,14 +43,17 @@ PLATFORM:
 
 DATA SOURCE (provide one):
         --blob-url URL            Full Azure Blob URL to LeRobot dataset
+        --dataset-asset ASSET     Pinned Azure ML Data Asset (azureml:<name>:<version>)
         --local-dataset NAME      Dataset directory under the profile's datasets root, mounted
                                   read-only in the job (local profile)
         --dataset-path PATH       Container-local dataset path (default: /data/dataset)
+        --base-model-blob-url URL Hydrate base model weights from Azure Blob instead of HuggingFace Hub
 
 TRAINING HYPERPARAMETERS:
         --max-steps N             Total training iterations (default: 500)
         --batch-size N            Training batch size (default: 4)
         --save-steps N            Checkpoint save frequency (default: 100)
+        --logging-steps N         Scalar metric logging interval (default: 10; set 1 for smoke runs)
         --dataloader-workers N    Dataloader worker count (default: 0)
 
 MODEL OPTIONS:
@@ -67,7 +70,12 @@ RESUME:
 
 OUTPUT:
         --azure-upload            Mirror checkpoint to Azure ML after training
+        --azure-upload-strict     Exit non-zero if Azure ML mirror fails
         --azureml-model-name NAME Model name for Azure ML registry (default: groot-model)
+        --checkpoint-blob-url URL Write-once Blob destination for checkpoint + ready.json
+        --runhook-url URL         Lifecycle runhook POST endpoint (e.g. /v1/projects/{id}/runs:record)
+        --project-id ID           Canonical PAI project ID stamped on run-manifest.json and MLflow tags
+        --skip-runtime-bootstrap  Reuse pre-hydrated container environment without internet bootstrap
         --acr-registry NAME       Push model to ACR (e.g., acrdev001)
         --acr-model-repo PATH     ACR repository path (default: models/groot)
   HF_TOKEN env var          Optional Hugging Face token for gated model downloads (not printed)
@@ -133,8 +141,10 @@ job_name="${JOB_NAME:-groot-train}"
 image="${IMAGE:-$DEFAULT_GROOT_IMAGE}"
 
 blob_url="${BLOB_URL:-}"
+dataset_asset="${AZUREML_DATASET_ASSET:-}"
 dataset_path="${DATASET_PATH:-/data/dataset}"
 local_dataset="${LOCAL_DATASET:-}"
+base_model_blob_url="${BASE_MODEL_BLOB_URL:-}"
 
 vla_version="${VLA_VERSION:-1.5}"
 base_model="${BASE_MODEL:-}"
@@ -150,6 +160,7 @@ groot_ref="${ISAAC_GROOT_REF:-}"
 max_steps="${MAX_STEPS:-500}"
 batch_size="${BATCH_SIZE:-4}"
 save_steps="${SAVE_STEPS:-100}"
+logging_steps="${LOGGING_STEPS:-10}"
 dataloader_workers="${DATALOADER_WORKERS:-0}"
 platform="${PLATFORM:-}"
 cpu="${OSMO_CPU:-}"
@@ -161,7 +172,12 @@ resume="false"
 run_id_override="${RUN_ID_OVERRIDE:-}"
 
 azure_upload="false"
+azure_upload_strict="${AZURE_UPLOAD_STRICT:-false}"
 azureml_model_name="${AZUREML_MODEL_NAME:-groot-model}"
+checkpoint_blob_url="${CHECKPOINT_BLOB_URL:-}"
+runhook_url="${RUNHOOK_URL:-}"
+project_id="${PROJECT_ID:-}"
+skip_runtime_bootstrap="${SKIP_RUNTIME_BOOTSTRAP:-false}"
 acr_registry="${ACR_REGISTRY:-}"
 acr_model_repo="${ACR_MODEL_REPO:-models/groot}"
 hf_token="${HF_TOKEN:-}"
@@ -186,6 +202,7 @@ while [[ $# -gt 0 ]]; do
     -i|--image)                   image="$2"; shift 2 ;;
     --profile)                    profile="$2"; shift 2 ;;
     --blob-url)                   blob_url="$2"; shift 2 ;;
+    --dataset-asset)              dataset_asset="$2"; shift 2 ;;
     --local-dataset)              local_dataset="$2"; shift 2 ;;
     --cpu)                        cpu="$2"; shift 2 ;;
     --memory)                     memory="$2"; shift 2 ;;
@@ -193,6 +210,7 @@ while [[ $# -gt 0 ]]; do
     --dataset-path)               dataset_path="$2"; shift 2 ;;
     --base-model)                 base_model="$2"; shift 2 ;;
     --base-model-revision)        base_model_revision="$2"; shift 2 ;;
+    --base-model-blob-url)        base_model_blob_url="$2"; shift 2 ;;
     --data-config)                data_config="$2"; shift 2 ;;
     --data-config-b64)            data_config_b64="$2"; shift 2 ;;
     --data-config-file)           data_config_file="$2"; shift 2 ;;
@@ -204,12 +222,18 @@ while [[ $# -gt 0 ]]; do
     --max-steps)                  max_steps="$2"; shift 2 ;;
     --batch-size)                 batch_size="$2"; shift 2 ;;
     --save-steps)                 save_steps="$2"; shift 2 ;;
+    --logging-steps)              logging_steps="$2"; shift 2 ;;
     --dataloader-workers)         dataloader_workers="$2"; shift 2 ;;
     --platform)                   platform="$2"; shift 2 ;;
     --resume)                     resume="true"; shift ;;
     --run-id-override)            run_id_override="$2"; shift 2 ;;
     --azure-upload)               azure_upload="true"; shift ;;
+    --azure-upload-strict)        azure_upload="true"; azure_upload_strict="true"; shift ;;
     --azureml-model-name)         azureml_model_name="$2"; shift 2 ;;
+    --checkpoint-blob-url)        checkpoint_blob_url="$2"; shift 2 ;;
+    --runhook-url)                runhook_url="$2"; shift 2 ;;
+    --project-id)                 project_id="$2"; shift 2 ;;
+    --skip-runtime-bootstrap)     skip_runtime_bootstrap="true"; shift ;;
     --acr-registry)               acr_registry="$2"; shift 2 ;;
     --acr-model-repo)             acr_model_repo="$2"; shift 2 ;;
     --azure-subscription-id)      subscription_id="$2"; shift 2 ;;
@@ -260,9 +284,11 @@ esac
 [[ -z "$base_model_revision" && "$base_model" == "$default_base_model" ]] && base_model_revision="$default_base_model_revision"
 
 [[ -z "$base_model" ]] && fatal "--base-model is required"
-# A remote HuggingFace repo id (org/name, not an absolute on-disk path) must be
-# pinned to an immutable commit; absolute paths are exempt because no Hub download occurs.
-require_hf_pin "$base_model" "$base_model_revision" "--base-model-revision"
+if [[ -z "$base_model_blob_url" ]]; then
+  # A remote HuggingFace repo id (org/name, not an absolute on-disk path) must be
+  # pinned to an immutable commit; absolute paths and Blob-hydrated models are exempt.
+  require_hf_pin "$base_model" "$base_model_revision" "--base-model-revision"
+fi
 
 load_platform_profile "$profile"
 platform="${platform:-$PROFILE_OSMO_GPU_PLATFORM}"
@@ -272,15 +298,15 @@ storage="${storage:-${PROFILE_TASK_STORAGE:-200Gi}}"
 
 [[ -z "$data_config" ]] && fatal "--data-config is required"
 if [[ -n "$local_dataset" ]]; then
-  [[ -n "$blob_url" ]] && fatal "--blob-url and --local-dataset are mutually exclusive"
+  [[ -n "$blob_url" || -n "$dataset_asset" ]] && fatal "--blob-url/--dataset-asset and --local-dataset are mutually exclusive"
   # The entry trains from an existing dataset at DATASET_PATH instead of downloading one.
   dataset_path="$(platform_local_dataset_path "$local_dataset")"
 fi
-[[ -z "$blob_url" && -z "$local_dataset" ]] && fatal "--blob-url or --local-dataset is required (no dataset source configured)"
+[[ -z "$blob_url" && -z "$dataset_asset" && -z "$local_dataset" ]] && fatal "--blob-url, --dataset-asset, or --local-dataset is required (no dataset source configured)"
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
-# Only the Azure ML mirror and ACR push read the Azure context.
+# Azure ML Data Asset resolution, Azure ML mirror, and ACR push read the Azure context.
 needs_azure=false
-[[ "$azure_upload" == "true" || -n "$acr_registry" ]] && needs_azure=true
+[[ "$azure_upload" == "true" || -n "$acr_registry" || -n "$dataset_asset" || -n "$checkpoint_blob_url" ]] && needs_azure=true
 
 # Auto-resolve data config Python file from training/vla/configs/groot/ when the
 # caller only supplies --data-config NAME and a matching file exists on disk.
@@ -356,8 +382,10 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Workflow" "$workflow"
   print_kv "VLA Version" "$vla_version"
   print_kv "Blob URL" "${blob_url:-<none>}"
+  [[ -n "$dataset_asset" ]] && print_kv "Dataset Asset" "$dataset_asset"
   print_kv "Dataset Path" "$dataset_path"
   print_kv "Base Model" "$base_model"
+  [[ -n "$base_model_blob_url" ]] && print_kv "Base Model Blob URL" "$base_model_blob_url"
   print_kv "Data Config" "$data_config"
   [[ -n "$data_config_file" ]] && print_kv "Data Config File" "$data_config_file"
   [[ -n "$modality_config_file" ]] && print_kv "Modality Config File" "$modality_config_file"
@@ -365,6 +393,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Max Steps" "$max_steps"
   print_kv "Batch Size" "$batch_size"
   print_kv "Save Steps" "$save_steps"
+  print_kv "Logging Steps" "$logging_steps"
   print_kv "Platform" "$platform"
   print_kv "CPU" "$cpu"
   print_kv "Memory" "$memory"
@@ -372,7 +401,12 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Resume" "$resume"
   [[ -n "$run_id_override" ]] && print_kv "Run ID Override" "$run_id_override"
   print_kv "Azure Upload" "$azure_upload"
+  [[ "$azure_upload" == "true" ]] && print_kv "Azure Upload Strict" "$azure_upload_strict"
   [[ "$azure_upload" == "true" ]] && print_kv "Model Name" "$azureml_model_name"
+  [[ -n "$checkpoint_blob_url" ]] && print_kv "Checkpoint Blob URL" "$checkpoint_blob_url"
+  [[ -n "$runhook_url" ]] && print_kv "Runhook URL" "$runhook_url"
+  [[ -n "$project_id" ]] && print_kv "Project ID" "$project_id"
+  print_kv "Skip Runtime Bootstrap" "$skip_runtime_bootstrap"
   [[ -n "$acr_registry" ]] && print_kv "ACR Registry" "$acr_registry"
   [[ -n "$acr_registry" ]] && print_kv "ACR Model Repo" "$acr_model_repo"
   if [[ "$needs_azure" == "true" ]]; then
@@ -398,6 +432,7 @@ submit_args=(
   "batch_size=$batch_size"
   "max_steps=$max_steps"
   "save_steps=$save_steps"
+  "logging_steps=$logging_steps"
   "base_model=$base_model"
   "base_model_revision=$base_model_revision"
   "data_config=$data_config"
@@ -410,12 +445,19 @@ submit_args=(
   "storage=$storage"
   "resume=$resume"
   "azure_upload=$azure_upload"
+  "azure_upload_strict=$azure_upload_strict"
   "azureml_model_name=$azureml_model_name"
+  "skip_runtime_bootstrap=$skip_runtime_bootstrap"
   "download_blob_b64=$download_blob_b64"
   "aml_mirror_b64=$aml_mirror_b64"
   "train_script_b64=$train_script_b64"
 )
 
+[[ -n "$dataset_asset" ]]    && submit_args+=("dataset_asset=$dataset_asset")
+[[ -n "$base_model_blob_url" ]] && submit_args+=("base_model_blob_url=$base_model_blob_url")
+[[ -n "$checkpoint_blob_url" ]] && submit_args+=("checkpoint_blob_url=$checkpoint_blob_url")
+[[ -n "$runhook_url" ]]      && submit_args+=("runhook_url=$runhook_url")
+[[ -n "$project_id" ]]       && submit_args+=("project_id=$project_id")
 [[ -n "$run_id_override" ]]  && submit_args+=("run_id_override=$run_id_override")
 [[ -n "$data_config_b64" ]]  && submit_args+=("data_config_b64=$data_config_b64")
 [[ -n "$modality_config_b64" ]] && submit_args+=("modality_config_b64=$modality_config_b64")
