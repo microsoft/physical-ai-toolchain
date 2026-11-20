@@ -716,7 +716,7 @@ describe('ReleaseDialog', () => {
     expect(screen.getByRole('button', { name: /submit release/i })).toBeEnabled()
   })
 
-  it('shows zero reserved bytes as unknown rather than as an estimate of zero', async () => {
+  it('explains when the storage budget is calculated for an unestimated preview', async () => {
     const user = userEvent.setup()
     renderDialog({
       onPreview: vi
@@ -727,8 +727,8 @@ describe('ReleaseDialog', () => {
     await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
     await user.click(screen.getByRole('button', { name: /preview release/i }))
 
-    await screen.findByText('Reserved bytes')
-    expect(screen.getByText('Unknown')).toBeVisible()
+    await screen.findByText('Storage budget')
+    expect(screen.getByText('Calculated during release execution')).toBeVisible()
     expect(screen.queryByText('0 B')).toBeNull()
   })
 

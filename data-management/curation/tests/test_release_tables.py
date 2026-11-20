@@ -8,7 +8,7 @@ from dataclasses import replace
 import pandas as pd
 import pyarrow as pa
 import pytest
-from physical_ai_curation.release.composition import NativeGenerationPlan, prepare_saved_generation
+from physical_ai_curation.release.composition import NativeGenerationPlan, SavedSubtask, prepare_saved_generation
 from physical_ai_curation.release.encoding import EncodedWindow, VideoOutput
 from physical_ai_curation.release.media import ReleaseMediaLimits, ReleasePlanError, SubsetEpisodeInput
 from physical_ai_curation.release.statistics import numeric_feature_statistics
@@ -20,6 +20,7 @@ from physical_ai_curation.release.tables import (
     generate_native_selection,
     generate_task_table,
 )
+from physical_ai_dataset_io.lerobot import episode_subtasks_metadata
 from test_release_composition import EP1, _generation_case
 
 
@@ -116,6 +117,26 @@ def test_invalid_persistent_language_is_not_silently_discarded(source_table: pa.
 
     with pytest.raises(ReleasePlanError, match="cannot be retimed"):
         generate_episode_table(source_table, _episode(), output_episode_index=0, output_from_index=0)
+
+
+def test_rerelease_remaps_exact_overlaps_and_drops_wholly_removed_segment(source_table: pa.Table) -> None:
+    outer = SavedSubtask("outer", "Move", (0, 2), "#abcdef", "manual")
+    inner = replace(outer, id="inner", label="Turn", frame_range=(1, 1))
+    first = generate_episode_table(
+        source_table,
+        replace(_episode(), removed_frames=frozenset()),
+        output_episode_index=3,
+        output_from_index=0,
+        subtasks=(outer, inner),
+    )
+    assert [row["content"] for row in first["language_persistent"][0].as_py()] == ["Move", "Turn", "Move"]
+    second = generate_episode_table(
+        first, replace(_episode(), original_episode_index=3), output_episode_index=0, output_from_index=0
+    )
+    metadata = episode_subtasks_metadata(second.schema.metadata, 0, 2)
+    assert [(item["id"], item["frame_range"]) for item in metadata] == [("outer", [0, 1])]
+    assert [row["content"] for row in second["language_persistent"][0].as_py()] == ["Move"]
+    assert len(episode_subtasks_metadata(first.schema.metadata, 3, 3)) == 2
 
 
 @pytest.mark.parametrize(

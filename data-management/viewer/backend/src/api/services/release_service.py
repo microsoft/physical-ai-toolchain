@@ -930,10 +930,10 @@ class ReleaseService:
         datasets = getattr(self._planner, "datasets", None)
         if datasets is None or await datasets.get_dataset(dataset_id) is None:
             raise ReleaseApiError(404, "release source is unavailable")
-        source_episodes = await datasets.list_episodes(dataset_id, limit=_MAX_EPISODES + 1, require_actual=True)
+        source_episodes = await datasets.list_actual_episode_indices(dataset_id, limit=_MAX_EPISODES + 1)
         if len(source_episodes) > _MAX_EPISODES:
             raise ReleaseApiError(422, "source_inventory_limit_exceeded")
-        indices = sorted({episode.index for episode in source_episodes})
+        indices = sorted(set(source_episodes))
         if episodes is None:
             selected = indices[cursor : cursor + limit]
         else:

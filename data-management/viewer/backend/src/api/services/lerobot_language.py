@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import pyarrow as pa
-from physical_ai_dataset_io.lerobot import remap_persistent_language_rows
+from physical_ai_dataset_io.lerobot import persistent_language_type, remap_persistent_language_rows
 
 from .episode_edits import PlannedFrame, SubtaskSegment, output_indices, remap_subtasks
 
@@ -40,9 +40,7 @@ _ROW_FIELDS = [
 _TARGET_FIELDS = [pa.field("camera", pa.string()), pa.field("tool_calls", pa.list_(pa.json_()))]
 # The column types ``lerobot.datasets.language`` declares in LeRobot 0.6.
 _LANGUAGE_TYPES = {
-    LANGUAGE_PERSISTENT: pa.list_(
-        pa.struct([*_ROW_FIELDS, pa.field("timestamp", pa.float32(), nullable=False), *_TARGET_FIELDS])
-    ),
+    LANGUAGE_PERSISTENT: persistent_language_type(),
     LANGUAGE_EVENTS: pa.list_(pa.struct([*_ROW_FIELDS, *_TARGET_FIELDS])),
 }
 

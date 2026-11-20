@@ -1271,6 +1271,7 @@ def test_given_own_claim_when_worker_fails_then_failure_is_recorded_with_backoff
         "source_task_metadata_invalid",
         "source_frame_schema_invalid",
         "source_binding_changed",
+        "saved_edits_not_composable",
     ],
 )
 def test_given_capture_refusal_when_queue_runs_then_needs_input_is_not_recaptured(tmp_path: Path, code: str) -> None:
@@ -1283,6 +1284,10 @@ def test_given_capture_refusal_when_queue_runs_then_needs_input_is_not_recapture
 
     async def capture(checkpoint: object) -> tuple[bytes, bytes, int, ConfiguredExecution]:
         captures.append(checkpoint)
+        if code == "saved_edits_not_composable":
+            from physical_ai_curation.release.composition import BlockedEditCompositionError
+
+            raise BlockedEditCompositionError("private edit payload")
         raise ReleaseRefusal(code)
 
     configured = ConfiguredExecution(None, SavedReader(), _selection(), None, destination, capture)
@@ -1294,10 +1299,32 @@ def test_given_capture_refusal_when_queue_runs_then_needs_input_is_not_recapture
     assert len(captures) == 1
     assert status.state == "needs_input"
     assert status.refusal_code == code
+    assert status.refusal_message and "private" not in status.refusal_message
     assert not status.recovery_required
     store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
     asyncio.run(run_queue(store, lambda *_args: configured))
     assert job_id not in store.storage.snapshot()
+
+
+def test_given_unexpected_capture_error_when_dispatched_then_logs_stage_without_private_payload(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    store = _store(tmp_path / "jobs", OffsetClock())
+    destination = tmp_path / "output"
+    request = replace(_request(destination), frozen_request=b'{"schema_version":"curated-release-intent/v1"}')
+    job_id = store.accept(request).job_id
+
+    async def capture(checkpoint: object) -> tuple[bytes, bytes, int, ConfiguredExecution]:
+        raise TimeoutError("private provider detail")
+
+    configured = ConfiguredExecution(None, SavedReader(), _selection(), None, destination, capture)
+    outcomes = asyncio.run(run_queue(store, lambda *_args: configured))
+
+    assert outcomes == ({"job_id": job_id, "status": "recovery_required"},)
+    assert f"job={job_id} stage=capture category=timeout" in caplog.text
+    assert "location=physical_ai_curation.release.runner.execute_job:" in caplog.text
+    assert "private provider detail" not in caplog.text
+    assert store.storage.snapshot()[job_id]["diagnostics"]["capture.timeout"]["count"] == 1
 
 
 def test_given_stopped_partial_effect_when_source_refused_then_cleanup_ownership_and_capacity_are_retained(
@@ -2662,6 +2689,87 @@ def test_given_blob_selection_when_discovered_then_only_metadata_listed_and_read
     assert any(path.startswith("data/") for path in paths)
     assert any(path.startswith("videos/") for path in paths)
     assert all(call["name"].startswith("native/meta/") for call in _sdk_calls(sdk, "download_blob"))
+
+
+def _preflight_planning(source: BlobReleaseSource) -> coordinator_module.PlanningMetadata:
+    objects = source.metadata_inventory()
+    info, rows = coordinator_module._planning_metadata(source, objects, 8 * 1024**2, None)
+    return coordinator_module.PlanningMetadata(objects=objects, info=info, rows=rows)
+
+
+def test_given_preflight_planning_when_selected_then_metadata_is_rechecked_without_reparsing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.release.coordinator import select_blob_dependencies
+
+    source, _reader, selection, _context, _frozen, _inputs, sdk, remote = _blob_native_case(tmp_path)
+    listings: list[str] = []
+    parses: list[int] = []
+    original_list = remote.list_blobs
+    original_parse = coordinator_module._planning_metadata
+
+    def counting_list(*, name_starts_with: str, **kwargs: object) -> object:
+        listings.append(name_starts_with)
+        return original_list(name_starts_with=name_starts_with, **kwargs)
+
+    def counting_parse(*args: object) -> object:
+        parses.append(1)
+        return original_parse(*args)
+
+    monkeypatch.setattr(remote, "list_blobs", counting_list)
+    monkeypatch.setattr(coordinator_module, "_planning_metadata", counting_parse)
+
+    planning = _preflight_planning(source)
+    assert listings == ["native/meta/"] * 2
+    assert len(parses) == 1
+    listings.clear()
+    parses.clear()
+    downloads_before = len(_sdk_calls(sdk, "download_blob"))
+
+    selected = select_blob_dependencies(source, selection.episode_indices, planning=planning)
+
+    assert listings == ["native/meta/"] * 2
+    assert parses == []
+    assert len(_sdk_calls(sdk, "download_blob")) == downloads_before
+    baseline = select_blob_dependencies(source, selection.episode_indices)
+    assert selected.inventory() == baseline.inventory()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("same_length_info", "changed during selection"),
+        ("same_length_episodes", "changed during selection"),
+        ("changed_length_episodes", "changed during selection"),
+        ("added_episodes", "changed during selection"),
+        ("removed_episodes", "changed during selection"),
+    ],
+)
+def test_given_selected_metadata_mutated_after_preflight_when_selected_then_refused(
+    tmp_path: Path, mutation: str, message: str
+) -> None:
+    from physical_ai_curation.release.coordinator import select_blob_dependencies
+
+    source, _reader, selection, _context, _frozen, _inputs, _sdk, remote = _blob_native_case(tmp_path)
+    info_name = "native/meta/info.json"
+    episodes_name = "native/meta/episodes/chunk-000/file-000.parquet"
+    planning = _preflight_planning(source)
+
+    if mutation == "same_length_info":
+        data = remote.read(info_name)
+        remote.put(info_name, data[:-1] + bytes([data[-1] ^ 0x01]))
+    elif mutation == "same_length_episodes":
+        data = remote.read(episodes_name)
+        remote.put(episodes_name, data[:-1] + bytes([data[-1] ^ 0x01]))
+    elif mutation == "changed_length_episodes":
+        remote.put(episodes_name, remote.read(episodes_name) + b" ")
+    elif mutation == "added_episodes":
+        remote.put("native/meta/episodes/chunk-000/file-001.parquet", remote.read(episodes_name))
+    else:
+        remote.remove(episodes_name)
+
+    with pytest.raises(ReleaseInputError, match=message):
+        select_blob_dependencies(source, selection.episode_indices, planning=planning)
 
 
 def test_given_oversized_metadata_decode_when_planning_then_refused_before_allocation(

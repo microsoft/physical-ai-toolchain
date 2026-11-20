@@ -1,7 +1,7 @@
 ---
 title: Curated Dataset Release
 description: Contracts for saved-selection capture, immutable LeRobot publication, verification, release jobs and optional Azure ML registration.
-ms.date: 2026-11-06
+ms.date: 2026-11-19
 ms.topic: reference
 ---
 
@@ -88,6 +88,12 @@ returns `507`; insufficient capacity discovered during execution fails the accep
 job before output effects. An ambiguous transport/server failure does not establish
 whether acceptance occurred.
 
+If execution-time capture finds saved edits that cannot be composed, job status
+returns `needs_input` with refusal code `saved_edits_not_composable`. For example,
+a saved frame insertion cannot be included by the current composer. Submit a
+selection without the unsupported edits; retrying the same inputs does not make
+them supported. The worker does not silently omit edits or expose their contents.
+
 Accepted-request lookup and replay use the original idempotency key before
 reopening source data. Retrying an uncertain submission must not create another
 logical job. Configured destination aliases resolve server-side before acceptance;
@@ -107,9 +113,18 @@ Only explicit job cancellation requests server-side cancellation.
 
 Unchanged video objects are independently copied without an encoder or decoder.
 Affected media uses the confirmed processing plan. Supported saved operations are
-frame removal and `invert`/`grayscale` color filters. Crop, resize, other color
-adjustments, insertion, trajectory changes, subtask replacement and combined
+frame removal, subtask replacement and `invert`/`grayscale` color filters. Crop, resize, other color
+adjustments, insertion, trajectory changes and combined
 global/camera transforms are refused during worker capture, before output effects.
+
+A saved subtask timeline replaces the episode's recorded subtasks. An empty list
+clears them; an absent or null timeline leaves them unchanged. Inclusive ranges
+map to the first and last retained frames within each segment. Segments with no
+retained frames disappear. The native `language_persistent` column carries label
+changes and gaps; for overlaps, the latest start takes precedence, with ties
+going to the later saved segment. Episode Parquet metadata preserves all retained
+segments, including their IDs, colors, origins and descriptions, for the viewer.
+Changing only subtasks does not require video processing.
 
 Azure frame-table processing uses conditional ranges pinned to the captured
 revision. Parquet footer size, row-group statistics, compressed transfer and decoded
@@ -300,6 +315,11 @@ without replacing a live lease. Automatic retries respect backoff after writers
 have stopped. Status and history expose `recovery_required` after a dispatch
 failure; a retry request leaves it set until a worker claims the job. The UI shows
 the job as stalled and offers cancellation of partial output or explicit recovery.
+For worker execution failures, the authorized status and history responses include
+cumulative `diagnostics` counts and durations by stage and cause, such as
+`reconcile.scratch_creator_active`. Logs include the application code location;
+neither the API nor logs include raw exception text. The UI shows the recovery
+action without rendering diagnostic details.
 Cancellation resolves from recorded destination and association bindings without
 reopening the source. A definitive job-not-found response clears only the matching scoped
 browser pointer and history entry; it does not prove cleanup succeeded or submit a
@@ -309,6 +329,10 @@ The Linux supervisor uses pidfds/procfs and process start/boot identity. A reuse
 PID is not stopped-writer proof. Private scratch cleanup requires matching ownership
 and stopped children; recovery also requires creator-exit evidence. Missing proofs,
 replaced directories or exhausted cleanup budgets retain their charges. Workers
+create the local scratch root independently of the job ledger. When an exited
+creator recorded only a planned workspace, recovery can release its charge if
+the name is demonstrably absent. An existing entry, including a dangling link,
+is retained because the creator never recorded its filesystem identity. Workers
 must not revive an expired fence or start replacement effects while an earlier
 intent remains unresolved.
 
@@ -410,7 +434,7 @@ which remain authoritative for field schemas.
 | Method and path                                                     | Purpose                                                                |
 |---------------------------------------------------------------------|------------------------------------------------------------------------|
 | `GET /api/releases/v1/capabilities`                                 | Schema and supported features                                          |
-| `GET /api/releases/v1/destinations`                                 | Configured destination aliases                                         |
+| `GET /api/releases/v1/destinations`                                 | Sorted `alias` strings with boolean `azureml_registration_enabled` flags |
 | `POST /api/releases/v1/preview`                                     | Read-only body preview                                                 |
 | `GET /api/releases/v1/preview`                                      | Read-only query preview                                                |
 | `POST /api/releases/v1/jobs`                                        | Submit with `Idempotency-Key`                                          |

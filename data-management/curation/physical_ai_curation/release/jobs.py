@@ -9,7 +9,7 @@ import os
 import re
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
@@ -42,6 +42,10 @@ MIN_LEASE_SECONDS = 5
 MAX_LEASE_SECONDS = 3600
 DISPATCH_FAILURES = frozenset({"resolver_failed", "worker_failed"})
 INPUT_REFUSAL_MESSAGES = {
+    "saved_edits_not_composable": (
+        "The release cannot include one or more selected saved edits. "
+        "Exclude those edit resources or choose episodes with supported edits."
+    ),
     "processing_confirmation_required": "Selected video processing requires explicit confirmation.",
     "insufficient_capacity": "The selected release exceeds available capacity.",
     "source_unavailable": "The selected source is unavailable.",
@@ -117,6 +121,21 @@ DIAGNOSTIC_CATEGORIES = frozenset(
     {"encode", "validation", "copy", "reconciliation", "marker", "cleanup", "runtime_stop", "lease"}
 )
 DIAGNOSTIC_STATUSES = frozenset({"succeeded", "failed", "timed_out", "cancelled", "uncertain"})
+WORKER_STAGES = frozenset({"reconcile", "restore_request", "capture", "reserve", "prepare_generation", "generate"})
+WORKER_FAILURES = frozenset(
+    {
+        "timeout",
+        "authority",
+        "capacity",
+        "input",
+        "job_state",
+        "io",
+        "validation",
+        "unexpected",
+        "scratch_creator_active",
+        "scratch_creation_unresolved",
+    }
+)
 IO_COUNTERS = frozenset(
     {
         "storage_copy_bytes",
@@ -143,6 +162,14 @@ class JobConflictError(ReleaseJobError):
 
 class AuthorityError(ReleaseJobError):
     """A stale fence, expired lease, unconfirmed predecessor, or unresolved effect blocks the step."""
+
+
+class ScratchCreatorActiveError(AuthorityError):
+    """The process that created the scratch workspace has not exited."""
+
+
+class ScratchCreationUnresolvedError(AuthorityError):
+    """A planned workspace cannot safely be treated as absent."""
 
 
 class CapacityError(ReleaseJobError):
@@ -842,6 +869,7 @@ class ReleaseJobStore:
     def create_scratch_workspace(self, job_id: str, fence: int, length: int) -> Path:
         """Persist creator identity before a private workspace can receive any bytes."""
         self.reserve_scratch(job_id, fence, length)
+        os.close(_open_root_nofollow(self.root, create=True))
         name = uuid4().hex
         owner = ProcessIdentity.of(os.getpid()).to_dict()
         with self._transaction() as conn:
@@ -853,8 +881,8 @@ class ReleaseJobStore:
                 "inode": None,
                 "status": "planned",
             }
-        directory = self.root.resolve() / "scratch" / job_id / name
-        descriptor = _open_root_nofollow(self.root.resolve())
+        directory = self.root.absolute() / "scratch" / job_id / name
+        descriptor = _open_root_nofollow(self.root)
         try:
             for segment in ("scratch", job_id, name):
                 try:
@@ -890,12 +918,23 @@ class ReleaseJobStore:
                 if owner.boot_id != ProcessIdentity.of(os.getpid()).boot_id:
                     raise AuthorityError("scratch creator host/boot is not independently observable")
                 if not owner.has_exited():
-                    raise AuthorityError("scratch creator is not independently stopped")
+                    raise ScratchCreatorActiveError("scratch creator is not independently stopped")
             elif workspace["fence"] != fence or owner != ProcessIdentity.of(os.getpid()):
                 raise AuthorityError("private workspace belongs to another creator")
+            parent = self.root.absolute() / "scratch" / job_id
             if workspace["status"] != "present":
-                raise AuthorityError("workspace creation outcome is unresolved")
-            parent = self.root.resolve() / "scratch" / job_id
+                if recover and workspace["status"] == "planned":
+                    try:
+                        parent_fd = _open_root_nofollow(parent)
+                        try:
+                            os.stat(workspace["name"], dir_fd=parent_fd, follow_symlinks=False)
+                        finally:
+                            os.close(parent_fd)
+                    except FileNotFoundError:
+                        workspace["status"] = "removed"
+                        self._emit(conn, job_id, "scratch.removed", "info", {"fence": fence})
+                        return
+                raise ScratchCreationUnresolvedError("workspace creation outcome is unresolved")
             parent_fd = _open_root_nofollow(parent)
             try:
                 try:
@@ -1989,6 +2028,7 @@ class ReleaseJobStore:
         status: str,
         *,
         duration_ms: int = 0,
+        worker_failure: tuple[str, str] | None = None,
     ) -> None:
         """Record a fixed category, status and duration once per operation; no free-form text is accepted."""
         if not isinstance(operation_id, str) or re.fullmatch(r"[0-9a-f]{32}|[0-9a-f]{64}", operation_id) is None:
@@ -1997,6 +2037,11 @@ class ReleaseJobStore:
             raise ReleaseJobError("diagnostic category or status is invalid")
         _require_int(duration_ms, "diagnostic duration", 0, MAX_DIAGNOSTIC_DURATION_MS)
         observation = {"category": category, "status": status, "duration_ms": duration_ms}
+        if worker_failure is not None:
+            stage, reason = worker_failure
+            if status != "failed" or stage not in WORKER_STAGES or reason not in WORKER_FAILURES:
+                raise ReleaseJobError("invalid worker failure diagnostic")
+            observation.update(stage=stage, reason=reason)
         with self._transaction() as conn:
             row = self._lease(conn, job_id, fence)
             existing = row["diagnostic_operations"].get(operation_id)
@@ -2010,6 +2055,10 @@ class ReleaseJobStore:
             bucket = row["diagnostics"].setdefault(f"{category}.{status}", {"count": 0, "duration_ms": 0})
             bucket["count"] += 1
             bucket["duration_ms"] += duration_ms
+            if worker_failure is not None:
+                detail = row["diagnostics"].setdefault(f"{stage}.{reason}", {"count": 0, "duration_ms": 0})
+                detail["count"] += 1
+                detail["duration_ms"] += duration_ms
             severity = "info" if status == "succeeded" else "warning"
             self._emit(conn, job_id, "diagnostic.recorded", severity, observation)
 
@@ -2452,12 +2501,20 @@ def _verify_open_file(fd: int, length: int, digest: str, *, deadline: float | No
     return hasher.hexdigest() == digest
 
 
-def _open_root_nofollow(root: Path) -> int:
+def _open_root_nofollow(root: Path, *, create: bool = False) -> int:
     absolute = root.absolute()
     descriptor = os.open(absolute.anchor, _DIRECTORY_FLAGS)
     try:
         for segment in absolute.parts[1:]:
-            child = os.open(segment, _DIRECTORY_FLAGS, dir_fd=descriptor)
+            try:
+                child = os.open(segment, _DIRECTORY_FLAGS, dir_fd=descriptor)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                with suppress(FileExistsError):
+                    os.mkdir(segment, mode=0o700, dir_fd=descriptor)
+                    os.fsync(descriptor)
+                child = os.open(segment, _DIRECTORY_FLAGS, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = child
         return descriptor

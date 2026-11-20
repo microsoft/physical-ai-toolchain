@@ -393,15 +393,28 @@ function DatasetWorkspaceContent({
                 <div className="space-y-2">
                   <h4 className="font-medium">Job review: {review.status}</h4>
                   <ul>
-                    {review.targets?.map((target) => (
-                      <li key={target.episodeIndex}>
-                        Episode {target.episodeIndex}: {target.comparison ?? target.status};{' '}
-                        {target.sample?.baselineSource === 'label' ? 'saved label' : 'saved rating'}{' '}
-                        {String(target.sample?.humanOutcome ?? 'unknown')}; judge{' '}
-                        {String(target.result?.outcomeSuccess ?? 'inconclusive')}
-                        {target.error && `; error: ${target.error}`}
-                      </li>
-                    ))}
+                    {review.targets?.map((target) => {
+                      let verdict = 'no judge verdict'
+                      if (target.result) {
+                        const { outcomeSuccess, outcomeConfidence } = target.result
+                        verdict =
+                          outcomeSuccess === null
+                            ? 'judge inconclusive (no success or failure decision)'
+                            : `judge ${outcomeSuccess ? 'SUCCESS' : 'FAILURE'} (${Math.round(outcomeConfidence * 100)}% confidence)`
+                      } else if (target.status === 'queued' || target.status === 'running') {
+                        verdict = 'judge verdict pending'
+                      }
+                      return (
+                        <li key={target.episodeIndex}>
+                          Episode {target.episodeIndex}: {target.comparison ?? target.status};{' '}
+                          {target.sample?.baselineSource === 'label'
+                            ? 'saved label'
+                            : 'saved rating'}{' '}
+                          {String(target.sample?.humanOutcome ?? 'unknown')}; {verdict}
+                          {target.error && `; error: ${target.error}`}
+                        </li>
+                      )
+                    })}
                   </ul>
                   <label className="flex items-center gap-2">
                     <input

@@ -150,7 +150,6 @@ def test_subset_inputs_follow_frozen_selection_order() -> None:
         ({"globalTransform": {"crop": {"x": 0, "y": 0, "width": 2, "height": 2}}}, "globalTransform"),
         ({"cameraTransforms": {"front": {"resize": {"width": 2, "height": 2}}}}, "cameraTransforms"),
         ({"trajectoryAdjustments": [{"frameIndex": 0, "channelDeltas": {"0": 0.1}}]}, "trajectoryAdjustments"),
-        ({"subtasks": []}, "subtasks"),
     ],
 )
 def test_unhandled_operations_block_instead_of_dropping(operations: dict, fragment: str) -> None:
@@ -162,6 +161,22 @@ def test_unhandled_operations_block_instead_of_dropping(operations: dict, fragme
     assert any(fragment in reason for reason in composition.blocking)
     with pytest.raises(ReleasePlanError, match="blocked"):
         subset_episode_inputs(frozen, _sources(), composition)
+
+
+@pytest.mark.parametrize("span", [[0, 999], [True, 1], [1, 0]])
+def test_saved_subtask_outside_source_coordinates_is_not_composed(span: list[int]) -> None:
+    segment = {"id": "one", "label": "Move", "frameRange": span, "color": "#008866", "source": "manual"}
+    frozen = _frozen(_resource("edits/episode_000000", {"operations": {"subtasks": [segment]}}))
+    with pytest.raises(ReleasePlanError, match="subtask"):
+        subset_episode_inputs(frozen, _sources(), compose_frame_removals(frozen))
+
+
+def test_empty_subtask_replacement_is_distinct_from_unedited_episode() -> None:
+    frozen = _frozen(_resource("edits/episode_000000", {"operations": {"subtasks": []}}))
+    composition = compose_frame_removals(frozen)
+
+    assert composition.submittable
+    assert dict(composition.subtasks) == {EP0: ()}
 
 
 def test_empty_or_null_operations_are_not_edits() -> None:

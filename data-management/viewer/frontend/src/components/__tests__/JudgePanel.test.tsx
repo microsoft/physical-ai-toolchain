@@ -245,6 +245,37 @@ describe('JudgePanel', () => {
     expect(screen.queryByText(/Job review:/)).not.toBeInTheDocument()
   })
 
+  it('distinguishes pending grounding verdicts from completed assessments', () => {
+    const targets = [
+      { episodeIndex: 0, status: 'queued' },
+      { episodeIndex: 1, status: 'running' },
+      { episodeIndex: 2, status: 'succeeded', result: judgeResult({ outcomeSuccess: null }) },
+      { episodeIndex: 3, status: 'failed' },
+      {
+        episodeIndex: 4,
+        status: 'succeeded',
+        result: judgeResult({ outcomeSuccess: true, outcomeConfidence: 0.96 }),
+      },
+    ]
+    mockDatasetJobs.mockReturnValue({
+      inventory: {},
+      annotated: {},
+      usable: {},
+      jobs: {},
+      approvals: {},
+      reset: {},
+      review: { data: { id: 'sample', mode: 'sample', status: 'running', targets } },
+      act: mockDatasetAction,
+      refresh: vi.fn(),
+    })
+    render(<DatasetWorkspace datasetId="demo" open enabled onToggle={vi.fn()} />)
+    expect(screen.getByText(/Episode 0:.*judge verdict pending/)).toBeVisible()
+    expect(screen.getByText(/Episode 1:.*judge verdict pending/)).toBeVisible()
+    expect(screen.getByText(/Episode 2:.*judge inconclusive/)).toBeVisible()
+    expect(screen.getByText(/Episode 3:.*no judge verdict/)).toBeVisible()
+    expect(screen.getByText(/Episode 4:.*judge SUCCESS \(96% confidence\)/)).toBeVisible()
+  })
+
   it('reviews label baselines, approves the configuration and submits both target modes', async () => {
     const user = userEvent.setup()
     const submit = vi.fn().mockResolvedValue({ id: 'sample' })
@@ -315,7 +346,7 @@ describe('JudgePanel', () => {
         options: { processMethod: 'chronological', views: ['wrist'] },
       }),
     )
-    expect(screen.getByText(/saved label success; judge false/)).toBeVisible()
+    expect(screen.getByText(/saved label success; judge FAILURE/)).toBeVisible()
     expect(screen.getByRole('button', { name: 'Approve configuration' })).toBeDisabled()
     await user.click(
       screen.getByRole('checkbox', { name: 'I reviewed disagreements and inconclusive results' }),
