@@ -333,6 +333,36 @@ def test_given_oversized_blob_record_when_read_directly_then_refused_before_deco
     with pytest.raises(ReleaseVerificationError, match="max_record_bytes"):
         storage._read(name, container.blobs[name].etag)
 
+    with pytest.raises(ReleaseVerificationError, match="max_record_bytes"):
+        storage.job_snapshot(KEY)
+
+
+def test_scoped_transaction_preserves_warm_unrelated_blob(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    storage = _storage(tmp_path, "blob")
+    for key in (KEY, OTHER):
+        with storage.transaction() as working:
+            working[key] = _record(key)
+    assert set(storage.snapshot()) == {KEY, OTHER}
+    with storage.transaction(job_id=KEY) as working:
+        working[KEY]["updated"] = True
+
+    read = Mock(wraps=storage._read)
+    monkeypatch.setattr(storage, "_read", read)
+    assert storage.snapshot() == {KEY: {**_record(), "updated": True}, OTHER: _record(OTHER)}
+    assert all(not call.args[0].endswith(f"/{OTHER}.json") for call in read.call_args_list)
+
+
+def test_blob_snapshot_refuses_inconsistent_listed_length(monkeypatch: pytest.MonkeyPatch) -> None:
+    container = _RecordContainer()
+    storage = _blob_record_store(container)
+    name = f"{storage._jobs_prefix}{KEY}.json"
+    body = canonical_json_bytes(_record())
+    container.put(name, body)
+    listed = SimpleNamespace(name=name, size=len(body) - 1, etag=container.blobs[name].etag)
+    monkeypatch.setattr(container, "list_blobs", lambda **_kwargs: [listed])
+    with pytest.raises(ReleaseVerificationError, match="length differs"):
+        storage.snapshot()
+
 
 @pytest.mark.parametrize("container", [None, "ab", "Uppercase"])
 def test_blob_location_rejects_invalid_container_name(container: object) -> None:

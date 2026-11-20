@@ -171,6 +171,13 @@ def test_saved_subtask_outside_source_coordinates_is_not_composed(span: list[int
         subset_episode_inputs(frozen, _sources(), compose_frame_removals(frozen))
 
 
+@pytest.mark.parametrize(("payload", "message"), [({}, "must be a list"), (["bad segment"], "invalid saved subtask")])
+def test_malformed_saved_timeline_blocks_composition(payload: object, message: str) -> None:
+    frozen = _frozen(_resource("edits/episode_000000", {"operations": {"subtasks": payload}}))
+    with pytest.raises(ReleasePlanError, match=message):
+        compose_frame_removals(frozen)
+
+
 def test_empty_subtask_replacement_is_distinct_from_unedited_episode() -> None:
     frozen = _frozen(_resource("edits/episode_000000", {"operations": {"subtasks": []}}))
     composition = compose_frame_removals(frozen)

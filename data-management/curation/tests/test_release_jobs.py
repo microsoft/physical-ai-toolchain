@@ -6691,6 +6691,22 @@ def test_given_recorded_diagnostic_identity_when_observation_changes_then_confli
     assert store.storage.snapshot() == before
 
 
+@pytest.mark.parametrize(
+    ("status", "stage", "reason"),
+    [("succeeded", "capture", "io"), ("failed", "private", "io"), ("failed", "capture", "private")],
+)
+def test_worker_failure_diagnostic_rejects_unclassified_values(
+    tmp_path: Path, status: str, stage: str, reason: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker")
+    before = store.storage.snapshot()
+    with pytest.raises(ReleaseJobError, match="invalid worker failure diagnostic"):
+        store.record_diagnostic(job_id, fence, "c" * 32, "validation", status, worker_failure=(stage, reason))
+    assert store.storage.snapshot() == before
+
+
 def test_given_no_scratch_workspace_when_cleanup_requested_then_ledger_is_unchanged(tmp_path: Path) -> None:
     store = _store(tmp_path / "ledger", FakeClock())
     job_id = store.accept(_request(tmp_path / "output")).job_id

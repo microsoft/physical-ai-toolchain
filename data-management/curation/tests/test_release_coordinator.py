@@ -1763,6 +1763,19 @@ def test_given_nested_arrow_table_when_identity_computed_then_chunks_and_metadat
     assert table_identity(table) != table_identity(table.slice(0, 1))
 
 
+def test_release_subtask_metadata_is_part_of_native_table_identity() -> None:
+    from physical_ai_curation.release.native_inputs import table_identity
+    from physical_ai_dataset_io.lerobot import RELEASE_SUBTASKS_KEY
+
+    frames = pa.table({"frame_index": [0]})
+    timeline = {"episode_index": 0, "length": 1, "segments": []}
+    cleared = frames.replace_schema_metadata({RELEASE_SUBTASKS_KEY: json.dumps(timeline).encode()})
+    edited = {**timeline, "segments": [{"id": "one", "label": "Move", "frame_range": [0, 0]}]}
+    labeled = frames.replace_schema_metadata({RELEASE_SUBTASKS_KEY: json.dumps(edited).encode()})
+
+    assert len({table_identity(frames), table_identity(cleared), table_identity(labeled)}) == 3
+
+
 @pytest.mark.parametrize("budget", [0, -1, True])
 def test_given_invalid_planning_metadata_budget_when_read_then_refused_before_source_access(
     tmp_path: Path, budget: Any

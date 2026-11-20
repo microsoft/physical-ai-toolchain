@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from dataclasses import replace
 
 import pandas as pd
@@ -20,7 +21,7 @@ from physical_ai_curation.release.tables import (
     generate_native_selection,
     generate_task_table,
 )
-from physical_ai_dataset_io.lerobot import episode_subtasks_metadata
+from physical_ai_dataset_io.lerobot import RELEASE_SUBTASKS_KEY, episode_subtasks_metadata
 from test_release_composition import EP1, _generation_case
 
 
@@ -117,6 +118,47 @@ def test_invalid_persistent_language_is_not_silently_discarded(source_table: pa.
 
     with pytest.raises(ReleasePlanError, match="cannot be retimed"):
         generate_episode_table(source_table, _episode(), output_episode_index=0, output_from_index=0)
+
+
+@pytest.mark.parametrize("override", [{"episode_index": 8}, {"length": 4}, {"segments": {}}])
+def test_rerelease_refuses_mismatched_subtask_metadata(source_table: pa.Table, override: dict) -> None:
+    metadata = {"episode_index": 7, "length": 3, "segments": [], **override}
+    source = source_table.replace_schema_metadata({RELEASE_SUBTASKS_KEY: json.dumps(metadata).encode()})
+    with pytest.raises(ValueError, match="metadata does not match the episode"):
+        generate_episode_table(source, _episode(), output_episode_index=0, output_from_index=0)
+
+
+def test_native_writer_refuses_subtasks_outside_source_or_memory_limit(source_table: pa.Table) -> None:
+    segment = SavedSubtask("one", "Move", (0, 3), "#abcdef", "manual")
+    with pytest.raises(ReleasePlanError, match="cannot be retimed") as invalid_range:
+        generate_episode_table(
+            source_table, _episode(), output_episode_index=0, output_from_index=0, subtasks=(segment,)
+        )
+    assert "range exceeds" in str(invalid_range.value.__cause__)
+    with pytest.raises(ReleasePlanError, match="cannot be retimed") as over_budget:
+        generate_episode_table(
+            source_table,
+            _episode(),
+            output_episode_index=0,
+            output_from_index=0,
+            subtasks=(replace(segment, label="X" * 4096, frame_range=(0, 2)),),
+            limits=replace(ReleaseMediaLimits(), processing_memory_bytes=4096),
+        )
+    assert "persistent language rows exceed" in str(over_budget.value.__cause__)
+
+
+def test_hidden_segment_ending_does_not_repeat_the_active_label(source_table: pa.Table) -> None:
+    short = SavedSubtask("one", "Move", (0, 1), "#abcdef", "manual")
+    active = replace(short, id="two", label="Turn", frame_range=(0, 2))
+    output = generate_episode_table(
+        source_table,
+        replace(_episode(), removed_frames=frozenset()),
+        output_episode_index=0,
+        output_from_index=0,
+        subtasks=(short, active),
+    )
+    assert [row["content"] for row in output["language_persistent"][0].as_py()] == ["Turn"]
+    assert len(episode_subtasks_metadata(output.schema.metadata, 0, 3)) == 2
 
 
 def test_rerelease_remaps_exact_overlaps_and_drops_wholly_removed_segment(source_table: pa.Table) -> None:
