@@ -1049,6 +1049,9 @@ class ReleaseService:
 
     def _execution(self, store: ReleaseJobStore, scope: str, job_id: str) -> ConfiguredExecution:
         store.get(job_id, scope=scope, principal=scope)
+        return self._resolve_execution(store, job_id)
+
+    def _resolve_execution(self, store: ReleaseJobStore, job_id: str) -> ConfiguredExecution:
         if self._planner is None:
             raise ReleaseApiError(503, "release worker is not configured")
         try:
@@ -1067,8 +1070,8 @@ class ReleaseService:
                 raise ReleaseApiError(422, status.refusal_code, message=status.refusal_message, nonretryable=True)
             if status.state != "committed":
                 raise ReleaseApiError(409, "release_result_not_verified")
-            configured = self._execution(store, scope, job_id)
-            record = store.storage.snapshot()[job_id]
+            configured = self._resolve_execution(store, job_id)
+            record = store.storage.job_snapshot(job_id)[job_id]
             package_id, attempt_id = record["attempt_key"].split("/", 1)
             attempt = PublicationAttempt(
                 package_id, attempt_id, record["attempt_prefix"], record["attempt_source_dataset_id"]

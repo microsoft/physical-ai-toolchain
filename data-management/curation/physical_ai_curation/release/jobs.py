@@ -387,8 +387,9 @@ class ReleaseJobStore:
         self._free_bytes = free_bytes or _statvfs_free_bytes
 
     @contextmanager
-    def _transaction(self) -> Iterator[dict[str, dict[str, Any]]]:
-        with self.storage.transaction() as records:
+    def _transaction(self, *, job_id: str | None = None) -> Iterator[dict[str, dict[str, Any]]]:
+        transaction = self.storage.transaction() if job_id is None else self.storage.transaction(job_id=job_id)
+        with transaction as records:
             for row in records.values():
                 _require_current_job(row)
             yield records
@@ -485,8 +486,8 @@ class ReleaseJobStore:
             self._emit(conn, job_id, "job.accepted", "info", {"reserved_bytes": request.reserved_bytes})
             return AcceptedJob(job_id, replayed=False)
 
-    def _snapshot(self) -> dict[str, dict[str, Any]]:
-        records = self.storage.snapshot()
+    def _snapshot(self, job_id: str | None = None) -> dict[str, dict[str, Any]]:
+        records = self.storage.snapshot() if job_id is None else self.storage.job_snapshot(job_id)
         for row in records.values():
             _require_current_job(row)
         return records
@@ -521,11 +522,11 @@ class ReleaseJobStore:
 
     def execution_binding(self, job_id: str) -> bytes:
         """Return immutable private configuration for trusted workers, never HTTP clients."""
-        row = self._job(self._snapshot(), job_id)
+        row = self._job(self._snapshot(job_id), job_id)
         return base64.b64decode(row["execution_binding"], validate=True)
 
     def get(self, job_id: str, *, scope: str, principal: str) -> JobStatus:
-        conn = self._snapshot()
+        conn = self._snapshot(job_id)
         row = self._owned(conn, job_id, scope, principal)
         return _status(conn, row)
 
@@ -562,7 +563,7 @@ class ReleaseJobStore:
         )
 
     def frozen_request(self, job_id: str) -> bytes:
-        return base64.b64decode(self._job(self._snapshot(), job_id)["frozen_request"], validate=True)
+        return base64.b64decode(self._job(self._snapshot(job_id), job_id)["frozen_request"], validate=True)
 
     def capture_execution(
         self,
@@ -636,11 +637,11 @@ class ReleaseJobStore:
 
     def source_association(self, job_id: str) -> SourceAssociationIntent | None:
         """Restore private accepted association from durable binding and acceptance event."""
-        return self._restore_source_association(self._job(self._snapshot(), job_id))
+        return self._restore_source_association(self._job(self._snapshot(job_id), job_id))
 
     def accepted_at(self, job_id: str) -> str:
         """Return the durable acceptance time as UTC ISO text before or after capture."""
-        return _iso(self._acceptance_time(self._job(self._snapshot(), job_id)))
+        return _iso(self._acceptance_time(self._job(self._snapshot(job_id), job_id)))
 
     @staticmethod
     def _acceptance_time(row: Mapping[str, Any]) -> float:
@@ -668,7 +669,7 @@ class ReleaseJobStore:
         scope_sha256: str,
     ) -> None:
         """Check immutable accepted source/access identity; effect and commit guards authorize dispatch separately."""
-        row = self._job(self._snapshot(), job_id)
+        row = self._job(self._snapshot(job_id), job_id)
         if (
             row["fence"] != fence
             or row["destination"] != _destination_text(destination)
@@ -712,10 +713,10 @@ class ReleaseJobStore:
 
     def heartbeat(self, job_id: str, fence: int) -> bool:
         """Observe cancellation every time; renew only when less than half the lease remains."""
-        row = self._lease(self._snapshot(), job_id, fence)
+        row = self._lease(self._snapshot(job_id), job_id, fence)
         if row["lease_expires"] - self._clock() >= self.settings.lease_seconds / 2:
             return bool(row["cancel_requested"])
-        with self._transaction() as conn:
+        with self._transaction(job_id=job_id) as conn:
             row = self._lease(conn, job_id, fence)
             if row["lease_expires"] - self._clock() < self.settings.lease_seconds / 2:
                 row["lease_expires"] = self._clock() + self.settings.lease_seconds

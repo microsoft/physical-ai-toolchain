@@ -199,7 +199,9 @@ test.describe('curated dataset release workflow', () => {
     await dialog.getByRole('checkbox', { name: 'Episode 1' }).check()
 
     await dialog.getByRole('button', { name: 'Preview release' }).click()
-    await expect(dialog.getByText('Reserved bytes')).toBeVisible({ timeout: 30_000 })
+    await expect(dialog.getByText('Calculated during release execution')).toBeVisible({
+      timeout: 30_000,
+    })
 
     const processing = dialog.getByRole('checkbox', { name: /video processing/i })
     if (await processing.count()) await processing.check()
@@ -363,7 +365,9 @@ function countSubmissions(page: Page): () => number {
  */
 async function previewAndAcknowledge(dialog: Locator): Promise<void> {
   await dialog.getByRole('button', { name: 'Preview release' }).click()
-  await expect(dialog.getByText('Reserved bytes')).toBeVisible({ timeout: 30_000 })
+  await expect(dialog.getByText('Calculated during release execution')).toBeVisible({
+    timeout: 30_000,
+  })
   const processing = dialog.getByRole('checkbox', { name: /video processing/i })
   if (await processing.count()) await processing.check()
   const localDisk = dialog.getByRole('checkbox', { name: /local disk/i })
@@ -742,7 +746,7 @@ test.describe('release dialog and job panel through the real API', () => {
     })
     expect(saved.ok(), await saved.text()).toBeTruthy()
 
-    await expect(dialog.getByText('Reserved bytes')).toBeVisible()
+    await expect(dialog.getByText('Calculated during release execution')).toBeVisible()
     await expect(dialog.getByRole('button', { name: 'Submit release' })).toBeEnabled()
     const jobId = await submitDraft(page, dialog)
     await expect(page.getByRole('region', { name: `Job ${jobId.slice(0, 8)}` })).toBeVisible()

@@ -1586,7 +1586,7 @@ def test_given_inconsistent_execution_destination_when_result_read_then_refused(
     store = MagicMock(spec=ReleaseJobStore)
     store.get.return_value = SimpleNamespace(state="committed")
     store.storage = MagicMock()
-    store.storage.snapshot.return_value = {
+    store.storage.job_snapshot.return_value = {
         "job": {
             "attempt_key": "package/attempt",
             "attempt_prefix": "published",
@@ -1602,6 +1602,8 @@ def test_given_inconsistent_execution_destination_when_result_read_then_refused(
         service.result("localuser", "job")
     assert error.value.status_code == 409
     assert not (tmp_path / "changed").exists()
+    store.get.assert_called_once_with("job", scope="localuser", principal="localuser")
+    store.storage.snapshot.assert_not_called()
 
 
 def test_given_saved_input_verification_failure_when_previewed_then_safe_error(

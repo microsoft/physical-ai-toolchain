@@ -71,6 +71,20 @@ def _record(key: str = KEY) -> dict[str, object]:
     return {"schema_version": SCHEMA_VERSION, "job_id": key}
 
 
+def test_blob_point_snapshot_reads_current_job_without_listing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    storage = _storage(tmp_path, "blob")
+    with storage.transaction() as working:
+        working[KEY] = _record()
+    with monkeypatch.context() as point_read:
+        point_read.setattr(storage._container, "list_blobs", Mock(side_effect=AssertionError("unexpected listing")))
+        assert storage.job_snapshot(KEY) == {KEY: _record()}
+        assert storage.job_snapshot(OTHER) == {}
+        assert storage.job_snapshot("../invalid") == {}
+    with storage.transaction() as working:
+        working[KEY]["updated"] = True
+    assert storage.job_snapshot(KEY)[KEY]["updated"] is True
+
+
 def _storage(tmp_path: Path, backend: str, **limits: int) -> RecordStorage:
     if backend == "local":
         return LocalRecordStorage(tmp_path / "records", **limits)
@@ -81,6 +95,34 @@ def _storage(tmp_path: Path, backend: str, **limits: int) -> RecordStorage:
         prefix="selected/subfolder",
         **limits,
     )
+
+
+@pytest.mark.parametrize("backend", ["local", "blob"])
+def test_job_transaction_accounts_for_other_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str
+) -> None:
+    size = len(canonical_json_bytes(_record()))
+    store = _storage(tmp_path, backend, max_record_bytes=size + 16, max_total_bytes=2 * size + 8)
+    for key in (KEY, OTHER):
+        with store.transaction() as working:
+            working[key] = _record(key)
+    if backend == "blob":
+        store._record_cache.clear()
+        read = store._read
+
+        def selected_only(name: str, etag: str) -> tuple[bytes, str]:
+            assert name.endswith(f"/{KEY}.json")
+            return read(name, etag)
+
+        monkeypatch.setattr(store, "_read", selected_only)
+    with store.transaction(job_id=KEY) as working:
+        assert set(working) == {KEY}
+        working[KEY]["x"] = 1
+    with pytest.raises(ReleaseVerificationError, match="max_total_bytes"), store.transaction(job_id=KEY) as working:
+        working[KEY]["x"] = "123456"
+    assert store.job_snapshot(KEY)[KEY]["x"] == 1
+    with pytest.raises(ReleaseVerificationError, match="only update"), store.transaction(job_id=KEY) as working:
+        del working[KEY]
 
 
 @pytest.mark.parametrize("backend", ["local", "blob"])
