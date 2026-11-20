@@ -79,6 +79,7 @@ class _IdentitySink(io.RawIOBase):
 
 def table_identity(table: pa.Table) -> str:
     """Hash canonical Arrow batches without building another table-sized byte buffer."""
+    from physical_ai_dataset_io.lerobot import RELEASE_SUBTASKS_KEY
 
     def field_type(dtype: pa.DataType) -> pa.DataType:
         if pa.types.is_list(dtype):
@@ -96,6 +97,9 @@ def table_identity(table: pa.Table) -> str:
     schema = pa.schema(
         [pa.field(field.name, field_type(field.type), nullable=field.nullable) for field in table.schema]
     )
+    metadata = table.schema.metadata or {}
+    if RELEASE_SUBTASKS_KEY in metadata:
+        schema = schema.with_metadata({RELEASE_SUBTASKS_KEY: metadata[RELEASE_SUBTASKS_KEY]})
     canonical = table.cast(schema).combine_chunks()
     sink = _IdentitySink()
     with pa.ipc.new_stream(sink, canonical.schema) as writer:
