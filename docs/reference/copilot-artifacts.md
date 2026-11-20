@@ -4,7 +4,7 @@ description: >-
   Inventory and reference for GitHub Copilot agents, instructions, and
   skills configured in this repository.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-31
+ms.date: 2026-11-16
 ms.topic: reference
 keywords:
   - copilot
@@ -45,6 +45,7 @@ The cloud-agent setup workflow provisions the RPI skill suite at runtime.
 | Skill       | fleet-deployment                      | Deploy trained policies through fleet GitOps        | `.github/skills/fleet-deployment/SKILL.md`                        |
 | Skill       | fleet-intelligence                    | Monitor fleet telemetry and drift                   | `.github/skills/fleet-intelligence/SKILL.md`                      |
 | Skill       | infrastructure                        | Deploy and manage Azure infrastructure              | `.github/skills/infrastructure/SKILL.md`                          |
+| Skill       | openssf-badge-audit                   | Audit OpenSSF badge evidence and gaps               | `.github/skills/openssf-badge-audit/SKILL.md`                     |
 | Skill       | osmo-lerobot-training                 | Training submission, monitoring, and analysis       | `.github/skills/osmo-lerobot-training/SKILL.md`                   |
 | Skill       | synthetic-data                        | Generate synthetic robotics training data           | `.github/skills/synthetic-data/SKILL.md`                          |
 | Skill       | rpi-*                                 | Cloud-agent research, plan, implement, review       | `.github/skills/rpi-*/` (runtime-provisioned, gitignored)         |
@@ -57,6 +58,7 @@ The cloud-agent setup workflow provisions the RPI skill suite at runtime.
 | Browse and annotate training episodes     | Dataviewer Developer agent                               |
 | Deploy or remove cloud E2E infrastructure | `e2e-infrastructure` skill                               |
 | Run and monitor cloud E2E tests           | `e2e-tests` skill                                        |
+| Audit OpenSSF Best Practices evidence     | `openssf-badge-audit` skill                              |
 | Submit a LeRobot training job             | `/submit-lerobot-training` skill → OSMO Training Manager |
 | Check training job status                 | `/check-training-status` skill → OSMO Training Manager   |
 | Save a conversation log                   | `/chatlog` skill                                         |
