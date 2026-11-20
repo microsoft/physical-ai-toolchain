@@ -431,24 +431,24 @@ other aliases return parsed JSON.
 The route contracts below complement generated OpenAPI and canonical models,
 which remain authoritative for field schemas.
 
-| Method and path                                                     | Purpose                                                                |
-|---------------------------------------------------------------------|------------------------------------------------------------------------|
-| `GET /api/releases/v1/capabilities`                                 | Schema and supported features                                          |
+| Method and path                                                     | Purpose                                                                  |
+|---------------------------------------------------------------------|--------------------------------------------------------------------------|
+| `GET /api/releases/v1/capabilities`                                 | Schema and supported features                                            |
 | `GET /api/releases/v1/destinations`                                 | Sorted `alias` strings with boolean `azureml_registration_enabled` flags |
-| `POST /api/releases/v1/preview`                                     | Read-only body preview                                                 |
-| `GET /api/releases/v1/preview`                                      | Read-only query preview                                                |
-| `POST /api/releases/v1/jobs`                                        | Submit with `Idempotency-Key`                                          |
-| `GET /api/releases/v1/requests`                                     | Scoped accepted-request lookup                                         |
-| `GET /api/releases/v1/jobs`, `GET /api/releases/v1/jobs/{job_id}`   | List and read job status                                               |
-| `POST /api/releases/v1/jobs/{job_id}/cancel`, `.../recover`         | Request cancellation or recovery (`202`)                               |
-| `POST /api/releases/v1/jobs/{job_id}/registration`                  | Retry registration of a scoped committed release without republishing  |
-| `GET /api/releases/v1/jobs/{job_id}/result`                         | Verified committed result; otherwise `409 release_result_not_verified` |
-| `GET /api/releases/v1/jobs/{job_id}/artifacts/{artifact}`           | Aliases `manifest`, `inventory`, `receipt`, `checksums`                |
-| `GET /api/releases/v1/inventory/{dataset_id}`                       | Source inventory and saved-evidence freshness                          |
-| `GET /api/releases/v1/sources/{dataset_id}/releases`                | Source-associated verified releases                                    |
-| `GET .../sources/{dataset_id}/releases/{handle}`                    | One retained release                                                   |
-| `GET .../releases/{handle}/episodes`                                | Paged retained episodes                                                |
-| `GET .../releases/{handle}/episodes/{episode_index}/media/{camera}` | Inventoried episode video; `Cache-Control: no-store`                   |
+| `POST /api/releases/v1/preview`                                     | Read-only body preview                                                   |
+| `GET /api/releases/v1/preview`                                      | Read-only query preview                                                  |
+| `POST /api/releases/v1/jobs`                                        | Submit with `Idempotency-Key`                                            |
+| `GET /api/releases/v1/requests`                                     | Scoped accepted-request lookup                                           |
+| `GET /api/releases/v1/jobs`, `GET /api/releases/v1/jobs/{job_id}`   | List and read job status                                                 |
+| `POST /api/releases/v1/jobs/{job_id}/cancel`, `.../recover`         | Request cancellation or recovery (`202`)                                 |
+| `POST /api/releases/v1/jobs/{job_id}/registration`                  | Retry registration of a scoped committed release without republishing    |
+| `GET /api/releases/v1/jobs/{job_id}/result`                         | Verified committed result; otherwise `409 release_result_not_verified`   |
+| `GET /api/releases/v1/jobs/{job_id}/artifacts/{artifact}`           | Aliases `manifest`, `inventory`, `receipt`, `checksums`                  |
+| `GET /api/releases/v1/inventory/{dataset_id}`                       | Source inventory and saved-evidence freshness                            |
+| `GET /api/releases/v1/sources/{dataset_id}/releases`                | Source-associated verified releases                                      |
+| `GET .../sources/{dataset_id}/releases/{handle}`                    | One retained release                                                     |
+| `GET .../releases/{handle}/episodes`                                | Paged retained episodes                                                  |
+| `GET .../releases/{handle}/episodes/{episode_index}/media/{camera}` | Inventoried episode video; `Cache-Control: no-store`                     |
 
 ## Integration and Related Documentation
 
