@@ -165,6 +165,43 @@ training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh \
 
 See [configs/groot/examples/README.md](configs/groot/examples/README.md) for how to adapt the bundled example for a custom embodiment.
 
+## 🚀 GR00T N1.7 smoke run and Azure ML publication
+
+Use the [GR00T launcher](scripts/groot/osmo-train-entry.sh) as a reference when training on an external scheduler.
+Set `MAX_STEPS=2`, `SAVE_STEPS=2` and `LOGGING_STEPS=1`. Set `RUN_ID_OVERRIDE` to the scheduler's run ID when using
+the launcher. The [mirror](../utils/aml_mirror.py) consumes `${OUTPUT_ROOT}/${RUN_ID}/checkpoint-2` and scalar
+metrics from `runs/` (TensorBoard) or `trainer_state.json` (fallback). The
+[dataset helper](scripts/groot/download_blob.py) and [example modality config](configs/groot/examples/modality_config.py)
+are separate from the trainer.
+
+GR00T N1.7 trains in Python 3.10. Set `AML_TOOLS_PYTHON` to an executable **inside the worker image**, for example
+`/opt/aml-tools/bin/python`, running Python 3.11 or later. The launcher selects it before activating the training
+environment and keeps it for dataset downloads, verification, runhooks and publishing. If unset, it looks for a
+compatible `python3`, `python3.11` or `python` on the initial `PATH`. When runtime bootstrap is disabled, provision
+`azure-identity`, `azure-storage-blob`, `azure-ai-ml`, `mlflow`, `azureml-mlflow` and `tbparse` in that tools environment.
+
+Choose **one** publisher: use `AZURE_UPLOAD=true` and `AZURE_UPLOAD_STRICT=true` for inline publication, or leave
+`AZURE_UPLOAD=false` and invoke the mirror from a separate post-training job. For a separate job, configure the
+workspace, model and workload identity as described in the mirror header, then use:
+
+```bash
+export OUTPUT_DIR="${OUTPUT_ROOT}/${RUN_ID}"
+export TRAINING_FRAMEWORK=groot
+export AML_SOURCE=external-training
+"${AML_TOOLS_PYTHON}" training/utils/aml_mirror.py
+```
+
+`PROJECT_ID` sets the MLflow `project_id` tag; `EXTERNAL_JOB_ID` sets `external.job_id`. To emit a scheduler-specific
+alias too, append `scheduler.job_id=${EXTERNAL_JOB_ID}` to `AML_EXTRA_TAGS` (comma-separated `key=value` pairs).
+Set these in the publishing process. The [OSMO workflow](workflows/osmo/groot-train.yaml) also accepts these values.
+
+For a direct Blob copy, set `CHECKPOINT_BLOB_URL` to a new container prefix **per attempt**, with no SAS query.
+The mirror creates `checksums.sha256` without overwriting, uploads and reads back the payload, and publishes
+`ready.json` only if the remote SHA-256 values match the manifest. A failed transfer can leave unsealed objects;
+retry at a fresh prefix, not by overwriting the old one. Disabling read-back or enabling overwrite is not supported
+for direct publication. The marker attests to Blob integrity, not model registration: retain the final JSON receipt
+with `checkpoint_blob.readback_verified`, `metrics_logged`, `checksums_sha256`, the MLflow run ID and model version.
+
 ## 📋 Specifications
 
 See [VLA Training Specification](../specifications/vla-training.specification.md) for additional VLA approaches and components.

@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import glob
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -175,7 +176,7 @@ def _write_checkpoint_integrity_files(
         total_bytes += file_path.stat().st_size
 
     checksums_path = staged / "checksums.sha256"
-    checksums_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    checksums_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8", newline="\n")
     manifest_digest = _sha256_file(checksums_path)
 
     step_str = checkpoint_name.rsplit("-", 1)[-1]
@@ -391,9 +392,11 @@ def _upload_checkpoint_to_blob_url(
     verify_readback: bool = True,
     overwrite: bool = False,
 ) -> dict[str, Any]:
-    """Upload staged checkpoint to Blob write-once with ready.json strictly last and SHA-256 read-back (ST-8)."""
+    """Publish a write-once marker only after the remote payload matches its checksum manifest."""
     from azure.storage.blob import ContainerClient
 
+    if overwrite or not verify_readback:
+        raise ValueError("Sealed Blob publication requires read-back and a fresh, write-once prefix")
     parsed = urlparse(checkpoint_blob_url)
     redacted = _redact_url(checkpoint_blob_url)
     if parsed.scheme != "https" or not parsed.netloc:
@@ -411,41 +414,50 @@ def _upload_checkpoint_to_blob_url(
     endpoint = f"https://{parsed.netloc}"
     container_client = ContainerClient(endpoint, container, credential=credential)
 
-    all_files = sorted(
-        (p for p in staged.rglob("*") if p.is_file()),
+    manifest_path = staged / "checksums.sha256"
+    ready_path = staged / "ready.json"
+    manifest = manifest_path.read_bytes()
+    marker = ready_path.read_bytes()
+    manifest_sha = hashlib.sha256(manifest).hexdigest()
+    if not manifest or json.loads(marker)["checksums_sha256"] != manifest_sha:
+        raise ValueError("Invalid checkpoint checksum manifest or ready marker")
+    payload = sorted(
+        (p for p in staged.rglob("*") if p.is_file() and p not in (manifest_path, ready_path)),
         key=lambda p: p.relative_to(staged).as_posix(),
     )
-    ready_file = staged / "ready.json"
-    ordered_files = [p for p in all_files if p != ready_file]
-    if ready_file.is_file():
-        ordered_files.append(ready_file)
 
-    expected_hashes: dict[str, str] = {}
-    for local_file in ordered_files:
-        rel = local_file.relative_to(staged).as_posix()
-        blob_name = f"{prefix}/{rel}"
-        expected_hashes[blob_name] = _sha256_file(local_file)
-        with local_file.open("rb") as fh:
-            container_client.upload_blob(name=blob_name, data=fh, overwrite=overwrite)
+    def remote_sha256(name: str) -> str:
+        digest = hashlib.sha256()
+        for chunk in container_client.download_blob(name).chunks():
+            digest.update(chunk)
+        return digest.hexdigest()
 
-    if verify_readback:
-        for blob_name, expected_sha in expected_hashes.items():
-            digest = hashlib.sha256()
-            downloader = container_client.download_blob(blob_name)
-            for chunk in downloader.chunks():
-                digest.update(chunk)
-            actual_sha = digest.hexdigest()
-            if actual_sha != expected_sha:
-                raise RuntimeError(
-                    f"Checkpoint Blob read-back SHA-256 mismatch for {blob_name}: "
-                    f"expected {expected_sha}, got {actual_sha}"
-                )
+    # Creating the manifest first reserves this attempt prefix, including across competing writers.
+    manifest_name = f"{prefix}/checksums.sha256"
+    container_client.upload_blob(name=manifest_name, data=io.BytesIO(manifest), overwrite=False)
+    if remote_sha256(manifest_name) != manifest_sha:
+        raise RuntimeError("Checkpoint Blob read-back SHA-256 mismatch for checksums.sha256")
+
+    readback_manifest = hashlib.sha256()
+    for path in payload:
+        rel = path.relative_to(staged).as_posix()
+        name = f"{prefix}/{rel}"
+        with path.open("rb") as fh:
+            container_client.upload_blob(name=name, data=fh, overwrite=False)
+        readback_manifest.update(f"{remote_sha256(name)}  {rel}\n".encode())
+    if readback_manifest.hexdigest() != manifest_sha:
+        raise RuntimeError("Checkpoint Blob read-back SHA-256 mismatch against the sealed payload manifest")
+
+    marker_name = f"{prefix}/ready.json"
+    container_client.upload_blob(name=marker_name, data=io.BytesIO(marker), overwrite=False)
+    if remote_sha256(marker_name) != hashlib.sha256(marker).hexdigest():
+        raise RuntimeError("Checkpoint Blob read-back SHA-256 mismatch for ready.json")
 
     return {
         "blob_url": redacted,
-        "uploaded_files": len(ordered_files),
-        "ready_written_last": ordered_files[-1].name == "ready.json" if ordered_files else False,
-        "readback_verified": verify_readback,
+        "uploaded_files": len(payload) + 2,
+        "ready_written_last": True,
+        "readback_verified": True,
     }
 
 
@@ -588,7 +600,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             for src in final.rglob("*"):
                 if src.is_dir() or src.name in SKIP_FILES:
                     continue
-                dst = staged / src.relative_to(final)
+                relative = src.relative_to(final)
+                if relative.as_posix() in ("checksums.sha256", "ready.json"):
+                    continue
+                dst = staged / relative
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 try:
                     os.link(src, dst)

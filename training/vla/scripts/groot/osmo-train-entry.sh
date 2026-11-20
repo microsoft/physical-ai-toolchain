@@ -54,13 +54,31 @@ active_python() {
   fi
 }
 
+resolve_tools_python() {
+  local candidate
+  local -a candidates=(python3 python3.11 python)
+  if [[ -n "${AML_TOOLS_PYTHON:-}" ]]; then
+    candidates=("${AML_TOOLS_PYTHON}")
+  fi
+  for candidate in "${candidates[@]}"; do
+    if command -v "${candidate}" >/dev/null 2>&1 &&
+      "${candidate}" -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
+      "${candidate}" -c 'import sys; print(sys.executable)'
+      return
+    fi
+  done
+  echo "ERROR: set AML_TOOLS_PYTHON to a Python 3.11+ interpreter for Azure helpers." >&2
+  return 1
+}
+
+# Keep the tools venv's executable, not its symlink target, across GR00T's conda activation.
+TOOLS_PYTHON="$(resolve_tools_python)"
+
 emit_hook() {
   local phase="$1"
   shift
   if [ -f "${AML_MIRROR_PY}" ]; then
-    local py_bin
-    py_bin="$(active_python)"
-    DETECTED_GPU_PRODUCT="${GPU_PRODUCT}" "${py_bin}" "${AML_MIRROR_PY}" \
+    DETECTED_GPU_PRODUCT="${GPU_PRODUCT}" "${TOOLS_PYTHON}" "${AML_MIRROR_PY}" \
       --emit-runhook --phase "${phase}" "$@" || {
         if [ "${RUNHOOK_STRICT:-false}" = "true" ]; then
           return 1
@@ -112,14 +130,14 @@ retry_cmd() {
 }
 
 ensure_azure_blob_deps() {
-  if python3 -c "import azure.identity, azure.storage.blob" >/dev/null 2>&1; then
+  if "${TOOLS_PYTHON}" -c "import azure.identity, azure.storage.blob" >/dev/null 2>&1; then
     return 0
   fi
   if [ "${SKIP_RUNTIME_BOOTSTRAP}" = "true" ]; then
     echo "ERROR: azure-identity and azure-storage-blob must be pre-installed when SKIP_RUNTIME_BOOTSTRAP=true" >&2
     exit 1
   fi
-  pip install --quiet azure-storage-blob==12.27.1 azure-identity==1.25.3
+  "${TOOLS_PYTHON}" -m pip install --quiet azure-storage-blob==12.27.1 azure-identity==1.25.3
 }
 
 latest_checkpoint() {
@@ -137,7 +155,7 @@ if [ "${RUN_AUTH_PREFLIGHT}" = "true" ]; then
   REPO_CANDIDATE="$(cd "${SCRIPT_DIR}/../../../.." 2>/dev/null && pwd || true)"
   if [ -n "${REPO_CANDIDATE}" ] && [ -f "${REPO_CANDIDATE}/training/rl/scripts/smoke_test_azure.py" ]; then
     echo "--- running Azure connectivity and auth preflight ---"
-    PYTHONPATH="${REPO_CANDIDATE}" python3 -m training.rl.scripts.smoke_test_azure \
+    PYTHONPATH="${REPO_CANDIDATE}" "${TOOLS_PYTHON}" -m training.rl.scripts.smoke_test_azure \
       --forbid-static-secrets --verify-all-scopes --require-artifact-upload --probe-network
   else
     echo "WARN: RUN_AUTH_PREFLIGHT=true, but training/rl/scripts/smoke_test_azure.py is not in workspace tree; skipping" >&2
@@ -152,13 +170,13 @@ if [ -d "${DATASET_PATH}" ] && [ -n "$(ls -A "${DATASET_PATH}" 2>/dev/null)" ]; 
   echo "--- using existing local dataset at ${DATASET_PATH} ---"
   ls -lh "${DATASET_PATH}/" | head
   if [ "${VERIFY_DATASET}" = "true" ] && [ -f "${DOWNLOAD_BLOB_PY}" ]; then
-    python3 "${DOWNLOAD_BLOB_PY}" --verify-only --dataset-path "${DATASET_PATH}" --receipt-out "${HYDRATION_RECEIPT_PATH}"
+    "${TOOLS_PYTHON}" "${DOWNLOAD_BLOB_PY}" --verify-only --dataset-path "${DATASET_PATH}" --receipt-out "${HYDRATION_RECEIPT_PATH}"
   fi
 elif [ -n "${AZUREML_DATASET_ASSET:-}" ] || [ -n "${BLOB_URL:-}" ]; then
   echo "--- hydrating dataset onto worker (${AZUREML_DATASET_ASSET:-${BLOB_URL%%\?*}}) ---"
   mkdir -p "${DATASET_PATH}"
   ensure_azure_blob_deps
-  python3 "${DOWNLOAD_BLOB_PY}" --dataset-path "${DATASET_PATH}" --receipt-out "${HYDRATION_RECEIPT_PATH}"
+  "${TOOLS_PYTHON}" "${DOWNLOAD_BLOB_PY}" --dataset-path "${DATASET_PATH}" --receipt-out "${HYDRATION_RECEIPT_PATH}"
   echo "--- dataset hydration complete ---"
   ls -lh "${DATASET_PATH}/" | head
 else
@@ -174,7 +192,7 @@ if [ -n "${BASE_MODEL_BLOB_URL:-}" ] && [ ! -d "${BASE_MODEL:-}" ]; then
   mkdir -p "${BASE_MODEL_LOCAL}"
   ensure_azure_blob_deps
   BLOB_URL="${BASE_MODEL_BLOB_URL}" AZUREML_DATASET_ASSET="" \
-    python3 "${DOWNLOAD_BLOB_PY}" --dataset-path "${BASE_MODEL_LOCAL}" --skip-schema-check --receipt-out ""
+    "${TOOLS_PYTHON}" "${DOWNLOAD_BLOB_PY}" --dataset-path "${BASE_MODEL_LOCAL}" --skip-schema-check --receipt-out ""
   BASE_MODEL="${BASE_MODEL_LOCAL}"
   if [ -z "${BASE_MODEL_SOURCE}" ]; then
     BASE_MODEL_SOURCE="${BASE_MODEL_BLOB_URL%%\?*}"
@@ -309,7 +327,6 @@ else
       source /opt/conda/etc/profile.d/conda.sh
       conda activate gr00t-py310
       pip install --upgrade pip setuptools wheel
-      pip install azure-identity==1.25.3 azure-storage-blob==12.27.1
     fi
   fi
 
@@ -522,12 +539,12 @@ if [ "${AZURE_UPLOAD:-false}" = "true" ]; then
   else
     echo "--- mirroring run to Azure ML ---"
     emit_hook MIRRORING --hydrate-s "${HYDRATE_S}" --bootstrap-s "${BOOTSTRAP_S}" --train-s "${TRAIN_S}"
-    if ! "${PY_BIN}" -c "import mlflow, azureml.mlflow, azure.ai.ml, azure.identity, tbparse" >/dev/null 2>&1; then
+    if ! "${TOOLS_PYTHON}" -c "import mlflow, azureml.mlflow, azure.ai.ml, azure.identity, azure.storage.blob, tbparse" >/dev/null 2>&1; then
       if [ "${SKIP_RUNTIME_BOOTSTRAP}" = "true" ]; then
-        echo "ERROR: mlflow, azureml-mlflow, azure-ai-ml, azure-identity, and tbparse must be pre-installed when SKIP_RUNTIME_BOOTSTRAP=true" >&2
+        echo "ERROR: pre-install mlflow, azureml-mlflow, azure-ai-ml, azure-identity, azure-storage-blob and tbparse in AML_TOOLS_PYTHON." >&2
         exit 1
       fi
-      pip install --quiet \
+      "${TOOLS_PYTHON}" -m pip install --quiet \
         'mlflow==2.22.5' \
         'azureml-mlflow==1.62.0.post3' \
         'azure-identity==1.25.3' \
@@ -540,7 +557,7 @@ if [ "${AZURE_UPLOAD:-false}" = "true" ]; then
       BASE_MODEL_REVISION="${BASE_MODEL_REVISION:-}" \
       DETECTED_GPU_PRODUCT="${GPU_PRODUCT}" \
       TRAINING_FRAMEWORK=groot AML_SOURCE="${AML_SOURCE:-osmo-train}" \
-      "${PY_BIN}" "${AML_MIRROR_PY}"; then
+      "${TOOLS_PYTHON}" "${AML_MIRROR_PY}"; then
       MIRROR_COMPLETED=1
     else
       if [ "${AZURE_UPLOAD_STRICT:-false}" = "true" ]; then
@@ -569,12 +586,12 @@ if [ -n "${ACR_REGISTRY:-}" ]; then
   chmod +x /usr/local/bin/oras
   rm -f "oras_${ORAS_VERSION}_linux_amd64.tar.gz"
 
-  pip install --quiet azure-identity==1.25.3
+  ensure_azure_blob_deps
   ACR_HOST="${ACR_REGISTRY}.azurecr.io"
   az login --identity --allow-no-subscriptions 2>/dev/null && \
     az acr login --name "${ACR_REGISTRY}" 2>/dev/null || {
     echo "  az acr login unavailable; authenticating oras via workload identity token"
-    ACR_REFRESH=$(python3 -c "import requests; from azure.identity import DefaultAzureCredential; aad=DefaultAzureCredential().get_token('https://management.azure.com/.default').token; r=requests.post('https://${ACR_HOST}/oauth2/exchange', data={'grant_type':'access_token','service':'${ACR_HOST}','access_token':aad}); r.raise_for_status(); print(r.json()['refresh_token'])")
+    ACR_REFRESH=$("${TOOLS_PYTHON}" -c "import requests; from azure.identity import DefaultAzureCredential; aad=DefaultAzureCredential().get_token('https://management.azure.com/.default').token; r=requests.post('https://${ACR_HOST}/oauth2/exchange', data={'grant_type':'access_token','service':'${ACR_HOST}','access_token':aad}); r.raise_for_status(); print(r.json()['refresh_token'])")
     printf '%s' "${ACR_REFRESH}" | oras login "${ACR_HOST}" --username 00000000-0000-0000-0000-000000000000 --password-stdin
     unset ACR_REFRESH
   }
