@@ -242,7 +242,9 @@ describe('JudgePanel', () => {
 
     expect(submit).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('button', { name: 'Evaluate grounding episodes' })).toBeEnabled()
-    expect(screen.queryByText(/Job review:/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: /^Grounding evaluation:/ }),
+    ).not.toBeInTheDocument()
   })
 
   it('distinguishes pending grounding verdicts from completed assessments', () => {
@@ -274,6 +276,48 @@ describe('JudgePanel', () => {
     expect(screen.getByText(/Episode 2:.*judge inconclusive/)).toBeVisible()
     expect(screen.getByText(/Episode 3:.*no judge verdict/)).toBeVisible()
     expect(screen.getByText(/Episode 4:.*judge SUCCESS \(96% confidence\)/)).toBeVisible()
+  })
+
+  it('identifies a judge-and-label run and shows its applied output without a grounding baseline', () => {
+    const job = {
+      id: 'apply-job',
+      mode: 'judge-and-label',
+      status: 'succeeded',
+      total: 1,
+      applied: 1,
+      judged: 1,
+      errors: 0,
+      targets: [
+        {
+          episodeIndex: 4,
+          status: 'succeeded',
+          sample: null,
+          applied: true,
+          result: judgeResult({ outcomeSuccess: true, outcomeConfidence: 1 }),
+        },
+      ],
+    }
+    mockDatasetJobs.mockReturnValue({
+      inventory: {},
+      annotated: {},
+      usable: {},
+      jobs: { data: { items: [job], total: 1 } },
+      approvals: {},
+      reset: {},
+      review: { data: job },
+      act: mockDatasetAction,
+      refresh: vi.fn(),
+    })
+    render(<DatasetWorkspace datasetId="demo" open enabled onToggle={vi.fn()} />)
+    expect(
+      screen.getByRole('heading', { name: 'Judge and label episodes: succeeded' }),
+    ).toBeVisible()
+    expect(screen.getByText('Judge and label episodes')).toBeVisible()
+    expect(
+      screen.getByText(/Episode 4: succeeded; judge SUCCESS \(100% confidence\); label applied/),
+    ).toBeVisible()
+    expect(screen.queryByText(/saved rating unknown/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Approve configuration' })).not.toBeInTheDocument()
   })
 
   it('reviews label baselines, approves the configuration and submits both target modes', async () => {
@@ -403,6 +447,8 @@ describe('JudgePanel', () => {
     })
     render(<DatasetWorkspace datasetId="demo" open enabled onToggle={vi.fn()} />)
     expect(screen.getByText(/Previously loaded jobs remain visible/)).toBeVisible()
+    expect(screen.getByText('Grounding evaluation')).toBeVisible()
+    expect(screen.getByText('Judge episodes')).toBeVisible()
     await user.click(screen.getByRole('button', { name: 'Review samples' }))
     await user.click(screen.getByRole('button', { name: 'Job details' }))
     await user.click(screen.getByRole('button', { name: 'Retry job failed' }))
