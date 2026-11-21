@@ -550,6 +550,7 @@ class TestVideoAndFrames:
 
     def test_extract_frame_av_returns_none_when_time_base_unset(self, monkeypatch, tmp_path):
         handler, _ = _configured_handler(monkeypatch, tmp_path)
+        import av
         from fractions import Fraction
         zero_time_base = getattr(av, "AVRational", Fraction)(0, 1)
         fake_stream = SimpleNamespace(type="video", time_base=zero_time_base)
