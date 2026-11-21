@@ -1,0 +1,6 @@
+project_slug: physical-ai-toolchain
+owner: '@microsoft/edge-ai-core-dev'
+default_status: proposed
+decision_id_format: NNNN
+template_source: madr-v4
+last_decision_id: '0001'
