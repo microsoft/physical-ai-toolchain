@@ -46,6 +46,11 @@ The script updates `pyproject.toml`, `uv.lock`, and `.lerobot-version`. Review
 the release notes, rebuild both architectures, run the workflows you use, and
 then commit the changed paths.
 
+Before you commit, check each `override-dependencies` entry in `pyproject.toml`
+against the new release's dependency constraints, and remove an entry once the
+release lifts the cap that required it. For example, the `Pillow==13.0.0`
+override exists only because `lerobot==0.6.1` caps Pillow below 13.0.0.
+
 ## ⚙️ Configure SO-101
 
 Edit `config/so101.env` or override values in `scripts/.env`, the repository

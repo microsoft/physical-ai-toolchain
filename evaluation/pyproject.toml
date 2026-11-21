@@ -36,6 +36,9 @@ dependencies = [
     # lerobot==0.6.1 permits diffusers releases affected by
     # GHSA-98h9-4798-4q5v; keep the runtime on the patched release.
     "diffusers==0.40.0",
+    # lerobot==0.6.1 caps Pillow below 13.0.0, which leaves the runtime exposed
+    # to GHSA-v9pv-5gc8-w2m6 and related advisories; use the patched release.
+    "Pillow==13.0.0",
     "torchcodec==0.16.0",
 ]
 
@@ -56,6 +59,9 @@ environments = [
 override-dependencies = [
     # lerobot==0.6.1 caps diffusers below 0.40.0; use the patched release.
     "diffusers==0.40.0",
+    # lerobot==0.6.1 caps Pillow below 13.0.0; use the release that fixes
+    # GHSA-v9pv-5gc8-w2m6 and related advisories.
+    "Pillow==13.0.0",
     # lerobot==0.6.1 caps torch below 2.12.0; use the validated patched release.
     "torch==2.14.0",
     # lerobot==0.6.1 caps torchvision below 0.27.0; Torch 2.14 requires 0.29.0.

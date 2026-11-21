@@ -11,14 +11,21 @@ readonly SCRIPT_DIR
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
+# Matches the lerobot pin at any indentation; group 1 keeps the indent, name,
+# and extras, and group 2 keeps the closing quote and comma.
+readonly LEROBOT_PIN_PATTERN='^([[:space:]]*"lerobot\[[^]]*\])==[^"]+(",)$'
+# Release, pre-release, post-release, and dev segments of a PEP 440 version.
+readonly VERSION_PATTERN='^[0-9]+(\.[0-9]+)*((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?$'
+
 usage() {
   cat <<'EOF'
 Usage: update_lerobot_version.sh VERSION
 
 Update the pinned LeRobot version in pyproject.toml and .lerobot-version,
-then re-lock dependencies. Review the release notes, rebuild both
-architectures, run the workflows you use, and then commit pyproject.toml,
-uv.lock, and .lerobot-version together.
+then re-lock dependencies. VERSION is a PEP 440 release such as 0.7.0 or
+0.7.0rc1. Review the release notes, rebuild both architectures, run the
+workflows you use, and then commit pyproject.toml, uv.lock, and
+.lerobot-version together.
 EOF
 }
 
@@ -36,16 +43,16 @@ main() {
     usage >&2
     return 2
   }
+  [[ "${version}" =~ ${VERSION_PATTERN} ]] || \
+    die "invalid LeRobot version '${version}'; expected a release such as 0.7.0"
+  grep -Eq -- "${LEROBOT_PIN_PATTERN}" "${pyproject_file}" || \
+    die "no lerobot dependency line matched in ${pyproject_file}"
 
   require_command uv
 
   temporary_file="$(mktemp)"
-  sed -E "s/^(  \"lerobot\[[^]]*\])==[^\"]+(\",)\$/\1==${version}\2/" \
+  sed -E "s/${LEROBOT_PIN_PATTERN}/\1==${version}\2/" \
     "${pyproject_file}" >"${temporary_file}"
-  if diff -q "${pyproject_file}" "${temporary_file}" &>/dev/null; then
-    rm -f "${temporary_file}"
-    die "no lerobot dependency line matched in ${pyproject_file}"
-  fi
   mv "${temporary_file}" "${pyproject_file}"
 
   temporary_file="$(mktemp)"
