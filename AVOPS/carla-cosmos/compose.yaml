@@ -4,8 +4,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.carla
-      args:
-        CARLA_IMAGE: carlasim/carla:0.9.15
     command:
       - ./CarlaUE4.sh
       - -RenderOffScreen

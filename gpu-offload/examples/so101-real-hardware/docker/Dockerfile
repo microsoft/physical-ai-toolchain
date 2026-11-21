@@ -1,8 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
-ARG PYTHON_VERSION=3.12
-# Digest pins the PYTHON_VERSION=3.12 default above; update both together if that default changes.
-FROM python:${PYTHON_VERSION}-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9
+# library/ keeps this reference distinct from the gpu-offload-controller scan lane.
+FROM library/python:3.12-slim@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54
 
 ARG TARGETARCH
 ARG UV_VERSION=0.8.17

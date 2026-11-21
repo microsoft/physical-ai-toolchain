@@ -8,7 +8,7 @@ RUN apt-get update && \
 	fi && \
 	rm -rf /var/lib/apt/lists/*
 
-FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04@sha256:d94c97dd9cacf183d0a6fd12a8e87b526e9e928307674ae9c94139139c0c6eae
+FROM mcr.microsoft.com/devcontainers/base:ubuntu24.04@sha256:ec556aed93f62aa6d13fe72c5db09da4e29a7c9b87c568dbca0ee5717466926a
 
 RUN apt-get update && \
 	apt-get install -y --no-install-recommends python3 python3-venv python-is-python3 && \

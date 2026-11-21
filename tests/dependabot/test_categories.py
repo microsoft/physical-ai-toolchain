@@ -70,11 +70,11 @@ def _workspace_dir(name: str) -> Path:
     raise AssertionError(f"npm workspace {name!r} not found")
 
 
-def test_manifest_has_thirteen_unique_categories() -> None:
+def test_manifest_has_fourteen_unique_categories() -> None:
     ids = [category.id for category in MANIFEST.categories]
 
-    assert len(ids) == 13
-    assert len(set(ids)) == 13
+    assert len(ids) == 14
+    assert len(set(ids)) == 14
     assert [category.id for category in MANIFEST.categories if category.always] == ["baseline"]
 
 

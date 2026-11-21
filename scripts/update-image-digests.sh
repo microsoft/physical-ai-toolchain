@@ -3,8 +3,9 @@
 # Refresh @sha256 digest pins for OCI container images referenced in tracked files.
 #
 # References are discovered automatically: every "<image>:<tag>@sha256:<digest>" is
-# re-resolved to its current registry digest and rewritten in place. Dockerfiles and
-# compose files are owned by Dependabot; gh-aw compiled workflows are compiler-owned.
+# re-resolved to its current registry digest and rewritten in place. Dockerfiles,
+# Containerfiles, and compose files are owned by Dependabot; gh-aw compiled workflows
+# are compiler-owned.
 # Test fixtures and Pester test files are also excluded. AzureML environment versions
 # derived from shared image defaults are synchronized in the same run.
 # Check mode reports drift without modifying source files, optionally writing SARIF.
@@ -21,8 +22,9 @@ show_help() {
 Usage: $(basename "$0") [OPTIONS]
 
 Discover every "<image>:<tag>@sha256:<digest>" reference in tracked files, resolve each
-tag to its current registry digest, and rewrite the pins in place. Dockerfiles, compose
-files, gh-aw compiled workflows, test fixtures, and Pester test files are skipped.
+tag to its current registry digest, and rewrite the pins in place. Dockerfiles,
+Containerfiles, compose files, gh-aw compiled workflows, test fixtures, and Pester test
+files are skipped.
 AzureML environment versions derived from checked-in image defaults are synchronized.
 Check mode is a CI signal that supports SARIF and exits 2 on drift.
 Dry-run mode is a local preview of the changes that write mode would apply.
@@ -96,6 +98,7 @@ digest_ref_re="(${registry_prefix_re})?${repository_re}:[A-Za-z0-9._-]+@${digest
 exclude_paths=(
   ':(exclude,glob).github/workflows/*.lock.yml'
   ':(exclude,glob)**/Dockerfile*'
+  ':(exclude,glob)**/Containerfile*'
   ':(exclude,glob)**/*compose*.y*ml'
   ':(exclude,glob)**/tests/Fixtures/**'
   ':(exclude,glob)**/*.Tests.ps1'
