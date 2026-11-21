@@ -22,9 +22,49 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Protocol, TextIO
+from typing import TYPE_CHECKING, Any, Protocol, TextIO
+
+if TYPE_CHECKING:
+    import pyarrow as pa
 
 _LOGGER = logging.getLogger("evaluation.vlm_judge")
+
+RELEASE_SUBTASKS_KEY = b"physical_ai.subtasks.v1"
+
+
+def episode_subtasks_metadata(
+    metadata: Mapping[bytes, bytes], episode_index: int, length: int
+) -> list[dict[str, Any]] | None:
+    """Read exact subtask spans from a single-episode release file; absence uses native language rows."""
+    if RELEASE_SUBTASKS_KEY not in metadata:
+        return None
+    payload = json.loads(metadata[RELEASE_SUBTASKS_KEY])
+    if (
+        not isinstance(payload, dict)
+        or payload.get("episode_index") != episode_index
+        or payload.get("length") != length
+        or not isinstance(payload.get("segments"), list)
+    ):
+        raise ValueError("subtask metadata does not match the episode")
+    return payload["segments"]
+
+
+def persistent_language_type() -> pa.DataType:
+    """Return LeRobot's persistent language Arrow type without importing Arrow at module load."""
+    import pyarrow as pa
+
+    return pa.list_(
+        pa.struct(
+            [
+                pa.field("role", pa.string(), nullable=False),
+                pa.field("content", pa.string()),
+                pa.field("style", pa.string()),
+                pa.field("timestamp", pa.float32(), nullable=False),
+                pa.field("camera", pa.string()),
+                pa.field("tool_calls", pa.list_(pa.json_())),
+            ]
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)

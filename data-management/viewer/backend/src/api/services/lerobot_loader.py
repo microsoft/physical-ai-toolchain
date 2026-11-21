@@ -23,6 +23,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 from numpy.typing import NDArray
+from physical_ai_dataset_io.lerobot import episode_subtasks_metadata
 
 from .episode_edits import SubtaskSegment
 from .lerobot_language import LANGUAGE_PERSISTENT, recorded_subtasks
@@ -546,11 +547,15 @@ class LeRobotLoader:
             task_index = int(table.column("task_index")[0].as_py()) if "task_index" in col_names else 0
 
             # Every frame repeats the episode's persistent language rows
-            subtasks = (
-                recorded_subtasks(table.column(LANGUAGE_PERSISTENT)[0].as_py(), timestamps.tolist())
-                if LANGUAGE_PERSISTENT in col_names
-                else []
-            )
+            exact = episode_subtasks_metadata(table.schema.metadata or {}, episode_index, length)
+            if exact is not None:
+                subtasks = [SubtaskSegment(**{**item, "frame_range": tuple(item["frame_range"])}) for item in exact]
+            else:
+                subtasks = (
+                    recorded_subtasks(table.column(LANGUAGE_PERSISTENT)[0].as_py(), timestamps.tolist())
+                    if LANGUAGE_PERSISTENT in col_names
+                    else []
+                )
 
             # Find video paths. Honor per-episode video chunk/file indices
             # recorded in meta/episodes parquet so the path resolves to the

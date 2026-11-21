@@ -91,6 +91,15 @@ EPISODES_PATH = "meta/episodes/chunk-000/file-000.parquet"
 TASKS_PATH = "meta/tasks.parquet"
 
 
+@dataclass(frozen=True)
+class PlanningMetadata:
+    """Metadata listing with the planning tables parsed from that same listing."""
+
+    objects: tuple[SourceObjectRecord, ...]
+    info: dict[str, object]
+    rows: list[dict[str, object]]
+
+
 def _planning_metadata(
     source: LocalReleaseSource | BlobReleaseSource,
     objects: tuple[SourceObjectRecord, ...],
@@ -164,10 +173,20 @@ def select_blob_dependencies(
     *,
     metadata_budget: int = 16 * 1024**2,
     checkpoint: Callable[[], None] | None = None,
+    planning: PlanningMetadata | None = None,
 ) -> BlobReleaseSource:
-    """Discover selected shared objects from bounded metadata, without payload listing or reads."""
+    """Discover selected shared objects from bounded metadata, without payload listing or reads.
+
+    A caller that already verified a metadata listing and parsed it may pass `planning`; the selected
+    paths are then derived from that same parse and still compared against the current objects.
+    """
     metadata = source.metadata_inventory(checkpoint)
-    info, rows = _planning_metadata(source, metadata, metadata_budget, checkpoint)
+    if planning is None:
+        info, rows = _planning_metadata(source, metadata, metadata_budget, checkpoint)
+    else:
+        if metadata != planning.objects:
+            raise ReleaseInputError("native planning metadata changed during selection")
+        info, rows = planning.info, planning.rows
     by_episode = {row["episode_index"]: row for row in rows}
     if len(by_episode) != len(rows) or not episode_indices or any(index not in by_episode for index in episode_indices):
         raise ReleaseInputError("native selected episode metadata is missing or ambiguous")

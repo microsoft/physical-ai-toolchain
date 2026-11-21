@@ -930,10 +930,10 @@ class ReleaseService:
         datasets = getattr(self._planner, "datasets", None)
         if datasets is None or await datasets.get_dataset(dataset_id) is None:
             raise ReleaseApiError(404, "release source is unavailable")
-        source_episodes = await datasets.list_episodes(dataset_id, limit=_MAX_EPISODES + 1, require_actual=True)
+        source_episodes = await datasets.list_actual_episode_indices(dataset_id, limit=_MAX_EPISODES + 1)
         if len(source_episodes) > _MAX_EPISODES:
             raise ReleaseApiError(422, "source_inventory_limit_exceeded")
-        indices = sorted({episode.index for episode in source_episodes})
+        indices = sorted(set(source_episodes))
         if episodes is None:
             selected = indices[cursor : cursor + limit]
         else:
@@ -1049,6 +1049,9 @@ class ReleaseService:
 
     def _execution(self, store: ReleaseJobStore, scope: str, job_id: str) -> ConfiguredExecution:
         store.get(job_id, scope=scope, principal=scope)
+        return self._resolve_execution(store, job_id)
+
+    def _resolve_execution(self, store: ReleaseJobStore, job_id: str) -> ConfiguredExecution:
         if self._planner is None:
             raise ReleaseApiError(503, "release worker is not configured")
         try:
@@ -1067,8 +1070,8 @@ class ReleaseService:
                 raise ReleaseApiError(422, status.refusal_code, message=status.refusal_message, nonretryable=True)
             if status.state != "committed":
                 raise ReleaseApiError(409, "release_result_not_verified")
-            configured = self._execution(store, scope, job_id)
-            record = store.storage.snapshot()[job_id]
+            configured = self._resolve_execution(store, job_id)
+            record = store.storage.job_snapshot(job_id)[job_id]
             package_id, attempt_id = record["attempt_key"].split("/", 1)
             attempt = PublicationAttempt(
                 package_id, attempt_id, record["attempt_prefix"], record["attempt_source_dataset_id"]

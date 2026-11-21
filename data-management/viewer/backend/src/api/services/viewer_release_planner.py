@@ -143,7 +143,11 @@ class ViewerReleasePlanner:
 
         import pyarrow as pa
         import pyarrow.parquet as pq
-        from physical_ai_curation.release.coordinator import _planning_metadata, select_blob_dependencies
+        from physical_ai_curation.release.coordinator import (
+            PlanningMetadata,
+            _planning_metadata,
+            select_blob_dependencies,
+        )
         from physical_ai_curation.release.errors import ReleaseVerificationError
         from physical_ai_curation.release.inputs import ReleaseInputError
         from physical_ai_curation.release.media import ReleasePlanError, SubsetEpisodeInput
@@ -161,6 +165,7 @@ class ViewerReleasePlanner:
             metadata = source.metadata_inventory(max_bytes=metadata_budget)
         try:
             info, rows = _planning_metadata(source, metadata, metadata_budget, None)
+            planning = PlanningMetadata(objects=metadata, info=info, rows=rows)
             features = info.get("features")
             fps = info.get("fps")
             if not isinstance(features, dict) or any(not isinstance(feature, dict) for feature in features.values()):
@@ -178,7 +183,9 @@ class ViewerReleasePlanner:
                 object_path(info, by_episode[index], prefix) for index in spec.episode_indices for prefix in prefixes
             }
             if isinstance(source, BlobReleaseSource):
-                source = select_blob_dependencies(source, spec.episode_indices, metadata_budget=metadata_budget)
+                source = select_blob_dependencies(
+                    source, spec.episode_indices, metadata_budget=metadata_budget, planning=planning
+                )
                 objects = {item.path: item for item in source.inventory()}
             else:
                 objects = {item.path: item for item in LocalReleaseStore(source.root).list_objects()}

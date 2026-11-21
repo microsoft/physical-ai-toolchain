@@ -714,19 +714,16 @@ class DatasetService:
     # Episode operations
     # ------------------------------------------------------------------
 
-    async def list_episodes(
-        self,
-        dataset_id: str,
-        offset: int = 0,
-        limit: int = 100,
-        has_annotations: bool | None = None,
-        task_index: int | None = None,
-        require_actual: bool = False,
-    ) -> list[EpisodeMeta]:
-        """List episodes for a dataset with filtering."""
-        dataset = self._datasets.get(dataset_id)
-        annotated_indices = set(await self._storage.list_annotated_episodes(dataset_id))
+    async def list_actual_episode_indices(self, dataset_id: str, limit: int) -> list[int]:
+        """Return up to ``limit`` raw actual episode indices in source order.
 
+        Skips annotation lookups and display-record construction. Never synthesizes indices.
+        """
+        episode_indices, _episode_info_map = await self._discover_episode_source(dataset_id)
+        return episode_indices[:limit]
+
+    async def _discover_episode_source(self, dataset_id: str) -> tuple[list[int], dict[int, dict]]:
+        """Discover actual episode indices and handler metadata from the owning source."""
         episode_indices: list[int] = []
         episode_info_map: dict[int, dict] = {}
         use_blob_metadata = self._blob_provider is not None and dataset_id not in self._local_dataset_ids
@@ -750,6 +747,23 @@ class DatasetService:
             synced_path = await self._ensure_blob_hdf5_synced(dataset_id)
             if synced_path is not None and self._hdf5_handler.get_loader(dataset_id, synced_path):
                 episode_indices, episode_info_map = self._hdf5_handler.list_episodes(dataset_id)
+
+        return episode_indices, episode_info_map
+
+    async def list_episodes(
+        self,
+        dataset_id: str,
+        offset: int = 0,
+        limit: int = 100,
+        has_annotations: bool | None = None,
+        task_index: int | None = None,
+        require_actual: bool = False,
+    ) -> list[EpisodeMeta]:
+        """List episodes for a dataset with filtering."""
+        dataset = self._datasets.get(dataset_id)
+        annotated_indices = set(await self._storage.list_annotated_episodes(dataset_id))
+
+        episode_indices, episode_info_map = await self._discover_episode_source(dataset_id)
 
         # Fallback: generate indices from dataset metadata
         if not episode_indices and dataset is not None and not require_actual:

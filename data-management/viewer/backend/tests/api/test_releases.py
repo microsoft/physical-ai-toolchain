@@ -547,6 +547,30 @@ def test_given_disabled_azureml_when_loaded_then_no_registration_or_sdk_is_requi
     assert ReleaseService(settings).capabilities()["azureml_registration_enabled"] is False
 
 
+def test_given_mixed_registration_destinations_when_listed_then_boolean_flags_are_preserved(
+    azureml_environment: dict[str, str],
+) -> None:
+    service = ReleaseService(load_release_api_settings(azureml_environment))
+    app = FastAPI()
+    app.include_router(router, prefix=BASE)
+    app.dependency_overrides[get_release_service] = lambda: service
+    app.dependency_overrides[require_principal_context] = lambda: PrincipalContext(
+        scope_id="localuser", auth_mode="local"
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.get(BASE + "/destinations")
+
+    assert response.status_code == 200
+    destinations = response.json()
+    assert destinations == [
+        {"alias": "local", "azureml_registration_enabled": False},
+        {"alias": "plain", "azureml_registration_enabled": False},
+        {"alias": "registered", "azureml_registration_enabled": True},
+    ]
+    assert all(type(item["azureml_registration_enabled"]) is bool for item in destinations)
+
+
 @pytest.mark.parametrize(
     "key,value",
     [
@@ -818,6 +842,98 @@ def test_given_tampered_intent_when_restored_then_refused(release_api: tuple, ch
     assert error.value.status_code == 409
 
 
+@pytest.mark.parametrize("mode", ["replace", "remove", "clear"])
+def test_given_saved_subtask_when_release_published_then_viewer_reopens_exact_timeline(
+    release_api: tuple, mode: str
+) -> None:
+    from physical_ai_curation.release.runner import run_queue
+
+    from src.api.models.episode_edits import EpisodeEditOperations
+    from src.api.services.lerobot_language import LANGUAGE_FEATURE, LANGUAGE_PERSISTENT, language_column
+    from src.api.services.lerobot_loader import LeRobotLoader
+
+    client, spec, settings, _app, root = release_api
+    path = root / "data/chunk-000/file-000.parquet"
+    table = pq.read_table(path)
+    original = {
+        "role": "user",
+        "style": "subtask",
+        "content": "Recorded",
+        "timestamp": 0.0,
+        "camera": None,
+        "tool_calls": None,
+    }
+    instruction = {**original, "style": "instruction", "content": "Pick"}
+    pq.write_table(
+        table.append_column(
+            LANGUAGE_PERSISTENT, language_column(LANGUAGE_PERSISTENT, [[original, instruction]] * table.num_rows)
+        ),
+        path,
+    )
+    info_path = root / "meta/info.json"
+    info = json.loads(info_path.read_bytes())
+    info["features"][LANGUAGE_PERSISTENT] = LANGUAGE_FEATURE
+    info_path.write_text(json.dumps(info))
+    planner = ViewerReleasePlanner(settings)
+    source_id, revision = asyncio.run(planner.datasets.get_source_revision("native", 0))
+    segment = {
+        "id": "segment-1",
+        "label": "Grasp",
+        "color": "#008866",
+        "frameRange": [1, 1],
+        "source": "manual",
+        "description": "Close gripper",
+    }
+    saved = asyncio.run(
+        planner._annotations.save_edits(
+            "native",
+            0,
+            EpisodeEditOperations.model_validate(
+                {
+                    "datasetId": "native",
+                    "episodeIndex": 0,
+                    "subtasks": [] if mode == "clear" else [segment],
+                    "removedFrames": [0] if mode == "remove" else [],
+                }
+            ),
+            author_id="localuser",
+            source_id=source_id,
+            source_revision=revision,
+            frame_count=2,
+            cameras={CAMERA},
+            if_none_match=True,
+        )
+    )
+    selected = {**spec, "resources": [{"kind": "edits", "episode_index": 0, "expected_revision": saved.etag}]}
+    response = _submit(client, selected, _preview(client, selected))
+    assert response.status_code == 202
+    job = response.json()["job_id"]
+    store = ReleaseJobStore(settings.job_root)
+    asyncio.run(run_queue(store, planner.execution))
+    assert client.get(BASE + "/jobs/" + job).json()["state"] == "committed"
+    published = next(settings.destinations["local"].rglob("meta/info.json")).parent.parent
+    loader = LeRobotLoader(published)
+    assert loader.load_episode(1).subtasks[0].label == "Recorded"
+    native = loader.load_episode_table(0)[LANGUAGE_PERSISTENT][0].as_py()
+    assert next(row for row in native if row["style"] == "instruction")["content"] == "Pick"
+    labels = [row["content"] for row in native if row["style"] == "subtask" and row["content"]]
+    if mode == "clear":
+        assert loader.load_episode(0).subtasks == []
+        assert labels == []
+    else:
+        (result,) = loader.load_episode(0).subtasks
+        frame = 0 if mode == "remove" else 1
+        assert (result.id, result.label, result.frame_range, result.color, result.source, result.description) == (
+            "segment-1",
+            "Grasp",
+            (frame, frame),
+            "#008866",
+            "manual",
+            "Close gripper",
+        )
+        assert labels == ["Grasp"]
+
+
 def test_given_required_saved_processing_without_consent_when_captured_then_no_video_effects(
     release_api: tuple,
     monkeypatch: pytest.MonkeyPatch,
@@ -987,7 +1103,7 @@ def test_given_invalid_source_inventory_when_read_then_safe_refusal(
     test_client, _spec, settings, app, _root = release_api
     planner = ViewerReleasePlanner(settings)
     if failure == "oversized":
-        monkeypatch.setattr(planner.datasets, "list_episodes", AsyncMock(return_value=[None] * 10001))
+        monkeypatch.setattr(planner.datasets, "list_actual_episode_indices", AsyncMock(return_value=[0] * 10001))
         expected = (422, "source_inventory_limit_exceeded")
     else:
         reader = planner.reader_for_scope("localuser")
@@ -1024,6 +1140,25 @@ def test_given_population_page_when_read_then_detail_evidence_is_not_loaded(
 
     assert [item["detailed"] for item in page["items"]] == [False, False]
     assert all(item["annotation"] is None and item["judge"] is None for item in page["items"])
+
+
+def test_given_real_local_inventory_page_when_read_then_annotations_and_records_are_not_built(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    test_client, _spec, settings, app, _root = release_api
+    planner = ViewerReleasePlanner(settings)
+
+    async def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("display records or annotation listing built for population page")
+
+    monkeypatch.setattr(planner.datasets, "list_episodes", forbidden)
+    monkeypatch.setattr(planner.datasets._storage, "list_annotated_episodes", forbidden)
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(settings, planner=planner)
+
+    response = test_client.get(BASE + "/inventory/native?limit=2")
+
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 2
 
 
 @pytest.mark.parametrize("episodes", ["", "x", "0,0", "-1", "999"])
@@ -1451,7 +1586,7 @@ def test_given_inconsistent_execution_destination_when_result_read_then_refused(
     store = MagicMock(spec=ReleaseJobStore)
     store.get.return_value = SimpleNamespace(state="committed")
     store.storage = MagicMock()
-    store.storage.snapshot.return_value = {
+    store.storage.job_snapshot.return_value = {
         "job": {
             "attempt_key": "package/attempt",
             "attempt_prefix": "published",
@@ -1467,6 +1602,8 @@ def test_given_inconsistent_execution_destination_when_result_read_then_refused(
         service.result("localuser", "job")
     assert error.value.status_code == 409
     assert not (tmp_path / "changed").exists()
+    store.get.assert_called_once_with("job", scope="localuser", principal="localuser")
+    store.storage.snapshot.assert_not_called()
 
 
 def test_given_saved_input_verification_failure_when_previewed_then_safe_error(
@@ -2033,6 +2170,34 @@ def test_stale_or_unconfirmed_submission_never_accepts(release_api: tuple, chang
     assert response.status_code == 202 if change == "source" else response.status_code in {409, 422}
     assert not settings.destinations["local"].exists()
     assert len(test_client.get(BASE + "/jobs").json()["items"]) == int(change == "source")
+
+
+def test_worker_failure_exposes_only_bounded_diagnostics_in_status_and_history(
+    release_api: tuple, caplog: pytest.LogCaptureFixture
+) -> None:
+    from dataclasses import replace
+
+    from physical_ai_curation.release.runner import run_queue
+
+    test_client, spec, settings, _app, _root = release_api
+    job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
+    store = ReleaseJobStore(settings.job_root)
+    execution = ViewerReleasePlanner(settings).execution(job, store.frozen_request(job))
+
+    async def unavailable(_checkpoint: object) -> None:
+        raise OSError("private-scratch-path")
+
+    asyncio.run(run_queue(store, lambda *_: replace(execution, capture=unavailable)))
+    status = test_client.get(BASE + "/jobs/" + job).json()
+    history = test_client.get(BASE + "/jobs").json()["items"]
+    for item in (status, next(item for item in history if item["job_id"] == job)):
+        assert item["recovery_required"]
+        assert item["diagnostics"]["capture.io"]["count"] == 1
+        assert item["diagnostics"]["validation.failed"]["count"] == 1
+        assert "private-scratch-path" not in json.dumps(item)
+        assert "location=" not in json.dumps(item)
+    assert f"job={job} stage=capture category=io" in caplog.text
+    assert "private-scratch-path" not in caplog.text
 
 
 def test_given_failed_release_when_status_and_history_read_then_recovery_required_is_visible(
@@ -3383,4 +3548,5 @@ def test_given_server_entrypoint_when_launched_then_shutdown_and_network_setting
     assert command[command.index("--timeout-graceful-shutdown") + 1] == "3"
     assert command[command.index("--host") + 1] == "127.0.0.1"
     assert command[command.index("--port") + 1] == "18000"
+    assert command[command.index("--loop") + 1] == "asyncio"
     assert "--reload" in command

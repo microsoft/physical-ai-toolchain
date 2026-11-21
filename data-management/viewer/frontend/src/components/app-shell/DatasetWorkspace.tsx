@@ -14,6 +14,11 @@ import type {
 } from '@/types/vlm-judge'
 
 const MAX_GROUNDING = 25
+const JOB_TITLES = {
+  sample: 'Grounding evaluation',
+  judge: 'Judge episodes',
+  'judge-and-label': 'Judge and label episodes',
+} as const
 
 function describeWithdrawal(field: JudgeWithdrawalField, completed: boolean): string {
   const runs = (ids?: string[]) => (ids?.length ? ` Runs: ${ids.join(', ')}.` : '')
@@ -391,45 +396,68 @@ function DatasetWorkspaceContent({
               )}
               {review && (
                 <div className="space-y-2">
-                  <h4 className="font-medium">Job review: {review.status}</h4>
+                  <h4 className="font-medium">
+                    {review.mode ? JOB_TITLES[review.mode] : 'Judge job'}: {review.status}
+                  </h4>
                   <ul>
-                    {review.targets?.map((target) => (
-                      <li key={target.episodeIndex}>
-                        Episode {target.episodeIndex}: {target.comparison ?? target.status};{' '}
-                        {target.sample?.baselineSource === 'label' ? 'saved label' : 'saved rating'}{' '}
-                        {String(target.sample?.humanOutcome ?? 'unknown')}; judge{' '}
-                        {String(target.result?.outcomeSuccess ?? 'inconclusive')}
-                        {target.error && `; error: ${target.error}`}
-                      </li>
-                    ))}
+                    {review.targets?.map((target) => {
+                      let verdict = 'no judge verdict'
+                      if (target.result) {
+                        const { outcomeSuccess, outcomeConfidence } = target.result
+                        verdict =
+                          outcomeSuccess === null
+                            ? 'judge inconclusive (no success or failure decision)'
+                            : `judge ${outcomeSuccess ? 'SUCCESS' : 'FAILURE'} (${Math.round(outcomeConfidence * 100)}% confidence)`
+                      } else if (target.status === 'queued' || target.status === 'running') {
+                        verdict = 'judge verdict pending'
+                      }
+                      return (
+                        <li key={target.episodeIndex}>
+                          Episode {target.episodeIndex}:{' '}
+                          {review.mode === 'sample'
+                            ? (target.comparison ?? target.status)
+                            : target.status}
+                          ;{' '}
+                          {review.mode === 'sample' &&
+                            target.sample &&
+                            `${target.sample.baselineSource === 'label' ? 'saved label' : 'saved rating'} ${target.sample.humanOutcome ?? 'unknown'}; `}
+                          {verdict}
+                          {target.applied && '; label applied'}
+                          {target.error && `; error: ${target.error}`}
+                        </li>
+                      )
+                    })}
                   </ul>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={acknowledgeExceptions}
-                      onChange={(event) => setAcknowledgeExceptions(event.target.checked)}
-                    />
-                    I reviewed disagreements and inconclusive results
-                  </label>
-                  <Button
-                    disabled={
-                      !canMutate ||
-                      busy ||
-                      review.mode !== 'sample' ||
-                      review.status !== 'succeeded' ||
-                      (!!exceptions && !acknowledgeExceptions)
-                    }
-                    onClick={() =>
-                      void workspace
-                        .act({ kind: 'approve', jobId: review.id, acknowledgeExceptions })
-                        .then((result) => {
-                          if ('configRevision' in result) setApprovalId(result.id)
-                        })
-                        .catch(() => undefined)
-                    }
-                  >
-                    Approve configuration
-                  </Button>
+                  {review.mode === 'sample' && (
+                    <>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={acknowledgeExceptions}
+                          onChange={(event) => setAcknowledgeExceptions(event.target.checked)}
+                        />
+                        I reviewed disagreements and inconclusive results
+                      </label>
+                      <Button
+                        disabled={
+                          !canMutate ||
+                          busy ||
+                          review.status !== 'succeeded' ||
+                          (!!exceptions && !acknowledgeExceptions)
+                        }
+                        onClick={() =>
+                          void workspace
+                            .act({ kind: 'approve', jobId: review.id, acknowledgeExceptions })
+                            .then((result) => {
+                              if ('configRevision' in result) setApprovalId(result.id)
+                            })
+                            .catch(() => undefined)
+                        }
+                      >
+                        Approve configuration
+                      </Button>
+                    </>
+                  )}
                 </div>
               )}
             </section>
@@ -574,13 +602,15 @@ function DatasetWorkspaceContent({
                     className="flex flex-wrap items-center justify-between gap-3 py-3"
                   >
                     <div className="min-w-0 text-sm">
-                      <p className="break-all">
-                        {job.id} · {job.status}
+                      <p>
+                        <strong>{job.mode ? JOB_TITLES[job.mode] : 'Judge job'}</strong> ·{' '}
+                        {job.status}
                       </p>
                       <p>
                         {job.judged} judged · {job.applied} applied · {job.errors} errors ·{' '}
                         {job.total} total
                       </p>
+                      <p className="text-muted-foreground text-xs break-all">Job {job.id}</p>
                     </div>
                     {job.mode === 'sample' && (
                       <Button

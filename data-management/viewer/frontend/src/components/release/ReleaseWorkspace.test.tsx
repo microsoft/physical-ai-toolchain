@@ -254,10 +254,15 @@ describe('ReleaseWorkspace', () => {
   })
 
   it('shows recovery-required execution as stalled with explicit cancellation guidance', () => {
+    const stalled = statusOf('running', {
+      recoveryRequired: true,
+      effectsStopped: true,
+      diagnostics: { 'reconcile.scratch_creator_active': { count: 1, duration_ms: 10 } },
+    })
     const release = makeRelease({
       activeJobId: JOB_ID,
-      status: { data: statusOf('running', { recoveryRequired: true, effectsStopped: true }) },
-      jobs: { data: { pages: [{ items: [statusOf('running', { recoveryRequired: true })] }] } },
+      status: { data: stalled },
+      jobs: { data: { pages: [{ items: [stalled] }] } },
     })
     vi.mocked(useRelease).mockReturnValue(release)
     renderWorkspace()
@@ -274,6 +279,7 @@ describe('ReleaseWorkspace', () => {
     expect(screen.getByRole('button', { name: 'Create release' })).toBeDisabled()
     expect(release.cancel).not.toHaveBeenCalled()
     expect(release.recover).not.toHaveBeenCalled()
+    expect(screen.queryByText(/scratch_creator_active/)).not.toBeInTheDocument()
   })
 
   it('shows stored creation dates next to job and release identities', async () => {

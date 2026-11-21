@@ -121,7 +121,7 @@ async def get_capabilities(
 async def list_destinations(
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
-) -> list[dict[str, str]]:
+) -> list[dict[str, str | bool]]:
     """List destination aliases available to release jobs."""
     return service.destinations()
 

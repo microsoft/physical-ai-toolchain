@@ -526,7 +526,7 @@ test('P06 real echo grounding blocks unmounted drafts before approval and separa
   await page
     .getByRole('button', { name: 'Evaluate grounding episodes', exact: true })
     .press('Enter')
-  await expect(page.getByRole('heading', { name: 'Job review: succeeded' })).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Grounding evaluation: succeeded' })).toBeVisible({
     timeout: 20_000,
   })
   await page
@@ -644,7 +644,9 @@ test('P06 pending save and real label conflict block grounding until acknowledge
     await page.getByRole('button', { name: 'Refresh dataset jobs', exact: true }).press('Enter')
     await expect(evaluate).toBeEnabled()
     await evaluate.press('Enter')
-    await expect(page.getByRole('heading', { name: 'Job review: succeeded' })).toBeVisible({
+    await expect(
+      page.getByRole('heading', { name: 'Grounding evaluation: succeeded' }),
+    ).toBeVisible({
       timeout: 20_000,
     })
   } finally {
@@ -856,7 +858,9 @@ for (const resource of ['annotation', 'episode-edit'] as const) {
     await page.getByRole('textbox', { name: 'Grounding episodes', exact: true }).fill('0')
     await expect(evaluate).toBeEnabled()
     await evaluate.press('Enter')
-    await expect(page.getByRole('heading', { name: 'Job review: succeeded' })).toBeVisible({
+    await expect(
+      page.getByRole('heading', { name: 'Grounding evaluation: succeeded' }),
+    ).toBeVisible({
       timeout: 20_000,
     })
     expect(submissions).toHaveLength(1)

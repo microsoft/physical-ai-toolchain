@@ -1,4 +1,4 @@
-"""Compose frozen saved removals and color filters into the existing object planner.
+"""Compose saved frame removals, color filters and subtask timelines for release.
 
 Unsupported saved effects block preview. This module reads no storage and publishes nothing;
 execution must revalidate frozen inputs before using a regenerated confirmed plan.
@@ -28,11 +28,13 @@ from physical_ai_curation.release.statistics import validate_feature_statistics
 
 EDIT_RESOURCE = re.compile(r"^edits/(episode_\d{6})$")
 REMOVED_FRAMES_REASON = "removed_frames"
-_COMPOSED_KEYS = frozenset({"removedFrames", "globalTransform", "cameraTransforms"})
+_COMPOSED_KEYS = frozenset({"removedFrames", "globalTransform", "cameraTransforms", "subtasks"})
 _IDENTITY_KEYS = frozenset({"datasetId", "episodeIndex"})
-_UNSUPPORTED_KEYS = frozenset(
-    {"globalTransform", "cameraTransforms", "insertedFrames", "subtasks", "trajectoryAdjustments"}
-)
+_UNSUPPORTED_KEYS = frozenset({"insertedFrames", "trajectoryAdjustments"})
+
+
+class BlockedEditCompositionError(ReleasePlanError):
+    """The selected saved edits cannot be represented in the release."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,10 +51,49 @@ class CameraFilter:
 
 
 @dataclass(frozen=True, slots=True)
+class SavedSubtask:
+    id: str
+    label: str
+    frame_range: tuple[int, int]
+    color: str
+    source: str
+    description: str | None = None
+
+
+def _saved_subtasks(value: object) -> tuple[SavedSubtask, ...]:
+    if not isinstance(value, list):
+        raise BlockedEditCompositionError("saved subtasks must be a list")
+    segments = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise BlockedEditCompositionError("invalid saved subtask")
+        span = item.get("frameRange")
+        if (
+            not isinstance(span, list)
+            or len(span) != 2
+            or any(type(frame) is not int for frame in span)
+            or not 0 <= span[0] <= span[1]
+            or any(not isinstance(item.get(key), str) or not item[key] for key in ("label", "id"))
+            or not isinstance(item.get("color"), str)
+            or not re.fullmatch(r"#[0-9a-fA-F]{6}", item["color"])
+            or item.get("source") not in ("manual", "auto")
+            or (item.get("description") is not None and not isinstance(item["description"], str))
+        ):
+            raise BlockedEditCompositionError("invalid saved subtask fields")
+        segments.append(
+            SavedSubtask(
+                item["id"], item["label"], (span[0], span[1]), item["color"], item["source"], item.get("description")
+            )
+        )
+    return tuple(segments)
+
+
+@dataclass(frozen=True, slots=True)
 class EditComposition:
     removals: tuple[FrameRemoval, ...]
     blocking: tuple[str, ...]
     filters: tuple[CameraFilter, ...] = ()
+    subtasks: tuple[tuple[str, tuple[SavedSubtask, ...]], ...] = ()
 
     @property
     def submittable(self) -> bool:
@@ -125,16 +166,11 @@ def _operations(value: Any, episode: str) -> dict[str, Any]:
 
 
 def _unsupported(key: str, value: Any) -> bool:
-    """Return True when a saved operation changes output that this composer does not handle.
-
-    Empty subtask lists replace recorded subtasks and cannot be ignored.
-    """
+    """Return True when a saved operation changes output that this composer does not handle."""
     if key in _COMPOSED_KEYS | _IDENTITY_KEYS:
         return False
     if key not in _UNSUPPORTED_KEYS:
         return True
-    if key == "subtasks":
-        return value is not None
     return not (value is None or value is False or value == [] or value == {})
 
 
@@ -146,6 +182,7 @@ def compose_frame_removals(frozen: FrozenInput) -> EditComposition:
     removals = []
     blocking = []
     filters = []
+    subtasks = []
     for resource in frozen.saved_resources:
         match = EDIT_RESOURCE.fullmatch(resource.resource_id)
         if match is None:
@@ -175,13 +212,15 @@ def compose_frame_removals(frozen: FrozenInput) -> EditComposition:
             if _unsupported(name, operations[name]):
                 blocking.append(f"{key}: saved {name} edits are not composed for release")
         selected_filters, unsupported_filters = _filters(operations, episode_id)
+        if operations.get("subtasks") is not None:
+            subtasks.append((episode_id, _saved_subtasks(operations["subtasks"])))
         filters.extend(selected_filters)
         blocking.extend(f"{key}: {reason}" for reason in unsupported_filters)
         if operations.get("removedFrames") is not None:
             frames = _parse_removed(operations["removedFrames"], key)
             if frames:
                 removals.append(FrameRemoval(episode_id=episode_id, removed_frames=frames))
-    return EditComposition(removals=tuple(removals), blocking=tuple(blocking), filters=tuple(filters))
+    return EditComposition(tuple(removals), tuple(blocking), tuple(filters), tuple(subtasks))
 
 
 def subset_episode_inputs(
@@ -195,10 +234,11 @@ def subset_episode_inputs(
     replaced by the frozen removals. Blocked compositions are never converted.
     """
     if not composition.submittable:
-        raise ReleasePlanError("release composition is blocked: " + "; ".join(composition.blocking))
+        raise BlockedEditCompositionError("release composition is blocked: " + "; ".join(composition.blocking))
     if composition != compose_frame_removals(frozen):
         raise ReleasePlanError("release composition does not match frozen saved inputs")
     episodes = []
+    replacements = dict(composition.subtasks)
     for episode_id in frozen.selected_episode_ids:
         source = sources.get(episode_id)
         if source is None:
@@ -210,6 +250,8 @@ def subset_episode_inputs(
             raise ReleasePlanError("source descriptor episode identity does not match selection")
         if source.removed_frames:
             raise ReleasePlanError("source descriptor must describe unedited recorded frames")
+        if any(segment.frame_range[1] >= source.length for segment in replacements.get(episode_id, ())):
+            raise BlockedEditCompositionError("saved subtask range exceeds the source episode")
         episodes.append(replace(source, episode_id=episode_id, removed_frames=composition.removed_for(episode_id)))
     subset_episode_lengths(episodes)
     return tuple(episodes)
@@ -253,6 +295,7 @@ class NativeGenerationPlan:
     windows: tuple[PreparedMediaWindow, ...]
     encode_options: EncodeOptions
     camera_statistics_json: str = "{}"
+    subtasks: tuple[tuple[str, tuple[SavedSubtask, ...]], ...] = ()
 
     def encoding_windows(self, obj: ObjectPlan) -> tuple[EncodingWindow, ...]:
         if obj not in self.plan.objects or obj.action != "transcode":
@@ -370,4 +413,5 @@ def prepare_saved_generation(
         windows=tuple(prepared),
         encode_options=settings,
         camera_statistics_json=canonical_json_bytes(preserved).decode("utf-8"),
+        subtasks=composition.subtasks,
     )

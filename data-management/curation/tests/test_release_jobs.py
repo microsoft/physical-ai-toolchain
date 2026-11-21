@@ -5949,7 +5949,10 @@ def test_given_sealed_job_when_controls_written_then_supervised_and_payload_rema
         publisher.write(RECEIPT_PATH, (b"changed",), length=7, sha256=sha256_hex(b"changed"))
 
 
-def test_given_exited_scratch_creator_when_store_reopened_then_owned_cleanup_releases_charge(tmp_path: Path) -> None:
+@pytest.mark.parametrize("entry", ["present", "planned_absent", "planned_link"])
+def test_given_exited_scratch_creator_when_store_reopened_then_owned_cleanup_releases_charge(
+    tmp_path: Path, entry: str
+) -> None:
     clock = FakeClock()
     root = tmp_path / "ledger"
     store = _store(root, clock)
@@ -5975,9 +5978,22 @@ def test_given_exited_scratch_creator_when_store_reopened_then_owned_cleanup_rel
     )
     workspace = Path(result.stdout.strip())
     assert workspace.is_dir()
+    if entry != "present":
+        (workspace / "source.bin").unlink()
+        workspace.rmdir()
+        with store._transaction() as records:
+            records[job.job_id]["workspace"].update(status="planned", device=None, inode=None)
+        if entry == "planned_link":
+            workspace.symlink_to(workspace.parent / "missing")
     clock.advance(31)
     reopened = _store(root, clock)
     current = reopened.claim(job.job_id, "replacement")
+    if entry == "planned_link":
+        with pytest.raises(AuthorityError, match="unresolved"):
+            reopened.cleanup_scratch_workspace(job.job_id, current, recover=True)
+        assert workspace.is_symlink()
+        assert reopened.get(job.job_id, scope=SCOPE, principal=OWNER).scratch_bytes == 256
+        return
     reopened.cleanup_scratch_workspace(job.job_id, current, recover=True)
     reopened.release_scratch(job.job_id, current)
     assert not workspace.exists()
@@ -6675,6 +6691,22 @@ def test_given_recorded_diagnostic_identity_when_observation_changes_then_confli
     assert store.storage.snapshot() == before
 
 
+@pytest.mark.parametrize(
+    ("status", "stage", "reason"),
+    [("succeeded", "capture", "io"), ("failed", "private", "io"), ("failed", "capture", "private")],
+)
+def test_worker_failure_diagnostic_rejects_unclassified_values(
+    tmp_path: Path, status: str, stage: str, reason: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker")
+    before = store.storage.snapshot()
+    with pytest.raises(ReleaseJobError, match="invalid worker failure diagnostic"):
+        store.record_diagnostic(job_id, fence, "c" * 32, "validation", status, worker_failure=(stage, reason))
+    assert store.storage.snapshot() == before
+
+
 def test_given_no_scratch_workspace_when_cleanup_requested_then_ledger_is_unchanged(tmp_path: Path) -> None:
     store = _store(tmp_path / "ledger", FakeClock())
     job_id = store.accept(_request(tmp_path / "output")).job_id
@@ -6684,6 +6716,34 @@ def test_given_no_scratch_workspace_when_cleanup_requested_then_ledger_is_unchan
     store.cleanup_scratch_workspace(job_id, fence)
 
     assert store.storage.snapshot() == before
+
+
+def test_scratch_root_is_created_independently_of_job_storage(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.root = tmp_path / "private" / "jobs"
+
+    workspace = store.create_scratch_workspace(job_id, fence, 100)
+
+    assert workspace.is_dir()
+    assert store.storage.snapshot()[job_id]["workspace"]["status"] == "present"
+
+
+def test_linked_scratch_root_is_refused_before_workspace_creation(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    target = tmp_path / "unrelated"
+    target.mkdir()
+    store.root = tmp_path / "linked-root"
+    store.root.symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(OSError):
+        store.create_scratch_workspace(job_id, fence, 100)
+
+    assert store.storage.snapshot()[job_id]["workspace"] is None
+    assert not list(target.iterdir())
 
 
 def test_given_reserved_workspace_name_already_exists_when_created_then_foreign_directory_is_kept(
