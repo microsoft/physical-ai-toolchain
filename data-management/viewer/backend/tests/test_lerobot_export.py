@@ -1268,3 +1268,26 @@ def test_a_cleanup_error_keeps_the_exports_own_result(
     ]
     assert [os.path.basename(error.filename) for error in refusals] == [refused]
     held_locks.enter_context(hold_lock(output))
+
+
+def test_episode_frames_with_unset_time_base_avoids_zero_division(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from fractions import Fraction
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    zero_time_base = getattr(av, "AVRational", Fraction)(0, 1)
+    fake_stream = SimpleNamespace(type="video", time_base=zero_time_base)
+    fake_container = MagicMock()
+    fake_container.streams.video = [fake_stream]
+    fake_container.decode.return_value = []
+    fake_av = MagicMock()
+    fake_av.open.return_value = fake_container
+    monkeypatch.setattr(lerobot_exporter, "av", fake_av)
+
+    frames = lerobot_exporter._EpisodeFrames(tmp_path / "dummy.mp4", window=(1.0, 2.0), fps=30.0)
+    fake_container.seek.assert_not_called()
+    with pytest.raises(lerobot_exporter.LeRobotExportError):
+        frames.get(0, keep_from=0)
+
