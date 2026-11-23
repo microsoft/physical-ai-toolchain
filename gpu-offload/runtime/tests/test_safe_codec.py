@@ -7,7 +7,7 @@ import socket
 import subprocess
 import threading
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import PurePosixPath
 from typing import Any
@@ -362,7 +362,7 @@ def test_registered_state_rejects_descriptor_and_unknown_fields(class_registry: 
     remoter.register_class2dict_type(State, wire_name="test:State")
     decoded = class2dict.from_dict({"__type__": "test:State", "value": 7})
     assert decoded == State(7)
-    with pytest.raises(TypeError, match="unknown dataclass fields"):
+    with pytest.raises(TypeError, match="exactly the declared dataclass fields"):
         class2dict.from_dict({"__type__": "test:State", "side_effect": 7})
     with pytest.raises(TypeError, match="double-underscore"):
         class2dict.from_dict({"__type__": "test:State", "__class__": "changed"})
@@ -373,6 +373,74 @@ def test_registered_state_rejects_descriptor_and_unknown_fields(class_registry: 
     remoter.register_class2dict_type(DescriptorState, wire_name="test:DescriptorState")
     with pytest.raises(TypeError, match="custom descriptor"):
         class2dict.from_dict({"__type__": "test:DescriptorState", "side_effect": 7})
+
+
+@pytest.mark.parametrize("payload", [{}, {"value": 7}, {"value": 7, "items": []}])
+def test_registered_dataclass_rejects_incomplete_state(payload: dict[str, Any], class_registry: None) -> None:
+    @dataclass
+    class State:
+        value: int
+        items: list[int] = field(default_factory=list)
+        version: int = 1
+
+    remoter.register_class2dict_type(State, wire_name="test:State")
+    with pytest.raises(TypeError, match="exactly the declared dataclass fields"):
+        class2dict.from_dict({"__type__": "test:State", **payload})
+
+    original = State(7)
+    assert remoter.deserialize_payload(remoter.serialize_payload(original)) == original
+
+
+def test_configured_stub_wire_alias_preserves_local_type_and_encoding_name(
+    monkeypatch: pytest.MonkeyPatch, class_registry: None
+) -> None:
+    class Stub:
+        def __init__(self) -> None:
+            raise AssertionError("stub constructor must never run during state restoration")
+
+    monkeypatch.setattr(remoter, "remotedclasses", set())
+    monkeypatch.setattr(remoter, "allowed_modules", set())
+    monkeypatch.setattr(remoter, "stub_to_class", {})
+    monkeypatch.setattr(remoter, "class_to_stub", {})
+    remoter.addremotedclass(Stub)
+    remoter.setstubclasses(
+        {
+            remoter.classkey(Stub): "server.policy/Policy",
+            "client.policy//create": "server.policy//create",
+        }
+    )
+    state = _WireClassDictionary({"__type__": "server.policy:Policy", "value": 7})
+
+    decoded = remoter.deserialize_payload(_encode_wire_payload(state))
+
+    assert type(decoded) is Stub
+    assert decoded.value == 7
+    assert class2dict.to_dict(decoded)["__type__"] == f"{Stub.__module__}:{Stub.__qualname__}"
+    with pytest.raises(TypeError, match="unregistered class2dict type"):
+        class2dict.from_dict({"__type__": "server.policy:OtherPolicy", "value": 7})
+
+
+def test_configured_stub_wire_alias_rejects_conflicting_registration(
+    monkeypatch: pytest.MonkeyPatch, class_registry: None
+) -> None:
+    class Stub:
+        pass
+
+    class Other:
+        pass
+
+    monkeypatch.setattr(remoter, "remotedclasses", set())
+    monkeypatch.setattr(remoter, "allowed_modules", set())
+    monkeypatch.setattr(remoter, "stub_to_class", {})
+    monkeypatch.setattr(remoter, "class_to_stub", {})
+    remoter.addremotedclass(Stub)
+    remoter.register_class2dict_type(Other, wire_name="server.policy:Policy")
+
+    with pytest.raises(ValueError, match="already registered"):
+        remoter.setstubclasses({remoter.classkey(Stub): "server.policy/Policy"})
+
+    assert type(class2dict.from_dict({"__type__": "server.policy:Policy"})) is Other
+    assert remoter.stub_to_class == {}
 
 
 def test_registered_slotted_state_round_trip(class_registry: None) -> None:

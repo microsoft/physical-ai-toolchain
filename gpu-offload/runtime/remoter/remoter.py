@@ -155,13 +155,20 @@ needmultiproc = False
 remotedclassmetadata = {}  # key: class object id -> metadata dict for object
 
 
-def setstubclasses(stub2class):
+def setstubclasses(stub2class: dict[str, str]) -> None:
     # of the form a.b.c: d.e
     # where a.b.c is the stub class, d.e is the actual class
     for class_path in (*stub2class.keys(), *stub2class.values()):
         module_name, separator, _ = class_path.partition("/")
         if separator:
             allow_module(module_name)
+    for cls in remotedclasses:
+        target_path = stub2class.get(classkey(cls))
+        if target_path is not None:
+            module_name, separator, class_name = target_path.partition("/")
+            if not separator or not module_name or not class_name or "/" in class_name:
+                raise ValueError(f"Stub class target {target_path!r} must use the format 'module/class'")
+            class2dict.register_type_alias(cls, name=f"{module_name}:{class_name}")
     stub_to_class.update(stub2class)
     class_to_stub.update({v: k for k, v in stub2class.items()})
 

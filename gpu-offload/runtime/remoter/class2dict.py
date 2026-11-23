@@ -49,6 +49,16 @@ def _qualname(cls: type) -> str:
     return _TYPE_TO_NAME.get(cls, f"{cls.__module__}:{cls.__qualname__}")
 
 
+def _register_wire_name(cls: type[Any], wire_name: str) -> None:
+    module_name, separator, qualname = wire_name.partition(":")
+    if not separator or not module_name or not qualname:
+        raise ValueError("class2dict type name must use the format 'module:qualname'")
+    registered_type = _NAME_TO_TYPE.get(wire_name)
+    if registered_type is not None and registered_type is not cls:
+        raise ValueError(f"class2dict type name {wire_name!r} is already registered")
+    _NAME_TO_TYPE[wire_name] = cls
+
+
 def register_type(
     cls: type[Any],
     *,
@@ -57,22 +67,21 @@ def register_type(
 ) -> None:
     """Register a stable wire name for a class2dict-serialized type."""
     wire_name = name or _qualname(cls)
-    module_name, separator, qualname = wire_name.partition(":")
-    if not separator or not module_name or not qualname:
-        raise ValueError("class2dict type name must use the format 'module:qualname'")
-
-    registered_type = _NAME_TO_TYPE.get(wire_name)
-    if registered_type is not None and registered_type is not cls:
-        raise ValueError(f"class2dict type name {wire_name!r} is already registered")
-
     registered_name = _TYPE_TO_NAME.get(cls)
     if registered_name is not None and registered_name != wire_name:
         raise ValueError(f"class {cls!r} is already registered as {registered_name!r}")
 
-    _NAME_TO_TYPE[wire_name] = cls
+    _register_wire_name(cls, wire_name)
     _TYPE_TO_NAME[cls] = wire_name
     if decode_state is not None:
         _TYPE_TO_DECODER[cls] = decode_state
+
+
+def register_type_alias(cls: type[Any], *, name: str) -> None:
+    """Register a receiving wire name while preserving the class's encoding name."""
+    if cls not in _TYPE_TO_NAME:
+        raise ValueError(f"class {cls!r} must be registered before adding a wire alias")
+    _register_wire_name(cls, name)
 
 
 def _resolve(path: str) -> type[Any]:
@@ -227,8 +236,8 @@ def to_dict(obj: Any) -> Any:
 def _restore_state(target: type[Any], payload: dict[str, Any]) -> Any:
     if any(not isinstance(key, str) or not key.isidentifier() or key.startswith("__") for key in payload):
         raise TypeError("class2dict state fields must be identifiers without a double-underscore prefix")
-    if is_dataclass(target) and not payload.keys() <= {field.name for field in fields(target)}:
-        raise TypeError("class2dict state contains unknown dataclass fields")
+    if is_dataclass(target) and payload.keys() != {field.name for field in fields(target)}:
+        raise TypeError("class2dict state must contain exactly the declared dataclass fields")
 
     descriptors = {}
     for base in reversed(target.__mro__):
@@ -324,4 +333,4 @@ def from_dict(
     return _restore_state(target, payload)
 
 
-__all__ = ["TENSOR_KEY", "TYPE_KEY", "VALUE_KEY", "from_dict", "register_type", "to_dict"]
+__all__ = ["TENSOR_KEY", "TYPE_KEY", "VALUE_KEY", "from_dict", "register_type", "register_type_alias", "to_dict"]

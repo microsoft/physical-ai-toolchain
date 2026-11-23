@@ -72,6 +72,9 @@ and `torch:Tensor`. Every custom wire type requires local registration on each
 receiving endpoint. Loading its module alone grants no decoding permission.
 Locally configured or decorated remoted classes are registered by the runtime
 when they join the remote-class registry, preserving object synchronization.
+Configured client stubs accept their server class's wire name as a receive-only
+alias. Synchronized server state is restored into the registered local stub without
+importing the server class or changing the stub's encoding name.
 
 Register ordinary state classes during endpoint initialization:
 
@@ -82,7 +85,8 @@ remoter.register_class2dict_type(ModelState, wire_name="application:ModelState")
 ```
 
 Default state reconstruction bypasses constructors and custom attribute setters.
-Dataclass fields must match the declared fields; custom descriptors and unsupported
+Dataclass state must contain every declared field, including fields with defaults
+or default factories, and no additional fields. Custom descriptors and unsupported
 value payloads require a reviewed `decode_state` function. Registered enums decode
 existing members without invoking missing-value hooks.
 
