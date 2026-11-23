@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import enum
 import importlib
-import sys
 import uuid
+from collections.abc import Callable
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime
-from pathlib import PurePath
+from pathlib import Path, PosixPath, PurePath, PurePosixPath, PureWindowsPath, WindowsPath
 from threading import Lock
+from types import GetSetDescriptorType, MemberDescriptorType
 from typing import Any
 
 from .safe_codec import CodecLimits, CodecLimitsError
@@ -25,6 +26,20 @@ TENSOR_KEY = "__tensor__"
 _PRIMITIVES = (str, bytes, int, float, bool, uuid.UUID, type(None))
 _NAME_TO_TYPE: dict[str, type[Any]] = {}
 _TYPE_TO_NAME: dict[type[Any], str] = {}
+_TYPE_TO_DECODER: dict[type[Any], Callable[[dict[str, Any]], Any]] = {}
+_VALUE_DECODERS: dict[type[Any], Callable[[Any], Any]] = {
+    date: date.fromisoformat,
+    datetime: datetime.fromisoformat,
+    tuple: tuple,
+    set: set,
+    frozenset: frozenset,
+    Path: Path,
+    PosixPath: PosixPath,
+    WindowsPath: WindowsPath,
+    PurePath: PurePath,
+    PurePosixPath: PurePosixPath,
+    PureWindowsPath: PureWindowsPath,
+}
 _UNAVAILABLE_TENSOR_DEVICES: dict[str, None] = {}
 _UNAVAILABLE_TENSOR_DEVICES_LOCK = Lock()
 _UNAVAILABLE_TENSOR_DEVICES_MAX_SIZE = 32
@@ -34,9 +49,14 @@ def _qualname(cls: type) -> str:
     return _TYPE_TO_NAME.get(cls, f"{cls.__module__}:{cls.__qualname__}")
 
 
-def register_type(cls: type[Any], *, name: str | None = None) -> None:
+def register_type(
+    cls: type[Any],
+    *,
+    name: str | None = None,
+    decode_state: Callable[[dict[str, Any]], Any] | None = None,
+) -> None:
     """Register a stable wire name for a class2dict-serialized type."""
-    wire_name = name or f"{cls.__module__}:{cls.__qualname__}"
+    wire_name = name or _qualname(cls)
     module_name, separator, qualname = wire_name.partition(":")
     if not separator or not module_name or not qualname:
         raise ValueError("class2dict type name must use the format 'module:qualname'")
@@ -51,26 +71,20 @@ def register_type(cls: type[Any], *, name: str | None = None) -> None:
 
     _NAME_TO_TYPE[wire_name] = cls
     _TYPE_TO_NAME[cls] = wire_name
+    if decode_state is not None:
+        _TYPE_TO_DECODER[cls] = decode_state
 
 
-def _resolve(path: str) -> type:
+def _resolve(path: str) -> type[Any]:
+    if not isinstance(path, str):
+        raise TypeError("class2dict type name must be a string")
     registered_type = _NAME_TO_TYPE.get(path)
     if registered_type is not None:
         return registered_type
-
-    module_name, _, qualname = path.partition(":")
-    obj: Any = sys.modules.get(module_name)
-    if obj is None:
-        raise TypeError(
-            f"Cannot reconstruct class2dict type {path!r}: module {module_name!r} is not loaded. "
-            "Load the defining module on this endpoint or register the local equivalent with "
-            "remoter.register_class2dict_type(..., wire_name=<sender type name>)."
-        )
-    for part in qualname.split("."):
-        obj = getattr(obj, part)
-    if not isinstance(obj, type):
-        raise TypeError(f"Resolved class2dict type {path!r} to non-type object {obj!r}")
-    return obj
+    raise TypeError(
+        f"Cannot reconstruct unregistered class2dict type {path!r}; "
+        "register it locally with remoter.register_class2dict_type(...)"
+    )
 
 
 def _get_torch() -> Any | None:
@@ -210,6 +224,49 @@ def to_dict(obj: Any) -> Any:
     return data
 
 
+def _restore_state(target: type[Any], payload: dict[str, Any]) -> Any:
+    if any(not isinstance(key, str) or not key.isidentifier() or key.startswith("__") for key in payload):
+        raise TypeError("class2dict state fields must be identifiers without a double-underscore prefix")
+    if is_dataclass(target) and not payload.keys() <= {field.name for field in fields(target)}:
+        raise TypeError("class2dict state contains unknown dataclass fields")
+
+    descriptors = {}
+    for base in reversed(target.__mro__):
+        descriptors.update(vars(base))
+    dict_descriptor = descriptors.get("__dict__")
+    slots = {}
+    for key in payload:
+        descriptor = descriptors.get(key)
+        if isinstance(descriptor, MemberDescriptorType):
+            slots[key] = descriptor
+        elif descriptor is not None and hasattr(type(descriptor), "__set__"):
+            raise TypeError(f"class2dict state field {key!r} has a custom descriptor; register a state decoder")
+        elif not isinstance(dict_descriptor, GetSetDescriptorType):
+            raise TypeError(f"class2dict state field {key!r} has no storage; register a state decoder")
+    instance = object.__new__(target)
+    for key, value in payload.items():
+        if key in slots:
+            slots[key].__set__(instance, value)
+        else:
+            dict_descriptor.__get__(instance, target)[key] = value
+    return instance
+
+
+def _decode_tensor(payload: dict[str, Any], device: Any | None, limits: CodecLimits) -> Any:
+    if payload.keys() != {TYPE_KEY, TENSOR_KEY}:
+        raise TypeError("Tensor class2dict payload must contain only type and tensor fields")
+    torch = _get_torch()
+    if torch is None:
+        raise TypeError("Cannot reconstruct torch:Tensor: PyTorch is not installed")
+    return _tensor_from_dict(torch.Tensor, payload[TENSOR_KEY], device, limits)
+
+
+# Fixed wire decoders are independent of the set of modules loaded by the peer.
+_BUILTIN_DECODERS = {"torch:Tensor": _decode_tensor}
+for _builtin_type in _VALUE_DECODERS:
+    register_type(_builtin_type)
+
+
 def from_dict(
     data: Any,
     cls: type | None = None,
@@ -229,27 +286,42 @@ def from_dict(
     if TYPE_KEY not in data and cls is None:
         return {key: from_dict(value, device=device, limits=limits) for key, value in data.items()}
 
+    if cls is None:
+        wire_name = data[TYPE_KEY]
+        if not isinstance(wire_name, str):
+            raise TypeError("class2dict type name must be a string")
+        builtin_decoder = _BUILTIN_DECODERS.get(wire_name)
+        if builtin_decoder is not None:
+            return builtin_decoder(data, device, limits)
     target = cls if cls is not None else _resolve(data[TYPE_KEY])
 
+    payload = {k: from_dict(v, device=device, limits=limits) for k, v in data.items() if k != TYPE_KEY}
+    decoder = _TYPE_TO_DECODER.get(target)
+    if decoder is not None:
+        return decoder(payload)
+
     if TENSOR_KEY in data:
-        return _tensor_from_dict(target, data[TENSOR_KEY], device, limits)
+        if cls is not None:
+            return _tensor_from_dict(target, data[TENSOR_KEY], device, limits)
+        raise TypeError("Custom tensor types require an explicit state decoder")
 
     if VALUE_KEY in data:
-        value = data[VALUE_KEY]
-        if isinstance(target, type) and issubclass(target, enum.Enum):
-            return target(value)
-        if isinstance(target, type) and issubclass(target, (datetime, date)):
-            return target.fromisoformat(value)
-        if isinstance(target, type) and issubclass(target, (tuple, set, frozenset)):
-            return target(from_dict(item, device=device, limits=limits) for item in value)
-        return target(value)
+        if payload.keys() != {VALUE_KEY}:
+            raise TypeError("class2dict value payload must contain only a value field")
+        value = payload[VALUE_KEY]
+        if issubclass(target, enum.Enum):
+            for member in target.__members__.values():
+                if member.value == value:
+                    return member
+            raise TypeError(f"Unknown value for registered enum {target!r}")
+        value_decoder = _VALUE_DECODERS.get(target)
+        if value_decoder is None:
+            raise TypeError(f"class2dict value type {target!r} requires an explicit state decoder")
+        return value_decoder(value)
 
-    payload = {k: from_dict(v, device=device, limits=limits) for k, v in data.items() if k != TYPE_KEY}
-
-    instance = object.__new__(target)
-    for key, value in payload.items():
-        object.__setattr__(instance, key, value)
-    return instance
+    if target in _VALUE_DECODERS or issubclass(target, enum.Enum):
+        raise TypeError("class2dict value type requires a value field")
+    return _restore_state(target, payload)
 
 
 __all__ = ["TENSOR_KEY", "TYPE_KEY", "VALUE_KEY", "from_dict", "register_type", "to_dict"]

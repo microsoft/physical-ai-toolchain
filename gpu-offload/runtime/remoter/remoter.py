@@ -74,7 +74,7 @@ def serialize_payload(obj) -> bytes:
         threadctx.noremote = oldnoremote
 
 
-def deserialize_payload(payload: bytes) -> Any:
+def deserialize_payload(payload: bytes, *, validate: Callable[[Any], None] | None = None) -> Any:
     oldnoremote = threadctx.noremote
     threadctx.noremote = True
     try:
@@ -83,6 +83,7 @@ def deserialize_payload(payload: bytes) -> Any:
             _CODEC_REGISTRY,
             limits=_CODEC_LIMITS,
             context=_CODEC_CONTEXT,
+            validate=validate,
         )
     finally:
         threadctx.noremote = oldnoremote
@@ -169,8 +170,9 @@ def setstubclasses(stub2class):
 remotedclasses = set()
 
 
-def addremotedclass(cls):
+def addremotedclass(cls: type[Any]) -> None:
     allow_module(cls.__module__)
+    class2dict.register_type(cls)
     remotedclasses.add(cls)
 
 
@@ -527,9 +529,14 @@ def register_codec_adapter(adapter: TypeAdapter) -> None:
     _CODEC_REGISTRY.register(adapter)
 
 
-def register_class2dict_type(cls: type[Any], *, wire_name: str | None = None) -> None:
-    """Register a stable class2dict wire name or map a remote name to a local class."""
-    class2dict.register_type(cls, name=wire_name)
+def register_class2dict_type(
+    cls: type[Any],
+    *,
+    wire_name: str | None = None,
+    decode_state: Callable[[dict[str, Any]], Any] | None = None,
+) -> None:
+    """Register a class2dict wire type with an optional reviewed state decoder."""
+    class2dict.register_type(cls, name=wire_name, decode_state=decode_state)
 
 
 def register_state_adapter(
@@ -827,49 +834,36 @@ def encode_function_call(
 def decode_function_call(
     payload, conn, remotedClasses, callbackOnCacheAdd
 ) -> tuple[Callable | None, dict, tuple, dict, CodecError | None]:
+    funcargs = {"key": "unknown", "loc": "unknown"}
+
+    def authorize(envelope: Any) -> None:
+        if not isinstance(envelope, tuple) or len(envelope) != 7:
+            raise CodecError("Function call payload must contain seven fields")
+        loc, key, module_name, func_name, class_name, args, kwargs = envelope
+        if not all(isinstance(value, str) for value in (loc, key, module_name, func_name, class_name)):
+            raise CodecError("Function call metadata fields must be strings")
+        if not isinstance(args, tuple) or not isinstance(kwargs, dict):
+            raise CodecError("Function call arguments must be a tuple and mapping")
+        if not all(isinstance(key, str) for key in kwargs):
+            raise CodecError("Function call keyword names must be strings")
+        funcargs.update(key=key, loc=loc, module_name=module_name, func_name=func_name, class_name=class_name)
+        try:
+            canonical_key = canonical_function_key(module_name, class_name, func_name)
+        except ValueError as exc:
+            raise CallableNotAllowedError(str(exc)) from exc
+        if key != canonical_key:
+            raise CallableNotAllowedError(f"Function key {key!r} does not match decoded identity {canonical_key!r}")
+        if canonical_key not in allowed_functions:
+            raise CallableNotAllowedError(f"Function {canonical_key!r} is not allowed to be called remotely")
+
     try:
-        decoded = deserialize_payload(payload)
+        decoded = deserialize_payload(payload, validate=authorize)
     except (CodecError, TypeError, ValueError) as exc:
         decode_error = exc if isinstance(exc, CodecError) else CodecError(str(exc))
         logger.error(f"Failed to decode function call payload: {decode_error}")
-        return None, {"key": "unknown", "loc": "unknown"}, (), {}, decode_error
-    if not isinstance(decoded, tuple) or len(decoded) != 7:
-        exc = CodecError("Function call payload must contain seven fields")
-        logger.error(f"Failed to decode function call payload: {exc}")
-        return None, {"key": "unknown", "loc": "unknown"}, (), {}, exc
+        return None, funcargs, (), {}, decode_error
     loc, key, module_name, func_name, class_name, args, kwargs = decoded
-    if not all(isinstance(value, str) for value in (loc, key, module_name, func_name, class_name)):
-        exc = CodecError("Function call metadata fields must be strings")
-        logger.error(f"Failed to decode function call payload: {exc}")
-        return None, {"key": "unknown", "loc": "unknown"}, (), {}, exc
-    if not isinstance(args, tuple) or not isinstance(kwargs, dict):
-        exc = CodecError("Function call arguments must be a tuple and mapping")
-        logger.error(f"Failed to decode function call payload: {exc}")
-        return None, {"key": "unknown", "loc": "unknown"}, (), {}, exc
     logger.debug(f"=====Decoded function for key {key} to location {loc}=====")
-    funcargs = {
-        "key": key,
-        "loc": loc,  # location of server as seen by client
-        "module_name": module_name,
-        "func_name": func_name,
-        "class_name": class_name,
-    }
-    try:
-        canonical_key = canonical_function_key(module_name, class_name, func_name)
-    except ValueError as exc:
-        decode_error = CallableNotAllowedError(str(exc))
-        logger.error(f"Rejected function call identity: {decode_error}")
-        return None, funcargs, (), {}, decode_error
-    if key != canonical_key:
-        decode_error = CallableNotAllowedError(
-            f"Function key {key!r} does not match decoded identity {canonical_key!r}"
-        )
-        logger.error(f"Rejected function call identity: {decode_error}")
-        return None, funcargs, (), {}, decode_error
-    if canonical_key not in allowed_functions:
-        decode_error = CallableNotAllowedError(f"Function {canonical_key!r} is not allowed to be called remotely")
-        logger.error(f"Rejected function call identity: {decode_error}")
-        return None, funcargs, (), {}, decode_error
     # rehydrate args on server side
     if conn is not None:  # noqa: SIM108 vendored from microsoft/xavier, not refactored
         clientloc = conn.get("key", "")
@@ -2074,12 +2068,20 @@ class Remoter:
         logger.debug(f"Decoding result of length {len(payload)}")
         if not payload:
             raise CodecError("Empty payload received for function result")
-        decoded = deserialize_payload(payload)
-        if not isinstance(decoded, tuple) or len(decoded) != 3:
-            raise CodecError("Function result payload must contain three fields")
+
+        def validate_result(envelope: Any) -> None:
+            if not isinstance(envelope, tuple) or len(envelope) != 3:
+                raise CodecError("Function result payload must contain three fields")
+            metadata = envelope[0]
+            if not isinstance(metadata, dict):
+                raise CodecError("Function result metadata must be a mapping")
+            if not all(isinstance(key, str) and isinstance(value, str) for key, value in metadata.items()):
+                raise CodecError("Function result metadata fields must be strings")
+            if "key" not in metadata or "loc" not in metadata:
+                raise CodecError("Function result metadata missing key or loc")
+
+        decoded = deserialize_payload(payload, validate=validate_result)
         funcargs, result, ex_payload = decoded
-        if not isinstance(funcargs, dict):
-            raise CodecError("Function result metadata must be a mapping")
         try:
             result = rehydrate(result, self.remotedClasses, loc, True, None)
         except Exception:
