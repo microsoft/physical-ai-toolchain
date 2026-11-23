@@ -18,7 +18,7 @@ dependencies = [
     "pyarrow==26.0.0",
     "Pillow==13.0.0",
     "av==19.0.1",
-    "cachetools==7.2.4",
+    "cachetools==8.0.0",
 ]
 
 [project.urls]
