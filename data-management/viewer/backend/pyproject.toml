@@ -14,7 +14,7 @@ dependencies = [
     "python-dotenv==1.2.4",
     "slowapi==0.1.10",
     "aiofiles==25.1.0",
-    "numpy==2.5.4",
+    "numpy==2.5.5",
     "pyarrow==26.0.0",
     "Pillow==13.0.0",
     "av==19.0.1",
