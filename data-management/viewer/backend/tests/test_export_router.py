@@ -7,13 +7,23 @@ HDF5 exporter mocked out.
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import json
+import os
+import threading
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
+
+from src.api.services.lerobot_exporter import LOCK_FILE, PROVENANCE_FILE
+from src.api.services.lerobot_language import LanguageInstruction
+
+from .lerobot_sources import hold_lock, stop_export, write_source
 
 
 @pytest.fixture
@@ -36,6 +46,7 @@ def mock_service(dataset_layout: tuple[Path, Path, Path]):
     svc.base_path = str(base)
     svc.get_dataset = AsyncMock(return_value=MagicMock(name="dataset"))
     svc._get_dataset_path = MagicMock(return_value=dataset_dir)
+    svc.dataset_is_lerobot = MagicMock(return_value=False)
     svc.get_episode = AsyncMock()
     return svc
 
@@ -53,6 +64,75 @@ def override_service(mock_service):
         app.dependency_overrides.pop(get_dataset_service, None)
 
 
+@pytest.fixture
+def saved_annotations():
+    """Install an annotation service holding two saved instructions for episode 0, the later one listed first."""
+    from src.api.main import app
+    from src.api.models.annotations import EpisodeAnnotationFile, LanguageInstructionAnnotation
+    from src.api.services.annotation_service import get_annotation_service
+
+    from .test_annotation_service import _build_annotation
+
+    older = _build_annotation("annotator-a").model_copy(
+        update={
+            "timestamp": datetime(2026, 9, 30, tzinfo=UTC),
+            "language_instruction": LanguageInstructionAnnotation(instruction="Older", source="human"),
+        }
+    )
+    newer = _build_annotation("annotator-b").model_copy(
+        update={
+            "timestamp": datetime(2026, 10, 1, 12, tzinfo=UTC),
+            "language_instruction": LanguageInstructionAnnotation(
+                instruction="Pick up the gear",
+                source="human",
+                paraphrases=["Grab the gear"],
+                subtask_instructions=["Approach"],
+            ),
+        }
+    )
+    files = {0: EpisodeAnnotationFile(episode_index=0, dataset_id="ds-1", annotations=[newer, older])}
+    service = MagicMock()
+    service.get_annotation = AsyncMock(side_effect=lambda _dataset_id, index: files.get(index))
+    app.dependency_overrides[get_annotation_service] = lambda: service
+    try:
+        yield service
+    finally:
+        app.dependency_overrides.pop(get_annotation_service, None)
+
+
+def _post_export(client: TestClient, endpoint: str, body: dict[str, Any]) -> None:
+    """Run an export through the synchronous or the streaming endpoint and require it to complete."""
+    if endpoint == "export":
+        resp = client.post("/api/datasets/ds-1/export", json=body)
+        assert resp.status_code == 200, resp.text
+        return
+    with client.stream("POST", "/api/datasets/ds-1/export/stream", json=body) as resp:
+        assert resp.status_code == 200
+        assert "event: complete" in "".join(resp.iter_text())
+
+
+def _export_through(client: TestClient, endpoint: str, output: Path) -> dict[str, Any]:
+    """Export source episode 1 through an endpoint with the real exporter and return the public result."""
+    body = {"episodeIndices": [1], "outputPath": str(output), "includeLanguageInstructions": False}
+    if endpoint == "export":
+        resp = client.post("/api/datasets/ds-1/export", json=body)
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+    with client.stream("POST", "/api/datasets/ds-1/export/stream", json=body) as resp:
+        assert resp.status_code == 200
+        text = "".join(resp.iter_text())
+    return json.loads(text.split("event: complete\ndata: ", 1)[1].split("\n\n", 1)[0])
+
+
+def _contents(directory: Path) -> dict[str, str]:
+    """Map every file under ``directory``, hidden ones included, to a digest of its bytes."""
+    return {
+        path.relative_to(directory).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(directory.rglob("*"))
+        if path.is_file()
+    }
+
+
 def _make_export_result(success: bool = True, error: str | None = None) -> MagicMock:
     result = MagicMock()
     result.success = success
@@ -64,6 +144,16 @@ def _make_export_result(success: bool = True, error: str | None = None) -> Magic
 
 def _patch_exporter(monkeypatch: pytest.MonkeyPatch, exporter_mock: MagicMock) -> None:
     monkeypatch.setattr("src.api.routers.export.HDF5Exporter", exporter_mock)
+
+
+def _patch_lerobot_exporter(monkeypatch: pytest.MonkeyPatch) -> tuple[MagicMock, MagicMock]:
+    instance = MagicMock()
+    instance.export_episodes.return_value = _make_export_result()
+    cls = MagicMock(return_value=instance)
+    monkeypatch.setattr("src.api.routers.export.LeRobotExporter", cls)
+    hdf5 = MagicMock(side_effect=AssertionError("HDF5Exporter must not handle LeRobot sources"))
+    monkeypatch.setattr("src.api.routers.export.HDF5Exporter", hdf5)
+    return cls, instance
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +298,84 @@ class TestExportEpisodes:
         assert kwargs["episode_indices"] == [0]
         assert 0 in kwargs["edits_map"]
 
+    def test_an_empty_subtask_list_reaches_the_exporter_as_empty(
+        self,
+        client: TestClient,
+        override_service,
+        dataset_layout,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _, _dataset, output_dir = dataset_layout
+        exporter_instance = MagicMock()
+        exporter_instance.export_episodes.return_value = _make_export_result()
+        _patch_exporter(monkeypatch, MagicMock(return_value=exporter_instance))
+        edits = {"0": {"episodeIndex": 0, "subtasks": []}, "1": {"episodeIndex": 1, "removedFrames": [2]}}
+        body = {"episodeIndices": [0, 1], "outputPath": str(output_dir), "applyEdits": True, "edits": edits}
+
+        assert client.post("/api/datasets/ds-1/export", json=body).status_code == 200
+
+        edits_map = exporter_instance.export_episodes.call_args.kwargs["edits_map"]
+        assert (edits_map[0].subtasks, edits_map[1].subtasks) == ([], None)
+
+    def test_trajectory_adjustments_reach_the_exporter(
+        self,
+        client: TestClient,
+        override_service,
+        dataset_layout,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from src.api.services.episode_edits import TrajectoryAdjustment
+
+        _, _dataset, output_dir = dataset_layout
+        exporter_instance = MagicMock()
+        exporter_instance.export_episodes.return_value = _make_export_result()
+        _patch_exporter(monkeypatch, MagicMock(return_value=exporter_instance))
+        adjustment = {"frameIndex": 2, "channelDeltas": {"0": 0.5}, "channelValues": {"6": 0.7}}
+        body = {
+            "episodeIndices": [0],
+            "outputPath": str(output_dir),
+            "applyEdits": True,
+            "edits": {"0": {"episodeIndex": 0, "trajectoryAdjustments": [adjustment]}},
+        }
+
+        resp = client.post("/api/datasets/ds-1/export", json=body)
+
+        assert resp.status_code == 200, resp.text
+        edits = exporter_instance.export_episodes.call_args.kwargs["edits_map"][0]
+        assert edits.trajectory_adjustments == [
+            TrajectoryAdjustment(frame_index=2, channel_deltas={0: 0.5}, channel_values={6: 0.7})
+        ]
+
+    @pytest.mark.parametrize(
+        "adjustment",
+        [
+            '{"frameIndex": -1, "channelDeltas": {"0": 0.5}}',
+            '{"frameIndex": 2, "channelDeltas": {"-1": 0.5}}',
+            '{"frameIndex": 2, "channelValues": {"0": NaN}}',
+            '{"frameIndex": 2, "channelDeltas": {"0": Infinity}}',
+        ],
+    )
+    def test_invalid_trajectory_adjustments_are_rejected_before_export(
+        self,
+        client: TestClient,
+        override_service,
+        dataset_layout,
+        monkeypatch: pytest.MonkeyPatch,
+        adjustment: str,
+    ) -> None:
+        _, _dataset, output_dir = dataset_layout
+        exporter_cls = MagicMock()
+        _patch_exporter(monkeypatch, exporter_cls)
+        body = (
+            f'{{"episodeIndices": [0], "outputPath": {json.dumps(str(output_dir))}, "applyEdits": true, '
+            f'"edits": {{"0": {{"episodeIndex": 0, "trajectoryAdjustments": [{adjustment}]}}}}}}'
+        )
+
+        resp = client.post("/api/datasets/ds-1/export", content=body, headers={"content-type": "application/json"})
+
+        assert resp.status_code == 422, resp.text
+        exporter_cls.assert_not_called()
+
     def test_import_error_returns_501(
         self,
         client: TestClient,
@@ -246,10 +414,305 @@ class TestExportEpisodes:
         assert resp.status_code == 500
         assert "write failed" in resp.json()["detail"]
 
+    def test_the_exporter_runs_off_the_event_loop(
+        self,
+        client: TestClient,
+        override_service,
+        dataset_layout,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from src.api.routers import export as export_router
+
+        _, _dataset, output_dir = dataset_layout
+        threads: dict[str, int] = {}
+        export_options = export_router._export_options
+
+        async def recording_options(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            threads["handler"] = threading.get_ident()
+            return await export_options(*args, **kwargs)
+
+        def recording_export(**_options: Any) -> MagicMock:
+            threads["exporter"] = threading.get_ident()
+            return _make_export_result()
+
+        monkeypatch.setattr(export_router, "_export_options", recording_options)
+        instance = MagicMock()
+        instance.export_episodes.side_effect = recording_export
+        _patch_exporter(monkeypatch, MagicMock(return_value=instance))
+
+        resp = client.post(
+            "/api/datasets/ds-1/export",
+            json={"episodeIndices": [0], "outputPath": str(output_dir), "applyEdits": False},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert threads["exporter"] != threads["handler"]
+
 
 # ---------------------------------------------------------------------------
 # POST /api/datasets/{dataset_id}/export/stream
 # ---------------------------------------------------------------------------
+
+
+class TestLeRobotExports:
+    def test_lerobot_sources_use_the_lerobot_exporter_without_creating_the_output(
+        self, client: TestClient, override_service, dataset_layout, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base, dataset_dir, _output = dataset_layout
+        override_service.dataset_is_lerobot.return_value = True
+        cls, instance = _patch_lerobot_exporter(monkeypatch)
+        output = base / "ds-1-edited"
+
+        resp = client.post("/api/datasets/ds-1/export", json={"episodeIndices": [0], "outputPath": str(output)})
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["success"] is True
+        cls.assert_called_once_with(dataset_dir, output, dataset_id="ds-1")
+        assert instance.export_episodes.call_args.kwargs["episode_indices"] == [0]
+        assert not output.exists()
+
+    def test_lerobot_export_refuses_a_non_empty_output(
+        self, client: TestClient, override_service, dataset_layout, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _base, _dataset, output_dir = dataset_layout
+        override_service.dataset_is_lerobot.return_value = True
+        cls, _instance = _patch_lerobot_exporter(monkeypatch)
+        (output_dir / "existing.txt").write_text("keep")
+
+        resp = client.post("/api/datasets/ds-1/export", json={"episodeIndices": [0], "outputPath": str(output_dir)})
+
+        assert resp.status_code == 400
+        assert "new or empty" in resp.json()["detail"]
+        cls.assert_not_called()
+
+    @pytest.mark.parametrize("relation", ["inside", "containing"])
+    def test_lerobot_export_refuses_paths_nested_with_the_source(
+        self, client: TestClient, override_service, dataset_layout, monkeypatch: pytest.MonkeyPatch, relation: str
+    ) -> None:
+        base, _dataset, _output = dataset_layout
+        nested = base / "group" / "ds-1"
+        nested.mkdir(parents=True)
+        override_service._get_dataset_path.return_value = nested
+        override_service.dataset_is_lerobot.return_value = True
+        cls, _instance = _patch_lerobot_exporter(monkeypatch)
+        output = nested / "derived" if relation == "inside" else base / "group"
+        before = sorted(path.relative_to(base).as_posix() for path in base.rglob("*"))
+
+        resp = client.post("/api/datasets/ds-1/export", json={"episodeIndices": [0], "outputPath": str(output)})
+
+        assert resp.status_code == 400
+        assert "outside the source dataset" in resp.json()["detail"]
+        assert sorted(path.relative_to(base).as_posix() for path in base.rglob("*")) == before
+        cls.assert_not_called()
+
+    def test_stream_guards_then_dispatches_lerobot_sources(
+        self, client: TestClient, override_service, dataset_layout, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base, dataset_dir, _output = dataset_layout
+        override_service.dataset_is_lerobot.return_value = True
+        cls, _instance = _patch_lerobot_exporter(monkeypatch)
+
+        rejected = client.post(
+            "/api/datasets/ds-1/export/stream", json={"episodeIndices": [0], "outputPath": str(dataset_dir / "x")}
+        )
+        assert rejected.status_code == 400
+        assert not (dataset_dir / "x").exists()
+        cls.assert_not_called()
+
+        with client.stream(
+            "POST",
+            "/api/datasets/ds-1/export/stream",
+            json={"episodeIndices": [0], "outputPath": str(base / "ds-1-edited")},
+        ) as resp:
+            assert resp.status_code == 200
+            body = "".join(resp.iter_text())
+
+        assert "event: complete" in body
+        cls.assert_called_once_with(dataset_dir, base / "ds-1-edited", dataset_id="ds-1")
+
+    @pytest.mark.parametrize("endpoint", ["export", "export/stream"])
+    def test_relative_output_paths_name_a_dataset_in_the_datasets_directory(
+        self,
+        client: TestClient,
+        override_service: MagicMock,
+        dataset_layout: tuple[Path, Path, Path],
+        monkeypatch: pytest.MonkeyPatch,
+        endpoint: str,
+    ) -> None:
+        base, dataset_dir, _output = dataset_layout
+        override_service.dataset_is_lerobot.return_value = True
+        cls, _instance = _patch_lerobot_exporter(monkeypatch)
+
+        _post_export(client, endpoint, {"episodeIndices": [0], "outputPath": "ds-1-curated"})
+
+        cls.assert_called_once_with(dataset_dir, base / "ds-1-curated", dataset_id="ds-1")
+
+    @pytest.mark.parametrize("endpoint", ["export", "export/stream"])
+    def test_relative_output_paths_cannot_leave_the_datasets_directory(
+        self, client: TestClient, override_service: MagicMock, monkeypatch: pytest.MonkeyPatch, endpoint: str
+    ) -> None:
+        override_service.dataset_is_lerobot.return_value = True
+        cls, _instance = _patch_lerobot_exporter(monkeypatch)
+
+        resp = client.post(f"/api/datasets/ds-1/{endpoint}", json={"episodeIndices": [0], "outputPath": "../escaped"})
+
+        assert resp.status_code == 400
+        assert "traversal" in resp.json()["detail"].lower()
+        cls.assert_not_called()
+
+    @pytest.mark.parametrize("endpoint", ["export", "export/stream"])
+    @pytest.mark.parametrize("include", [True, False, None], ids=["included", "left-out", "by-default"])
+    def test_lerobot_exports_get_the_latest_saved_language_instruction_unless_left_out(
+        self,
+        client: TestClient,
+        override_service,
+        saved_annotations,
+        dataset_layout,
+        monkeypatch: pytest.MonkeyPatch,
+        endpoint: str,
+        include: bool | None,
+    ) -> None:
+        base, _dataset, _output = dataset_layout
+        override_service.dataset_is_lerobot.return_value = True
+        _cls, instance = _patch_lerobot_exporter(monkeypatch)
+        body: dict[str, Any] = {"episodeIndices": [0, 1], "outputPath": str(base / "edited")}
+        if include is not None:
+            body["includeLanguageInstructions"] = include
+
+        _post_export(client, endpoint, body)
+
+        latest = LanguageInstruction(
+            "Pick up the gear", ("Grab the gear",), ("Approach",), "annotator-b", "2026-10-01T12:00:00+00:00"
+        )
+        assert instance.export_episodes.call_args.kwargs["language"] == ({} if include is False else {0: latest})
+
+    @pytest.mark.parametrize("endpoint", ["export", "export/stream"])
+    def test_given_stable_subtask_ids_when_exporting_then_writes_plan_text_without_changing_saved_steps(
+        self,
+        client: TestClient,
+        override_service,
+        saved_annotations,
+        dataset_layout: tuple[Path, Path, Path],
+        endpoint: str,
+    ) -> None:
+        import pyarrow.parquet as pq
+
+        from src.api.models.annotations import (
+            EpisodeAnnotationFile,
+            LanguageInstructionAnnotation,
+            SubtaskInstruction,
+        )
+
+        from .test_annotation_service import _build_annotation
+
+        base, dataset_dir, _output = dataset_layout
+        write_source(dataset_dir)
+        source_before = _contents(dataset_dir)
+        override_service.dataset_is_lerobot.return_value = True
+        annotation = _build_annotation("annotator-b").model_copy(
+            update={
+                "language_instruction": LanguageInstructionAnnotation(
+                    instruction="Pick up the gear",
+                    source="human",
+                    subtask_instructions=[
+                        SubtaskInstruction(id="step-b", text="Approach"),
+                        SubtaskInstruction(id="step-a", text="Grasp"),
+                    ],
+                )
+            }
+        )
+        saved_annotations.get_annotation.side_effect = None
+        saved_annotations.get_annotation.return_value = EpisodeAnnotationFile(
+            episode_index=0, dataset_id="ds-1", annotations=[annotation]
+        )
+        annotation_before = annotation.model_dump(mode="json")
+        output = base / "edited"
+
+        _post_export(client, endpoint, {"episodeIndices": [0], "outputPath": str(output)})
+
+        table = pq.read_table(output / "data/chunk-000/file-000.parquet")
+        language_rows = table.column("language_persistent").to_pylist()[0]
+        assert [row["content"] for row in language_rows if row["style"] == "plan"] == ["1. Approach\n2. Grasp"]
+        assert annotation.model_dump(mode="json") == annotation_before
+        assert _contents(dataset_dir) == source_before
+
+    @pytest.mark.parametrize("endpoint", ["export", "export/stream"])
+    def test_hdf5_exports_ignore_the_language_option(
+        self,
+        client: TestClient,
+        override_service,
+        saved_annotations,
+        dataset_layout,
+        monkeypatch: pytest.MonkeyPatch,
+        endpoint: str,
+    ) -> None:
+        _base, _dataset, output_dir = dataset_layout
+        instance = MagicMock()
+        instance.export_episodes.return_value = _make_export_result()
+        _patch_exporter(monkeypatch, MagicMock(return_value=instance))
+        body = {"episodeIndices": [0], "outputPath": str(output_dir), "includeLanguageInstructions": True}
+
+        _post_export(client, endpoint, body)
+
+        assert "language" not in instance.export_episodes.call_args.kwargs
+        saved_annotations.get_annotation.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "state",
+        ["after-the-first-move", "foreign-root-file", "after-meta", "live-holder", "free-lock-file", "held-lock-file"],
+    )
+    @pytest.mark.parametrize("endpoint", ["export", "export/stream"])
+    def test_either_endpoint_recovers_or_refuses_what_a_stopped_export_left(
+        self,
+        client: TestClient,
+        override_service,
+        dataset_layout,
+        held_locks: contextlib.ExitStack,
+        caplog: pytest.LogCaptureFixture,
+        endpoint: str,
+        state: str,
+    ) -> None:
+        base, dataset_dir, _output = dataset_layout
+        write_source(dataset_dir)
+        override_service.dataset_is_lerobot.return_value = True
+        output = base / "edited"
+        locks: list[os.stat_result] = []
+        if state in ("free-lock-file", "held-lock-file"):
+            output.mkdir()
+            (output / LOCK_FILE).touch()
+        else:
+            stop_export(dataset_dir, output, "after meta moved" if state == "after-meta" else "after the first move")
+        if state == "foreign-root-file":
+            (output / "notes.txt").write_text("mine")
+        if state in ("live-holder", "held-lock-file"):
+            locks.append(held_locks.enter_context(hold_lock(output)))
+        before, identity = _contents(output), output.stat()
+
+        result = _export_through(client, endpoint, output)
+
+        names = sorted(path.name for path in output.iterdir())
+        if state in ("after-the-first-move", "free-lock-file"):
+            assert result["success"] is True, result
+            assert names == ["data", PROVENANCE_FILE, "meta", "videos"]
+            assert json.loads((output / PROVENANCE_FILE).read_text())["source"]["dataset_id"] == "ds-1"
+            return
+        assert result["success"] is False
+        assert result["error"] == "Export failed"
+        if state == "foreign-root-file":
+            assert names == ["notes.txt"]
+            assert (output / "notes.txt").read_text() == "mine"
+        elif state == "after-meta":
+            assert names == ["data", PROVENANCE_FILE, "meta", "videos"]
+            assert _contents(output) == {name: digest for name, digest in before.items() if not name.startswith(".")}
+            assert json.loads((output / PROVENANCE_FILE).read_text())["source"]["dataset_id"] == "stopped"
+        else:
+            assert _contents(output) == before
+            assert os.path.samestat(output.stat(), identity)
+            assert os.path.samestat(os.stat(output / LOCK_FILE), locks[0])
+            assert "another export is writing to this directory" in caplog.text
+            if state == "held-lock-file":
+                held_locks.close()
+                assert _export_through(client, endpoint, output)["success"] is True
 
 
 class TestExportEpisodesStream:
@@ -328,7 +791,7 @@ class TestExportEpisodesStream:
         dataset_layout,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from src.api.services.hdf5_exporter import ExportProgress
+        from src.api.services.episode_edits import ExportProgress
 
         _, _dataset, output_dir = dataset_layout
 

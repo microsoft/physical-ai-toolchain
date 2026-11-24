@@ -3,7 +3,7 @@ sidebar_position: 2
 title: Azure ML Training Workflows
 description: Submit Isaac Lab and LeRobot training jobs to Azure Machine Learning
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-01
+ms.date: 2026-10-08
 ms.topic: how-to
 keywords:
   - azure ml
@@ -253,6 +253,32 @@ nodeSelector:
 
 The environment deployment bundle generates InstanceTypes this way from Terraform outputs. Apply them with `02-deploy-azureml-extension.sh --instance-types-manifest`.
 
+### Taint GPU pools and guard cluster starts
+
+The autoscaler's template for an empty pool can omit the pool's taints. When a stopped cluster starts, CPU pods wait briefly for the system nodes to return, and the autoscaler can pick an empty GPU pool for them. A cluster that stops each night then pays for a GPU node most mornings.
+
+Protect pools that scale from zero in two ways:
+
+- Taint every GPU pool with `nvidia.com/gpu:NoSchedule` in `node_taints`, including Regular (on-demand) pools. Azure ML adds the matching toleration to GPU jobs, and OSMO GPU pod templates carry it.
+- Autoscale the system pool and set the cluster autoscaler profile:
+
+  ```hcl
+  should_enable_system_node_pool_auto_scaling = true
+  system_node_pool_min_count                  = 3
+  system_node_pool_max_count                  = 5
+
+  aks_auto_scaler_profile = {
+    expander               = "least-waste"
+    new_pod_scale_up_delay = "120s"
+  }
+  ```
+
+  The autoscaler counts an autoscaled system pool's returning nodes as upcoming capacity. `least-waste` prefers the node group that leaves the least idle capacity, and the delay makes the autoscaler ignore pods younger than two minutes. AKS accepts the delay only in whole seconds; `2m` fails with `InvalidParameter`.
+
+With both in place, a scheduled start left every GPU pool at zero while CPU pods waited about six minutes for the system nodes.
+
+The delay applies to GPU jobs too. On H100 (on-demand and Spot) and A10 Spot pools, a job submitted to an empty pool started running 8 to 11 minutes later, including the two-minute delay, and the pool returned to zero about 10 minutes after the job finished. AKS also waits 10 minutes after a scale-up before removing a node (`scale-down-delay-after-add`), so even a short job keeps its node for about 20 minutes.
+
 ### Volcano enqueue-time capacity gate
 
 The Azure ML extension installs Volcano with `overcommit` and `proportion` plugins in the third tier of its scheduler config. Both implement Volcano's `JobEnqueueable` interface and gate the `enqueue` action against currently-Ready cluster capacity (`proportion`: `requested ≤ queue.Allocated + queue.Free`; `overcommit`: `requested ≤ total × overcommit-factor`).
@@ -297,6 +323,8 @@ If `scaleUp.status` stays `NoActivity` after submission, walk the three layers i
 1. Run `kubectl -n azureml logs deploy/aml-operator`. A `"resource validation failed"` message means the operator rejected the job.
 2. Run `kubectl get podgroup -n azureml`. Phase `Pending` with `Unschedulable: resource in cluster is overused` means the Volcano enqueue gate is holding the job.
 3. Run `kubectl describe pod -n azureml <worker>`. `FailedScheduling: 0/N nodes are available, ... node(s) didn't match Pod's node affinity/selector` means no node or node template matches the InstanceType's selector. See [Select GPU pools by `agentpool`](#select-gpu-pools-by-agentpool).
+
+If the pool scaled up but the job still waits, check the new node. `node(s) were unschedulable` with the node label `nvidia.com/gpu-driver-upgrade-state=pod-restart-required` means the GPU Operator's driver auto-upgrade cordoned it, and a `NotReady` node with `ContainerRuntimeProblem` means containerd stopped. See [GPU Configuration](../reference/gpu-configuration.md#gpu-driver-management) for both.
 
 ## 📚 Related Documentation
 

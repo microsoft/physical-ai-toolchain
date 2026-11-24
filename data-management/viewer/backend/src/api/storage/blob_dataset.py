@@ -19,11 +19,16 @@ Expected blob layout per dataset:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import logging
+import math
+import os
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any, TypeVar
 
 import aiofiles
 import pyarrow.parquet as pq
@@ -52,6 +57,43 @@ _SYNC_META_BLOBS = {
     "meta/episodes.jsonl",
 }
 
+_RELEASES_NAMESPACE = "_releases"
+_RESERVED_NAMESPACES = frozenset({_RELEASES_NAMESPACE, "_release_associations"})
+_OWNERSHIP_MAX_BYTES = 64 * 1024
+_DEFAULT_RELEASE_VERIFY_TIMEOUT_SECONDS = 30.0
+_DEFAULT_RELEASE_VERIFY_MAX_BYTES = 4 * 1024**3
+_EXHAUSTED = object()
+_T = TypeVar("_T")
+
+
+class _ReleaseDeadlineError(TimeoutError):
+    """Release verification exceeded its deadline."""
+
+
+class _ReleaseBudgetError(ValueError):
+    """Release verification read more bytes than allowed."""
+
+
+def _ownership_blob_path(prefix: str) -> str:
+    """Return the ownership record path for a release prefix.
+
+    Mirrors the `parent/_releases/leaf.json` convention until the curation
+    package exports a shared helper.
+    """
+    parent, _, leaf = prefix.rpartition("/")
+    head = f"{parent}/" if parent else ""
+    return f"{head}{_RELEASES_NAMESPACE}/{leaf}.json"
+
+
+async def _read_bounded(download: Any, max_bytes: int) -> bytes:
+    """Read a download fully, refusing payloads larger than max_bytes."""
+    data = bytearray()
+    async for chunk in download.chunks():
+        data.extend(chunk)
+        if len(data) > max_bytes:
+            raise ValueError("ownership document exceeds bound")
+    return bytes(data)
+
 
 class BlobDatasetProvider:
     """
@@ -66,6 +108,9 @@ class BlobDatasetProvider:
         account_name: str,
         container_name: str,
         sas_token: str | None = None,
+        *,
+        release_verify_timeout_seconds: float | None = None,
+        release_verify_max_bytes: int | None = None,
     ):
         """
         Initialize the blob dataset provider.
@@ -74,22 +119,53 @@ class BlobDatasetProvider:
             account_name: Azure Storage account name.
             container_name: Blob container holding dataset files.
             sas_token: Optional SAS token. DefaultAzureCredential is used when absent.
+            release_verify_timeout_seconds: Deadline for admitting one named release.
+            release_verify_max_bytes: Byte budget for reading one named release's control files.
 
         Raises:
             ImportError: If azure-storage-blob or azure-identity is not installed.
+            ValueError: If a release verification setting is invalid.
         """
         if not AZURE_AVAILABLE:
             raise ImportError(
                 "BlobDatasetProvider requires azure-storage-blob and azure-identity. "
                 "Install with: pip install 'lerobot-annotation-api[azure]'"
             )
+        if release_verify_timeout_seconds is None:
+            release_verify_timeout_seconds = float(
+                os.environ.get(
+                    "CURATION_RELEASE_ADMISSION_TIMEOUT_SECONDS",
+                    str(_DEFAULT_RELEASE_VERIFY_TIMEOUT_SECONDS),
+                )
+            )
+        if release_verify_max_bytes is None:
+            raw_bytes = os.environ.get("CURATION_RELEASE_ADMISSION_MAX_BYTES", str(_DEFAULT_RELEASE_VERIFY_MAX_BYTES))
+            if not raw_bytes.isascii() or not raw_bytes.isdecimal():
+                raise ValueError("CURATION_RELEASE_ADMISSION_MAX_BYTES must be a positive decimal integer")
+            release_verify_max_bytes = int(raw_bytes)
+        if (
+            isinstance(release_verify_timeout_seconds, bool)
+            or not isinstance(release_verify_timeout_seconds, int | float)
+            or not math.isfinite(release_verify_timeout_seconds)
+            or not 0 < release_verify_timeout_seconds <= 3600
+        ):
+            raise ValueError("release_verify_timeout_seconds must be finite and in (0, 3600]")
+        if (
+            isinstance(release_verify_max_bytes, bool)
+            or not isinstance(release_verify_max_bytes, int)
+            or not 0 < release_verify_max_bytes <= 1 << 42
+        ):
+            raise ValueError("release_verify_max_bytes must be an integer greater than 0")
 
         self.account_name = account_name
         self.container_name = container_name
         self.sas_token = sas_token
+        self._release_verify_timeout_seconds = float(release_verify_timeout_seconds)
+        self._release_verify_max_bytes = release_verify_max_bytes
         self._client: BlobServiceClient | None = None
         self._credential: AsyncDefaultAzureCredential | None = None
         self._info_cache: dict[str, dict] = {}
+        self._metadata_revisions: dict[str, str] = {}
         # Per-dataset cache of episode_index -> {camera -> (chunk, file, from_ts, to_ts)}
         self._episode_video_cache: dict[str, dict[int, dict[str, tuple[int, int, float, float]]]] = {}
 
@@ -100,6 +176,8 @@ class BlobDatasetProvider:
     @staticmethod
     def get_blob_prefix(dataset_id: str) -> str:
         """Convert a --separated dataset ID to a /-separated blob prefix."""
+        if _RESERVED_NAMESPACES.intersection(dataset_id.replace("--", "/").split("/")):
+            raise ValueError("reserved releases require marker-aware admission")
         return dataset_id_to_blob_prefix(dataset_id)
 
     async def _get_client(self) -> BlobServiceClient:
@@ -129,9 +207,63 @@ class BlobDatasetProvider:
             return await download.readall()
         except ResourceNotFoundError:
             return None
-        except Exception as e:
-            logger.warning("Failed to read blob '%s': %s", blob_path, e)
+        except Exception:
+            logger.warning("Failed to read blob: unavailable")
             return None
+
+    # ------------------------------------------------------------------
+    # Named release admission
+    # ------------------------------------------------------------------
+
+    async def _admitted(self, dataset_id: str) -> bool:
+        """Return whether a dataset may be served. Never raises; fails closed."""
+        deadline = time.monotonic() + self._release_verify_timeout_seconds
+        try:
+            return await asyncio.wait_for(
+                self._admit_release(dataset_id, deadline),
+                timeout=self._release_verify_timeout_seconds,
+            )
+        except Exception as e:
+            logger.warning(
+                "Dataset admission refused for '%s': %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                type(e).__name__,
+            )
+            return False
+
+    async def _admit_release(self, dataset_id: str, deadline: float) -> bool:
+        """Admit ordinary sources only; recorded releases use immutable release contexts."""
+        prefix = self.get_blob_prefix(dataset_id)
+        client = await self._get_client()
+        container = client.get_container_client(self.container_name)
+        return await self._read_ownership(container, prefix) is None
+
+    async def _read_ownership(self, container: Any, prefix: str) -> bytes | None:
+        owner_blob = container.get_blob_client(_ownership_blob_path(prefix))
+        try:
+            properties = await owner_blob.get_blob_properties()
+        except ResourceNotFoundError:
+            return None
+        if properties.size > _OWNERSHIP_MAX_BYTES:
+            raise ValueError("ownership document exceeds bound")
+        from azure.core import MatchConditions
+
+        return await _read_bounded(
+            await owner_blob.download_blob(
+                etag=properties.etag,
+                match_condition=MatchConditions.IfNotModified,
+            ),
+            _OWNERSHIP_MAX_BYTES,
+        )
+
+    async def _admit_blob_path(self, blob_path: str) -> bool:
+        parts = blob_path.split("/")
+        if any(not part or part in (".", "..", *_RESERVED_NAMESPACES) for part in parts):
+            return False
+        for depth in range(1, len(parts)):
+            if not await self._admitted("--".join(parts[:depth])):
+                return False
+        return True
 
     # ------------------------------------------------------------------
     # Dataset discovery
@@ -147,7 +279,7 @@ class BlobDatasetProvider:
         result = await self.scan_all_dataset_ids()
         return result["hdf5"]
 
-    async def scan_all_dataset_ids(self) -> dict[str, list[str]]:
+    async def scan_all_dataset_ids(self, *, strict: bool = False) -> dict[str, list[str]]:
         """Discover LeRobot and HDF5 datasets via prefix-only enumeration.
 
         Walks virtual directories with a '/' delimiter (cost proportional to
@@ -167,6 +299,8 @@ class BlobDatasetProvider:
             client = await self._get_client()
             container = client.get_container_client(self.container_name)
         except Exception as e:
+            if strict:
+                raise
             logger.warning("Failed to open blob container '%s': %s", self.container_name, e)
             return {"lerobot": [], "hdf5": []}
 
@@ -177,13 +311,19 @@ class BlobDatasetProvider:
             except ResourceNotFoundError:
                 return False
             except Exception as e:
+                if strict:
+                    raise
                 logger.warning("info.json probe failed for prefix '%s': %s", prefix, e)
                 return False
 
         async def _walk(prefix: str, depth: int) -> None:
             segments = prefix.rstrip("/").split("/") if prefix else []
+            if _RESERVED_NAMESPACES.intersection(segments):
+                return
             if 1 <= len(segments) <= max_depth and await _has_info_json(prefix):
-                lerobot_ids.add("--".join(segments))
+                dataset_id = "--".join(segments)
+                if await self._admitted(dataset_id):
+                    lerobot_ids.add(dataset_id)
                 return
 
             if depth >= max_depth:
@@ -201,11 +341,15 @@ class BlobDatasetProvider:
                     elif name.endswith(".hdf5"):
                         found_hdf5 = True
             except Exception as e:
+                if strict:
+                    raise
                 logger.warning("Failed to walk blob prefix '%s': %s", prefix, e)
                 return
 
             if found_hdf5 and 1 <= len(segments) <= max_depth:
-                hdf5_ids.add("--".join(segments))
+                dataset_id = "--".join(segments)
+                if await self._admitted(dataset_id):
+                    hdf5_ids.add(dataset_id)
                 return
 
             for child in child_prefixes:
@@ -214,6 +358,8 @@ class BlobDatasetProvider:
         try:
             await _walk("", 0)
         except Exception as e:
+            if strict:
+                raise
             logger.warning("Failed to scan blob container '%s': %s", self.container_name, e)
 
         hdf5_ids -= lerobot_ids
@@ -224,21 +370,48 @@ class BlobDatasetProvider:
 
     async def dataset_exists(self, dataset_id: str) -> bool:
         """Return True if the dataset has a meta/info.json blob."""
+        if _RESERVED_NAMESPACES.intersection(dataset_id.replace("--", "/").split("/")):
+            return False
         blob_path = f"{self.get_blob_prefix(dataset_id)}/meta/info.json"
         try:
             client = await self._get_client()
             container = client.get_container_client(self.container_name)
             blob_client = container.get_blob_client(blob_path)
             await blob_client.get_blob_properties()
-            return True
         except ResourceNotFoundError:
             return False
         except Exception:
             return False
+        return await self._admitted(dataset_id)
 
     # ------------------------------------------------------------------
     # Metadata access
     # ------------------------------------------------------------------
+
+    async def get_metadata_revision(self, dataset_id: str) -> str:
+        """Revalidate the metadata set before reusing parsed info or windows."""
+        if not await self._admitted(dataset_id):
+            raise ValueError("Metadata version unavailable")
+        client = await self._get_client()
+        container = client.get_container_client(self.container_name)
+        prefix = f"{self.get_blob_prefix(dataset_id)}/"
+        versions = []
+        async for blob in container.list_blobs(name_starts_with=f"{prefix}meta/"):
+            relative = blob.name[len(prefix) :]
+            if self._is_directory_blob(blob) or (
+                relative not in _SYNC_META_BLOBS and not relative.startswith("meta/episodes/")
+            ):
+                continue
+            if not isinstance(blob.etag, str) or not blob.etag:
+                raise ValueError("Metadata version unavailable")
+            versions.append((blob.name, blob.etag))
+        revision = hashlib.sha256(json.dumps(sorted(versions)).encode()).hexdigest()
+        previous = self._metadata_revisions.get(dataset_id)
+        if previous is not None and previous != revision:
+            self._info_cache.pop(dataset_id, None)
+            self._episode_video_cache.pop(dataset_id, None)
+        self._metadata_revisions[dataset_id] = revision
+        return revision
 
     async def get_info_json(self, dataset_id: str) -> dict | None:
         """
@@ -250,6 +423,9 @@ class BlobDatasetProvider:
         Returns:
             Parsed JSON dict or None if not found.
         """
+        if not await self._admitted(dataset_id):
+            return None
+        await self.get_metadata_revision(dataset_id)
         if dataset_id in self._info_cache:
             return self._info_cache[dataset_id]
 
@@ -283,6 +459,8 @@ class BlobDatasetProvider:
         Returns:
             Dict with 'size' (int) and 'content_type' (str), or None.
         """
+        if not await self._admit_blob_path(blob_path):
+            return None
         try:
             client = await self._get_client()
             container = client.get_container_client(self.container_name)
@@ -291,11 +469,12 @@ class BlobDatasetProvider:
             return {
                 "size": props.size,
                 "content_type": props.content_settings.content_type or "application/octet-stream",
+                **({"etag": props.etag} if isinstance(getattr(props, "etag", None), str) else {}),
             }
         except ResourceNotFoundError:
             return None
-        except Exception as e:
-            logger.warning("Failed to get properties for blob '%s': %s", blob_path, e)
+        except Exception:
+            logger.warning("Failed to get properties for blob: unavailable")
             return None
 
     # ------------------------------------------------------------------
@@ -324,6 +503,8 @@ class BlobDatasetProvider:
         Returns:
             Blob path string if found, None otherwise.
         """
+        if not await self._admitted(dataset_id):
+            return None
         info = await self.get_info_json(dataset_id)
         prefix = self.get_blob_prefix(dataset_id)
 
@@ -400,6 +581,10 @@ class BlobDatasetProvider:
         camera: str,
     ) -> tuple[int, int, float, float] | None:
         """Load per-episode video metadata (cached) and return entry for the camera."""
+        try:
+            await self.get_metadata_revision(dataset_id)
+        except Exception:
+            raise ValueError("Camera metadata unavailable") from None
         cache = self._episode_video_cache.get(dataset_id)
         if cache is None:
             cache = await self._load_episode_video_metadata(dataset_id)
@@ -445,7 +630,7 @@ class BlobDatasetProvider:
                     files = table.column(file_col).to_pylist()
                     froms = table.column(from_col).to_pylist()
                     tos = table.column(to_col).to_pylist()
-                    for ep, ck, fl, ft, tt in zip(episodes, chunks, files, froms, tos):
+                    for ep, ck, fl, ft, tt in zip(episodes, chunks, files, froms, tos, strict=True):
                         result.setdefault(int(ep), {})[camera] = (
                             int(ck),
                             int(fl),
@@ -520,6 +705,7 @@ class BlobDatasetProvider:
         chunk_size: int = 1024 * 1024,
         offset: int | None = None,
         length: int | None = None,
+        etag: str | None = None,
     ) -> AsyncIterator[bytes]:
         """
         Stream video bytes from blob in chunks.
@@ -533,13 +719,18 @@ class BlobDatasetProvider:
         Yields:
             Bytes chunks of the video stream.
         """
+        if not await self._admit_blob_path(blob_path):
+            return
         client = await self._get_client()
         container = client.get_container_client(self.container_name)
         blob_client = container.get_blob_client(blob_path)
+        from azure.core import MatchConditions
+
         download = await blob_client.download_blob(
             offset=offset,
             length=length,
             max_concurrency=4,
+            **({"etag": etag, "match_condition": MatchConditions.IfNotModified} if etag else {}),
         )
         async for chunk in download.chunks():
             yield chunk
@@ -563,13 +754,15 @@ class BlobDatasetProvider:
 
             async with client:
                 container = client.get_container_client(self.container_name)
+                if await self._read_ownership(container, prefix) is not None:
+                    return False
                 blob_client = container.get_blob_client(blob_path)
                 await blob_client.upload_blob(self._read_file_chunks(local_path), overwrite=True)
 
-            logger.info("Uploaded video to blob: %s", blob_path)
+            logger.info("Uploaded dataset video")
             return True
-        except Exception as e:
-            logger.warning("Failed to upload video to blob '%s': %s", blob_path, e)
+        except Exception:
+            logger.warning("Dataset video upload failed: unavailable")
             return False
         finally:
             if credential is not None:
@@ -601,6 +794,8 @@ class BlobDatasetProvider:
         Returns:
             True if sync completed successfully, False on critical failure.
         """
+        if not await self._admitted(dataset_id):
+            return False
         await asyncio.to_thread(local_dir.mkdir, parents=True, exist_ok=True)
 
         try:
@@ -656,6 +851,46 @@ class BlobDatasetProvider:
         metadata = getattr(blob, "metadata", None)
         return isinstance(metadata, dict) and str(metadata.get("hdi_isfolder", "")).lower() == "true"
 
+    async def sync_episode_to_local(self, dataset_id: str, local_dir: Path, episode_index: int) -> bool:
+        """Prepare metadata and only the requested episode's trajectory shard."""
+        if not await self.sync_meta_only_to_local(dataset_id, local_dir):
+            return False
+        info = json.loads(await asyncio.to_thread((local_dir / "meta" / "info.json").read_text))
+        if not 0 <= episode_index < int(info.get("total_episodes", 0)):
+            return False
+        template = info.get("data_path", "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet")
+        if "{episode_index" in template:
+            chunk_index, file_index = episode_index // max(int(info.get("chunks_size", 1000)), 1), 0
+        else:
+            location = None
+            for metadata_path in sorted((local_dir / "meta" / "episodes").glob("**/*.parquet")):
+                table = await asyncio.to_thread(pq.read_table, metadata_path)
+                columns = ["episode_index", "data/chunk_index", "data/file_index"]
+                if not set(columns).issubset(table.column_names):
+                    continue
+                for row in table.select(columns).to_pylist():
+                    if int(row["episode_index"]) == episode_index:
+                        location = int(row["data/chunk_index"]), int(row["data/file_index"])
+                        break
+                if location is not None:
+                    break
+            if location is None:
+                return False
+            chunk_index, file_index = location
+        relative = template.format(
+            episode_index=episode_index, episode_chunk=chunk_index, chunk_index=chunk_index, file_index=file_index
+        )
+        normalized = os.path.normpath(os.path.realpath(str(local_dir / relative)))
+        if not relative.startswith("data/") or not normalized.startswith(str(local_dir.resolve() / "data") + os.sep):
+            raise ValueError("Invalid episode data path")
+        target = Path(normalized)
+        data = await self._read_blob_bytes(f"{self.get_blob_prefix(dataset_id)}/{relative}")
+        if data is None:
+            return False
+        await asyncio.to_thread(target.parent.mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread(target.write_bytes, data)
+        return True
+
     async def sync_meta_only_to_local(self, dataset_id: str, local_dir: Path) -> bool:
         """
         Download only meta/ files for a dataset to a local directory.
@@ -671,6 +906,8 @@ class BlobDatasetProvider:
         Returns:
             True if meta/info.json was successfully downloaded, False otherwise.
         """
+        if not await self._admitted(dataset_id):
+            return False
         await asyncio.to_thread(local_dir.mkdir, parents=True, exist_ok=True)
 
         try:
@@ -687,15 +924,23 @@ class BlobDatasetProvider:
                 if relative not in _SYNC_META_BLOBS and not relative.startswith("meta/episodes/"):
                     continue
 
-                local_path = local_dir / relative
+                local_path = (local_dir / relative).resolve()
+                if not local_path.is_relative_to(local_dir.resolve()):
+                    raise ValueError("Invalid metadata path")
                 await asyncio.to_thread(local_path.parent.mkdir, parents=True, exist_ok=True)
 
                 if await asyncio.to_thread(local_path.exists):
                     continue
 
                 data = await self._read_blob_bytes(blob.name)
-                if data is not None:
-                    await asyncio.to_thread(local_path.write_bytes, data)
+                if data is None:
+                    logger.warning(
+                        "Metadata blob download incomplete for dataset '%s' category=%s",
+                        dataset_id.replace("\r", "").replace("\n", ""),
+                        "manifest" if relative == "meta/info.json" else "episode-metadata",
+                    )
+                    return False
+                await asyncio.to_thread(local_path.write_bytes, data)
 
             info_path = local_dir / "meta" / "info.json"
             if not await asyncio.to_thread(info_path.exists):
@@ -720,14 +965,15 @@ class BlobDatasetProvider:
     # ------------------------------------------------------------------
 
     async def sync_hdf5_dataset_to_local(self, dataset_id: str, local_dir: Path) -> bool:
-        """Download HDF5 config, video cache, and episode listing to a local directory.
+        """Download HDF5 config and episode listing without media.
 
-        Downloads JSON config files, cached MP4 videos from meta/videos/,
-        and creates empty placeholder files for each .hdf5 blob so
+        Downloads JSON config files and creates empty placeholders for each .hdf5 blob so
         HDF5Loader.list_episodes() can discover episode indices without
         downloading full episode data. Episode HDF5 files are fetched
         on-demand via sync_hdf5_episode_to_local.
         """
+        if not await self._admitted(dataset_id):
+            return False
         await asyncio.to_thread(local_dir.mkdir, parents=True, exist_ok=True)
         prefix = self.get_blob_prefix(dataset_id)
         try:
@@ -749,20 +995,6 @@ class BlobDatasetProvider:
                     local_path = local_dir / filename
                     if not await asyncio.to_thread(local_path.exists):
                         await asyncio.to_thread(local_path.touch)
-                elif blob.name.endswith(".mp4") and "/meta/videos/" in blob.name:
-                    relative = blob.name[len(prefix + "/") :]
-                    local_path = local_dir / relative
-                    if await asyncio.to_thread(local_path.exists):
-                        continue
-                    await asyncio.to_thread(local_path.parent.mkdir, parents=True, exist_ok=True)
-                    blob_client = container.get_blob_client(blob.name)
-                    download = await blob_client.download_blob()
-                    tmp_path = local_path.with_suffix(".mp4.tmp")
-                    async with aiofiles.open(tmp_path, "wb") as file:
-                        async for chunk in download.chunks():
-                            await file.write(chunk)
-                    await asyncio.to_thread(tmp_path.replace, local_path)
-                    logger.info("Downloaded cached video: %s", relative)
             return found_hdf5
         except Exception as e:
             logger.warning(
@@ -777,6 +1009,8 @@ class BlobDatasetProvider:
 
         Streams directly to disk to avoid loading the entire file into memory.
         """
+        if not await self._admitted(dataset_id):
+            return False
         prefix = self.get_blob_prefix(dataset_id)
         patterns = [
             f"episode_{episode_idx:06d}.hdf5",
@@ -807,18 +1041,17 @@ class BlobDatasetProvider:
                 await asyncio.to_thread(tmp_path.replace, local_path)
                 logger.info(
                     "Downloaded HDF5 episode %d for '%s' (%d bytes)",
-                    episode_idx,
-                    dataset_id,
+                    int(episode_idx),
+                    dataset_id.replace("\r", "").replace("\n", ""),
                     written,
                 )
                 return True
             return False
-        except Exception as e:
+        except Exception:
             logger.warning(
-                "Failed to sync HDF5 episode %d for '%s': %s",
-                episode_idx,
-                dataset_id,
-                e,
+                "Failed to sync HDF5 episode %d for '%s': unavailable",
+                int(episode_idx),
+                dataset_id.replace("\r", "").replace("\n", ""),
             )
             return False
 
@@ -829,6 +1062,8 @@ class BlobDatasetProvider:
 
     async def get_hdf5_dataset_config(self, dataset_id: str) -> dict | None:
         """Read dataset_config.json for a dataset."""
+        if not await self._admitted(dataset_id):
+            return None
         data = await self._read_blob_bytes(f"{self.get_blob_prefix(dataset_id)}/dataset_config.json")
         if data is None:
             return None
@@ -839,6 +1074,8 @@ class BlobDatasetProvider:
 
     async def count_hdf5_episodes(self, dataset_id: str) -> int:
         """Count .hdf5 files for a dataset."""
+        if not await self._admitted(dataset_id):
+            return 0
         prefix = self.get_blob_prefix(dataset_id)
         try:
             client = await self._get_client()

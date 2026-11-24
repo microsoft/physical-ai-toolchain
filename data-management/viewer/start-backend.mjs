@@ -1,14 +1,21 @@
 import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 
 const backend = spawn(
   "uv",
   [
     "run",
+    "--no-sync",
     "--frozen",
     "--directory",
     "backend",
-    "uvicorn",
-    "src.api.main:app",
+    "--project",
+    resolve("../.."),
+    "--package",
+    "lerobot-annotation-api",
+    "python",
+    "-m",
+    "src.api.server",
     "--log-config",
     "logging.json",
     "--log-level",
@@ -20,7 +27,11 @@ const backend = spawn(
     process.env.BACKEND_PORT ?? "8000",
   ],
   {
-    env: process.env,
+    env: {
+      ...process.env,
+      UV_PROJECT_ENVIRONMENT:
+        process.env.UV_PROJECT_ENVIRONMENT ?? resolve("backend/.venv"),
+    },
     stdio: "inherit",
   },
 );

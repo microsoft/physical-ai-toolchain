@@ -8,6 +8,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../..
 source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=defaults.conf
 source "$SCRIPT_DIR/defaults.conf"
+# shellcheck source=../../scripts/lib/osmo-cluster.sh
+source "$REPO_ROOT/scripts/lib/osmo-cluster.sh"
 
 VALUES_DIR="$SCRIPT_DIR/values"
 MANIFESTS_DIR="$SCRIPT_DIR/manifests"
@@ -174,29 +176,13 @@ fi
 if [[ "$skip_kai" == "false" ]]; then
   section "Install KAI Scheduler $kai_version"
 
-  kai_chart_ref="$HELM_REPO_KAI/kai-scheduler"
-  kai_chart_args=( "$kai_chart_ref" --version "$kai_version" )
+  kai_chart="$HELM_REPO_KAI/kai-scheduler"
+  kai_chart_args=(--version "$kai_version")
   if [[ -n "${KAI_SCHEDULER_CHART_SHA256:-}" ]]; then
-    kai_tgz=$(pull_and_verify_chart "$kai_chart_ref" "$kai_version" "$KAI_SCHEDULER_CHART_SHA256" "$(mktemp -d)")
-    kai_chart_args=( "$kai_tgz" )
+    kai_chart=$(pull_and_verify_chart "$kai_chart" "$kai_version" "$KAI_SCHEDULER_CHART_SHA256" "$(mktemp -d)")
+    kai_chart_args=()
   fi
-
-  # KAI uses an operator pattern: the chart deploys kai-operator, which then
-  # creates the scheduler/binder/admission components and a cluster-scoped
-  # SchedulingShard CR. That CR holds a permanent Reconciling=True condition,
-  # which Helm v4's kstatus-based --wait reads as "in progress", so --wait always
-  # times out despite a healthy deployment. Wait on KAI's own signals instead.
-  helm upgrade --install kai-scheduler "${kai_chart_args[@]}" \
-    --namespace "$NS_KAI_SCHEDULER" \
-    --create-namespace \
-    -f "$kai_values" \
-    --timeout "$TIMEOUT_DEPLOY"
-
-  info "Waiting for KAI operator rollout..."
-  kubectl rollout status deployment/kai-operator -n "$NS_KAI_SCHEDULER" --timeout "$TIMEOUT_DEPLOY"
-
-  info "Waiting for KAI SchedulingShard to become available..."
-  kubectl wait --for=condition=Available schedulingshard/default --timeout "$TIMEOUT_DEPLOY"
+  install_kai_scheduler "$kubeconfig" "$context" "$kai_chart" "$kai_values" "${kai_chart_args[@]}"
 
   info "KAI Scheduler installed successfully"
 else

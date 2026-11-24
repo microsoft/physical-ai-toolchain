@@ -109,7 +109,6 @@ def _detection_service(tmp_path: Path, *model_names: str) -> DetectionService:
     return DetectionService(models_dir=tmp_path, model_digests=digests)
 
 
-@pytest.mark.asyncio
 async def test_detect_frame_loads_model_and_returns_exact_empty_result(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -137,7 +136,6 @@ async def test_detect_frame_loads_model_and_returns_exact_empty_result(
     assert inference_kwargs == {"conf": 0.4, "verbose": False}
 
 
-@pytest.mark.asyncio
 async def test_detect_frame_maps_model_names_and_fallback_names(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -179,7 +177,6 @@ async def test_detect_frame_maps_model_names_and_fallback_names(
     ]
 
 
-@pytest.mark.asyncio
 async def test_detect_frame_returns_empty_result_when_model_returns_no_boxes(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -195,7 +192,6 @@ async def test_detect_frame_returns_empty_result_when_model_returns_no_boxes(
     assert result.processing_time_ms >= 0
 
 
-@pytest.mark.asyncio
 async def test_detect_frame_uses_open_vocabulary_model_and_reuses_it(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -216,7 +212,6 @@ async def test_detect_frame_uses_open_vocabulary_model_and_reuses_it(
     assert len(model.calls) == 3
 
 
-@pytest.mark.asyncio
 async def test_detect_frame_surfaces_missing_model_dependency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

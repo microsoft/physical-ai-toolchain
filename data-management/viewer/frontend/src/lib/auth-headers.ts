@@ -27,7 +27,8 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
   } catch (error) {
     if (error instanceof InteractionRequiredAuthError) {
       await msalInstance.acquireTokenRedirect(loginRequest)
+      return {}
     }
-    return {}
+    throw error
   }
 }

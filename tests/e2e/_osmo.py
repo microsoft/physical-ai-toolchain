@@ -7,16 +7,17 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 import pytest
 
-from tests.e2e._aml import AmlModelRef, AzureMLWorkspace
+from tests.e2e._aml import AzureMLWorkspace
 from tests.e2e._common import (
     E2EHandle,
+    RegisteredModel,
     command_tuple,
     delete_blob_prefix,
     e2e_name,
@@ -29,6 +30,10 @@ from tests.e2e._common import (
     upload_blob_directory,
     wait_for_status,
 )
+
+if TYPE_CHECKING:
+    from tests.e2e._lerobot_dataset import LeRobotDatasetSource
+    from tests.e2e._profile import PlatformProfile
 
 OSMO_SUCCESS_STATES = {"COMPLETED", "SUCCEEDED"}
 OSMO_STARTED_STATES = {"RUNNING", *OSMO_SUCCESS_STATES}
@@ -83,6 +88,17 @@ class OSMOWorkflow:
     terminal_status: str | None = None
 
 
+class SubmitPlatform(Protocol):
+    """The platform members the submit helpers read; ``tests.e2e._platform`` implements them for each profile."""
+
+    @property
+    def profile(self) -> PlatformProfile:
+        raise NotImplementedError
+
+    def workspace_args(self) -> list[str]:
+        raise NotImplementedError
+
+
 def _run_osmo_read_command(
     args: list[str],
     *,
@@ -123,28 +139,31 @@ def _e2e_correlation_id() -> str:
     return f"osmo-rl-e2e-{uuid.uuid4().hex}"
 
 
-def _osmo_rl_smoke_training_args(*, task: str, max_iterations: int, num_envs: int) -> list[str]:
-    """Core + smoke-sized resource args shared by the archive and dataset-injection RL submit paths.
+def _osmo_rl_smoke_training_args(
+    profile: PlatformProfile, *, task: str, max_iterations: int, num_envs: int
+) -> list[str]:
+    """Profile, core, and resource args shared by the archive and dataset-injection RL submit paths.
 
-    Sized to fit a single Standard_NC24ads_A100_v4 GPU node (24 vCPU / 220 GiB); the script
-    defaults target production headroom.
+    The azure profile sizes the task to fit a single Standard_NC24ads_A100_v4 GPU node (24 vCPU / 220 GiB);
+    the script defaults target production headroom. The local profile's task size comes from the profile.
     """
-    return [
+    args = [
+        *profile.profile_args(),
         "--task",
         task,
         "--max-iterations",
         str(max_iterations),
         "--num-envs",
         str(num_envs),
-        "--cpu",
-        "20",
-        "--memory",
-        "180Gi",
     ]
+    if not profile.is_local:
+        args += ["--cpu", "20", "--memory", "180Gi"]
+    return args
 
 
 def submit_osmo_training(
     repo_root: Path,
+    profile: PlatformProfile,
     *,
     task: str,
     max_iterations: int,
@@ -161,12 +180,12 @@ def submit_osmo_training(
     log_e2e(
         "Submitting OSMO workflow "
         f"for task={task}, num_envs={num_envs}, max_iterations={max_iterations}, experiment={experiment_name}, "
-        f"correlation_id={correlation_id}"
+        f"correlation_id={correlation_id}, profile={profile.name}"
     )
     result = run_command(
         [
             str(repo_root / "training/rl/scripts/submit-osmo-training.sh"),
-            *_osmo_rl_smoke_training_args(task=task, max_iterations=max_iterations, num_envs=num_envs),
+            *_osmo_rl_smoke_training_args(profile, task=task, max_iterations=max_iterations, num_envs=num_envs),
             "--correlation-id",
             correlation_id,
             *register_args,
@@ -190,6 +209,7 @@ def submit_osmo_training(
 
 def submit_osmo_dataset_training(
     repo_root: Path,
+    profile: PlatformProfile,
     *,
     task: str,
     max_iterations: int,
@@ -206,12 +226,13 @@ def submit_osmo_dataset_training(
     experiment_name = f"isaaclab-{task}" if task else "isaaclab-training"
     log_e2e(
         "Submitting OSMO dataset-injection workflow "
-        f"for task={task}, num_envs={num_envs}, max_iterations={max_iterations}, experiment={experiment_name}"
+        f"for task={task}, num_envs={num_envs}, max_iterations={max_iterations}, experiment={experiment_name}, "
+        f"profile={profile.name}"
     )
     result = run_command(
         [
             str(repo_root / "training/rl/scripts/submit-osmo-dataset-training.sh"),
-            *_osmo_rl_smoke_training_args(task=task, max_iterations=max_iterations, num_envs=num_envs),
+            *_osmo_rl_smoke_training_args(profile, task=task, max_iterations=max_iterations, num_envs=num_envs),
             "--skip-register-checkpoint",
             "--",
             "--format-type",
@@ -485,7 +506,7 @@ def fetch_workflow_task_logs(
             "--task",
             task_name,
             "-n",
-            "10000",
+            "2000",
         ],
         cwd=repo_root,
         description=f"OSMO persisted log read for {workflow.workflow_id}/{task_name}",
@@ -942,9 +963,9 @@ def _osmo_workflow_from_submission(
 
 def submit_osmo_lerobot_training(
     repo_root: Path,
-    aml_workspace: AzureMLWorkspace,
+    platform: SubmitPlatform,
     *,
-    blob_url: str,
+    dataset: LeRobotDatasetSource,
     policy_type: str,
     training_steps: int,
     save_freq: int,
@@ -952,21 +973,22 @@ def submit_osmo_lerobot_training(
     learning_rate: str,
     log_freq: int,
     register_model_name: str | None = None,
+    extra_args: Sequence[str] = (),
 ) -> OSMOWorkflow:
-    experiment_name = e2e_name("il-training-e2e-osmo")
+    experiment_name = e2e_name(f"{policy_type}-training-e2e-osmo")
     register_args = ["--register-checkpoint", register_model_name] if register_model_name else []
     log_e2e(
         "Submitting OSMO LeRobot training workflow "
-        f"for dataset={blob_url}, policy={policy_type}, training_steps={training_steps}, "
+        f"for dataset={dataset.description}, policy={policy_type}, training_steps={training_steps}, "
         f"save_freq={save_freq}, batch_size={batch_size}, learning_rate={learning_rate}, "
-        f"log_freq={log_freq}, experiment={experiment_name}"
+        f"log_freq={log_freq}, experiment={experiment_name}, profile={platform.profile.name}"
     )
     # eval-freq > training-steps disables in-loop evaluation, which needs sim deps absent from the training container.
     result = run_command(
         [
             str(repo_root / "training/il/scripts/submit-osmo-lerobot-training.sh"),
-            "--blob-url",
-            blob_url,
+            *platform.profile.profile_args(),
+            *dataset.training_args,
             "--policy-type",
             policy_type,
             "--training-steps",
@@ -983,13 +1005,9 @@ def submit_osmo_lerobot_training(
             learning_rate,
             "--experiment-name",
             experiment_name,
-            "--azure-subscription-id",
-            aml_workspace.subscription_id,
-            "--azure-resource-group",
-            aml_workspace.resource_group,
-            "--azure-workspace-name",
-            aml_workspace.workspace_name,
+            *platform.workspace_args(),
             *register_args,
+            *extra_args,
             "--",
             "--format-type",
             "json",
@@ -1015,7 +1033,7 @@ class OsmoLeRobotEvalPolicySource:
     description: str
 
 
-def osmo_lerobot_policy_source_from_model(model: AmlModelRef) -> OsmoLeRobotEvalPolicySource:
+def osmo_lerobot_policy_source_from_model(model: RegisteredModel) -> OsmoLeRobotEvalPolicySource:
     """Build an eval policy source from a concrete registered AzureML model."""
     return OsmoLeRobotEvalPolicySource(
         args=("--from-aml-model", "--model-name", model.name, "--model-version", model.version),
@@ -1023,11 +1041,28 @@ def osmo_lerobot_policy_source_from_model(model: AmlModelRef) -> OsmoLeRobotEval
     )
 
 
-def resolve_osmo_lerobot_eval_policy_override() -> OsmoLeRobotEvalPolicySource | None:
+def registered_model_override() -> RegisteredModel | None:
+    """Return the registered model ``E2E_LEROBOT_EVAL_MODEL`` names as ``name:version``, or ``None`` when unset."""
+    model = env_value(_LEROBOT_EVAL_MODEL_ENV)
+    if not model:
+        return None
+    if ":" not in model:
+        pytest.skip(f"{_LEROBOT_EVAL_MODEL_ENV} must use registered model name:version syntax")
+
+    model_name, model_version = (part.strip() for part in model.split(":", 1))
+    if not model_name or not model_version:
+        pytest.skip(f"{_LEROBOT_EVAL_MODEL_ENV} must include a non-empty registered model name and version")
+    return RegisteredModel(name=model_name, version=model_version)
+
+
+def resolve_osmo_lerobot_eval_policy_override(
+    model_source: Callable[[RegisteredModel], OsmoLeRobotEvalPolicySource] = osmo_lerobot_policy_source_from_model,
+) -> OsmoLeRobotEvalPolicySource | None:
     """Resolve an eval policy source from the environment, or ``None`` when unset.
 
     Configure ``E2E_LEROBOT_EVAL_POLICY_REPO_ID`` with ``E2E_LEROBOT_EVAL_POLICY_REVISION``
-    (HuggingFace repo) or ``E2E_LEROBOT_EVAL_MODEL`` (AzureML model ``name:version``). Missing
+    (HuggingFace repo) or ``E2E_LEROBOT_EVAL_MODEL`` (registered model ``name:version``, which
+    ``model_source`` turns into the platform's registry source; AzureML by default). Missing
     or malformed values skip.
     """
     policy_repo_id = env_value(_LEROBOT_EVAL_POLICY_REPO_ENV)
@@ -1040,57 +1075,37 @@ def resolve_osmo_lerobot_eval_policy_override() -> OsmoLeRobotEvalPolicySource |
             description=f"HuggingFace policy repo {policy_repo_id}@{policy_revision}",
         )
 
-    model = env_value(_LEROBOT_EVAL_MODEL_ENV)
-    if not model:
-        return None
-    if ":" not in model:
-        pytest.skip(f"{_LEROBOT_EVAL_MODEL_ENV} must use AzureML model name:version syntax")
-
-    model_name, model_version = (part.strip() for part in model.split(":", 1))
-    if not model_name or not model_version:
-        pytest.skip(f"{_LEROBOT_EVAL_MODEL_ENV} must include a non-empty AzureML model name and version")
-
-    return osmo_lerobot_policy_source_from_model(AmlModelRef(name=model_name, version=model_version))
+    model = registered_model_override()
+    return model_source(model) if model is not None else None
 
 
 def submit_osmo_lerobot_eval(
     repo_root: Path,
-    aml_workspace: AzureMLWorkspace,
+    platform: SubmitPlatform,
     *,
     policy_source: OsmoLeRobotEvalPolicySource,
+    dataset: LeRobotDatasetSource,
     policy_type: str,
     eval_episodes: int,
     eval_batch_size: int,
-    blob_storage_account: str,
-    blob_container: str,
-    blob_prefix: str,
 ) -> OSMOWorkflow:
     model_args = list(policy_source.args)
     model_description = policy_source.description
-    dataset_args = [
-        "--from-blob-dataset",
-        "--storage-account",
-        blob_storage_account,
-        "--storage-container",
-        blob_container,
-        "--blob-prefix",
-        blob_prefix,
-    ]
-    dataset_description = f"Azure Blob dataset {blob_storage_account}/{blob_container}/{blob_prefix}"
     experiment_name = e2e_name("lerobot-eval-e2e-osmo")
     job_name = e2e_name("lerobot-eval")
     log_e2e(
         "Submitting OSMO LeRobot eval workflow "
-        f"for policy_type={policy_type}, model={model_description}, dataset={dataset_description}, "
-        f"experiment={experiment_name}, job={job_name}"
+        f"for policy_type={policy_type}, model={model_description}, dataset={dataset.description}, "
+        f"experiment={experiment_name}, job={job_name}, profile={platform.profile.name}"
     )
     result = run_command(
         [
             str(repo_root / "evaluation/sil/scripts/submit-osmo-lerobot-eval.sh"),
             "--workflow",
             str(repo_root / "evaluation/sil/workflows/osmo/lerobot-eval.yaml"),
+            *platform.profile.profile_args(),
             *model_args,
-            *dataset_args,
+            *dataset.eval_args,
             "--policy-type",
             policy_type,
             "--eval-episodes",
@@ -1100,12 +1115,7 @@ def submit_osmo_lerobot_eval(
             "--experiment-name",
             experiment_name,
             "--mlflow-enable",
-            "--azure-subscription-id",
-            aml_workspace.subscription_id,
-            "--azure-resource-group",
-            aml_workspace.resource_group,
-            "--azure-workspace-name",
-            aml_workspace.workspace_name,
+            *platform.workspace_args(),
             "--job-name",
             job_name,
             "--",
@@ -1136,36 +1146,52 @@ def resolve_osmo_isaac_eval_checkpoint_override() -> str | None:
 
 def submit_osmo_isaaclab_eval(
     repo_root: Path,
-    aml_workspace: AzureMLWorkspace,
+    platform: SubmitPlatform,
     *,
-    checkpoint_uri: str,
     task: str,
     num_envs: int,
     max_steps: int,
+    eval_episodes: int,
+    success_threshold: float,
+    checkpoint_uri: str | None = None,
+    policy_image: str | None = None,
+    output_dataset: str | None = None,
 ) -> OSMOWorkflow:
-    """Submit the OSMO Isaac Lab evaluation/inference workflow against a checkpoint URI."""
-    experiment_name = f"isaaclab-inference-{task}" if task else "isaaclab-inference"
+    """Submit the gated OSMO Isaac Lab evaluation of a checkpoint URI or a runnable policy carrier.
+
+    The run lands in its own MLflow experiment, so the caller reads this evaluation's gate verdict.
+    ``output_dataset`` publishes the rollout videos and metrics as an OSMO dataset, such as judge input.
+    """
+    if (checkpoint_uri is None) == (policy_image is None):
+        raise ValueError("Evaluate exactly one of checkpoint_uri or policy_image")
+    policy_args = ["--checkpoint-uri", checkpoint_uri] if checkpoint_uri else ["--policy-image", str(policy_image)]
+    output_args = ["--output-dataset", output_dataset] if output_dataset else []
+    experiment_name = e2e_name("isaaclab-eval-e2e-osmo")
     log_e2e(
         "Submitting OSMO Isaac Lab eval workflow "
-        f"for task={task}, num_envs={num_envs}, max_steps={max_steps}, checkpoint_uri={checkpoint_uri}"
+        f"for task={task}, num_envs={num_envs}, max_steps={max_steps}, eval_episodes={eval_episodes}, "
+        f"success_threshold={success_threshold}, policy={checkpoint_uri or policy_image}, "
+        f"experiment={experiment_name}, profile={platform.profile.name}"
     )
     result = run_command(
         [
             str(repo_root / "evaluation/sil/scripts/submit-osmo-eval.sh"),
-            "--checkpoint-uri",
-            checkpoint_uri,
+            *platform.profile.profile_args(),
+            *policy_args,
             "--task",
             task,
             "--num-envs",
             str(num_envs),
             "--max-steps",
             str(max_steps),
-            "--azure-subscription-id",
-            aml_workspace.subscription_id,
-            "--azure-resource-group",
-            aml_workspace.resource_group,
-            "--azure-workspace-name",
-            aml_workspace.workspace_name,
+            "--eval-episodes",
+            str(eval_episodes),
+            "--success-threshold",
+            str(success_threshold),
+            "--experiment-name",
+            experiment_name,
+            *output_args,
+            *platform.workspace_args(),
             "--",
             "--format-type",
             "json",

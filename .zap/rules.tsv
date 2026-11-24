@@ -9,5 +9,6 @@
 10036	IGNORE	Server Leaks Version Information via "Server" HTTP Response Header Field
 10038	WARN	Content Security Policy (CSP) Header Not Set
 10049	IGNORE	Storable and Cacheable Content
-10055	WARN	CSP: Wildcard Directive
+10055	IGNORE	Current frontend inline styles require style-src 'unsafe-inline'; plugin-level baselining also covers other CSP sub-alerts because alert-reference IDs are rejected by ZAP automation-plan generation
 10109	IGNORE	Modern Web Application (informational)
+90004	IGNORE	Strict COEP is incompatible with the supported MSAL silent-authentication iframe; the classic baseline scan plugin ID cannot be scoped to COEP alone (per-header alertRef IDs like 90004-2 are rejected by ZAP automation-plan generation), so this also suppresses the COOP and CORP sub-alerts as an accepted residual risk

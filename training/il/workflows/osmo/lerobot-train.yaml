@@ -5,9 +5,9 @@ workflow:
   resources:
     default:
       gpu: {{ num_gpus }}
-      cpu: 8
-      memory: 48Gi
-      storage: 80Gi
+      cpu: {{ cpu }}
+      memory: {{ memory }}
+      storage: {{ storage }}
       platform: "{{ platform }}"
   tasks:
     - name: lerobot-train
@@ -31,6 +31,12 @@ workflow:
         NVIDIA_DRIVER_CAPABILITIES: "all"
         DATASET_REPO_ID: "{{ dataset_repo_id }}"
         DATASET_ROOT: "{{ dataset_root }}"
+        DATASET_DIR: "{{ dataset_dir }}"
+        LEROBOT_PROJECT: "{{ lerobot_project }}"
+        POLICY_PATH: "{{ policy_path }}"
+        POLICY_PATH_REVISION: "{{ policy_path_revision }}"
+        # Single-quoted: {{ rename_map }} expands to a JSON object literal.
+        RENAME_MAP: '{{ rename_map }}'
         # Single-quoted: {{ blob_urls }} expands to a JSON array literal whose
         # double quotes would otherwise break the YAML string.
         BLOB_URLS: '{{ blob_urls }}'
@@ -58,6 +64,8 @@ workflow:
         AZURE_AUTHORITY_HOST: "{{ azure_authority_host }}"
         MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES: "{{ mlflow_token_refresh_retries }}"
         MLFLOW_HTTP_REQUEST_TIMEOUT: "{{ mlflow_http_request_timeout }}"
+        TRACKING_BACKEND: "{{ tracking_backend }}"
+        MLFLOW_TRACKING_URI: "{{ mlflow_tracking_uri }}"
         OSMO_INPUT_0: "{{input:0}}"
       files:
         - path: /tmp/entry.sh.b64
@@ -72,6 +80,11 @@ default-values:
   payload_root: /workspace/lerobot_payload
   dataset_repo_id: ""
   dataset_root: /workspace/data
+  dataset_dir: ""
+  lerobot_project: training/il/lerobot
+  policy_path: ""
+  policy_path_revision: ""
+  rename_map: ""
   blob_urls: "[]"
   use_huggingface_credential: "true"
   policy_type: act
@@ -88,6 +101,9 @@ default-values:
   val_split: "0.1"
   system_metrics: "true"
   num_gpus: "1"
+  cpu: "8"
+  memory: 48Gi
+  storage: 80Gi
   mixed_precision: "no"
   platform: gpu_platform
   lerobot_version: ""
@@ -99,3 +115,5 @@ default-values:
   azure_authority_host: https://login.microsoftonline.com
   mlflow_token_refresh_retries: "3"
   mlflow_http_request_timeout: "60"
+  tracking_backend: azureml
+  mlflow_tracking_uri: ""

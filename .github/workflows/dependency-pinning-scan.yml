@@ -34,6 +34,14 @@ on:
         type: string
         default: ''
     outputs:
+      work-status: {description: Execution status, value: '${{ jobs.scan.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.scan.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.scan.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.scan.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.scan.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.scan.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.scan.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.scan.outputs.first-failure }}'}
       compliance-score:
         description: 'Compliance score percentage'
         value: ${{ jobs.scan.outputs.compliance-score }}
@@ -55,10 +63,19 @@ jobs:
   scan:
     name: Validate SHA Pinning Compliance
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       security-events: write  # Required for SARIF upload to Security tab
     outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
       compliance-score: ${{ steps.pinning.outputs.compliance-score }}
       unpinned-count: ${{ steps.pinning.outputs.unpinned-count }}
       is-compliant: ${{ steps.pinning.outputs.is-compliant }}
@@ -70,17 +87,18 @@ jobs:
 
       - name: Run SHA Pinning Validation
         id: pinning
+        continue-on-error: ${{ inputs.soft-fail }}
         env:
           PINNING_THRESHOLD: ${{ inputs.threshold }}
           PINNING_DEPENDENCY_TYPES: ${{ inputs.dependency-types }}
-          PINNING_SOFT_FAIL: ${{ inputs.soft-fail }}
+          PINNING_SOFT_FAIL: 'false'
           PINNING_UPLOAD_SARIF: ${{ inputs.upload-sarif }}
           PINNING_EXCLUDE_PATHS: ${{ inputs.exclude-paths }}
         run: ./scripts/security/Invoke-DependencyPinningWorkflow.ps1
 
       - name: Upload SARIF to Security tab
         if: inputs.upload-sarif && always()
-        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: logs/dependency-pinning-results.sarif
           category: dependency-pinning
@@ -88,8 +106,19 @@ jobs:
 
       - name: Upload validation report
         if: inputs.upload-artifact && always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dependency-pinning-results
           path: logs/dependency-pinning-results.json
           retention-days: 90
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: dependency-pinning-scan
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["pinning"]'
+          reports: '[{"path":"logs/dependency-pinning-results.json","kind":"json"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

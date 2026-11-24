@@ -506,6 +506,9 @@ function Invoke-Validation {
         -Branch $script:BaseBranch)
 
     if ($mdFiles.Count -eq 0) {
+        if (-not $script:ChangedFilesOnly) {
+            throw 'Full frontmatter validation has no markdown files.'
+        }
         Write-Host 'No markdown files to validate.'
         Set-CIOutput -Name 'total-issues' -Value '0' -IsOutput
         Set-CIOutput -Name 'total-errors' -Value '0' -IsOutput
@@ -689,7 +692,7 @@ function Invoke-Validation {
             errorCount   = $totalErrors
             warningCount = $totalWarnings
         }
-        results   = $results | ForEach-Object {
+        results   = @($results | ForEach-Object {
             @{
                 file    = $_.FilePath
                 isValid = $_.IsValid
@@ -702,7 +705,7 @@ function Invoke-Validation {
                     }
                 })
             }
-        }
+        })
     }
 
     $jsonPath = Join-Path $logsDir 'frontmatter-validation-results.json'

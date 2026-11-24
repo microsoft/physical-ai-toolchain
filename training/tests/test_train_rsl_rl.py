@@ -11,6 +11,8 @@ import pytest
 import torch
 from conftest import load_training_module
 
+from training.utils.tracking import AzureMLTracking, MLflowTracking, NoTracking
+
 # ---------------------------------------------------------------------------
 # Pre-load stubs: register all heavy/missing modules in sys.modules BEFORE
 # load_training_module imports the file.
@@ -196,25 +198,7 @@ _omni.log = SimpleNamespace(warn=lambda *a, **k: None)
 _register_stub("omni", _omni)
 
 
-# training.utils + training.utils.metrics
-class _AzureConfigError(Exception):
-    pass
-
-
-def _bootstrap_azure_ml(experiment_name=None, **_):
-    return None
-
-
-_register_stub(
-    "training.utils",
-    _build_stub_namespace(
-        "training.utils",
-        AzureConfigError=_AzureConfigError,
-        bootstrap_azure_ml=_bootstrap_azure_ml,
-    ),
-)
-
-
+# training.utils.metrics (training.utils.tracking is light and loads for real)
 class _SystemMetricsCollector:
     def __init__(self, collect_gpu=True, collect_disk=True) -> None:
         self.collect_gpu = collect_gpu
@@ -381,7 +365,7 @@ class TestResolveEnvCount:
 class TestStartMlflowRun:
     def test_import_error(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "mlflow", None)
-        ctx = SimpleNamespace(tracking_uri="x")
+        ctx = MLflowTracking("x")
         mod, active = _MOD._start_mlflow_run(context=ctx, experiment_name="e", run_name="r", tags={}, params={})
         assert mod is None
         assert active is False
@@ -389,13 +373,14 @@ class TestStartMlflowRun:
     def test_happy_path(self, monkeypatch):
         fake = ModuleType("mlflow")
         fake.set_tracking_uri = MagicMock()
+        fake.set_registry_uri = MagicMock()
         fake.set_experiment = MagicMock()
         fake.start_run = MagicMock()
         fake.set_tags = MagicMock()
         fake.log_params = MagicMock()
         monkeypatch.setitem(sys.modules, "mlflow", fake)
 
-        ctx = SimpleNamespace(tracking_uri="uri")
+        ctx = MLflowTracking("uri")
         params = {"a": 1, "b": "s", "c": [1, 2], "d": None}
         mod, active = _MOD._start_mlflow_run(
             context=ctx, experiment_name="exp", run_name="run", tags={"k": "v"}, params=params
@@ -403,6 +388,7 @@ class TestStartMlflowRun:
         assert mod is fake
         assert active is True
         fake.set_tracking_uri.assert_called_once_with("uri")
+        fake.set_registry_uri.assert_called_once_with("uri")
         fake.set_experiment.assert_called_once_with("exp")
         fake.start_run.assert_called_once_with(run_name="run")
         fake.set_tags.assert_called_once_with({"k": "v"})
@@ -415,7 +401,7 @@ class TestStartMlflowRun:
         fake = ModuleType("mlflow")
         fake.set_tracking_uri = MagicMock(side_effect=RuntimeError("boom"))
         monkeypatch.setitem(sys.modules, "mlflow", fake)
-        ctx = SimpleNamespace(tracking_uri="uri")
+        ctx = MLflowTracking("uri")
         mod, active = _MOD._start_mlflow_run(context=ctx, experiment_name="e", run_name="r", tags={}, params={})
         assert mod is None
         assert active is False
@@ -490,7 +476,7 @@ class TestRegisterFinalModel:
 
     def test_azure_import_error(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "azure.ai.ml.entities", None)
-        ctx = SimpleNamespace(client=SimpleNamespace())
+        ctx = AzureMLTracking(context=SimpleNamespace(client=SimpleNamespace()))
         result = _MOD._register_final_model(context=ctx, model_path="/m", model_name="n", tags={})
         assert result is False
 
@@ -498,21 +484,45 @@ class TestRegisterFinalModel:
         fake_entities = ModuleType("azure.ai.ml.entities")
         fake_entities.Model = MagicMock(return_value="model_obj")
         monkeypatch.setitem(sys.modules, "azure.ai.ml.entities", fake_entities)
-        ctx = SimpleNamespace(client=SimpleNamespace(models=SimpleNamespace(create_or_update=MagicMock())))
+        client = SimpleNamespace(models=SimpleNamespace(create_or_update=MagicMock()))
+        ctx = AzureMLTracking(context=SimpleNamespace(client=client))
         result = _MOD._register_final_model(
             context=ctx, model_path="/m", model_name="n", tags={"t": "v"}, properties={"p": "1"}
         )
         assert result is True
-        ctx.client.models.create_or_update.assert_called_once_with("model_obj")
+        client.models.create_or_update.assert_called_once_with("model_obj")
+        assert fake_entities.Model.call_args.kwargs["path"] == "/m"
 
     def test_create_raises(self, monkeypatch):
         fake_entities = ModuleType("azure.ai.ml.entities")
         fake_entities.Model = MagicMock(return_value="m")
         monkeypatch.setitem(sys.modules, "azure.ai.ml.entities", fake_entities)
-        ctx = SimpleNamespace(
-            client=SimpleNamespace(models=SimpleNamespace(create_or_update=MagicMock(side_effect=RuntimeError("x"))))
+        ctx = AzureMLTracking(
+            context=SimpleNamespace(
+                client=SimpleNamespace(
+                    models=SimpleNamespace(create_or_update=MagicMock(side_effect=RuntimeError("x")))
+                )
+            )
         )
         assert _MOD._register_final_model(context=ctx, model_path="/m", model_name="n", tags={}) is False
+
+    def test_untracked_backend_registers_nothing(self) -> None:
+        assert _MOD._register_final_model(context=NoTracking(), model_path="/m", model_name="n", tags={}) is False
+
+    def test_mlflow_registers_logged_artifact(self) -> None:
+        backend = MagicMock()
+        backend.register_checkpoint.return_value = SimpleNamespace(uri="models:/n/1")
+        result = _MOD._register_final_model(
+            context=backend,
+            model_path="/logs/model_9.pt",
+            model_name="n",
+            tags={"t": "v"},
+            artifact_uri="runs:/r1/checkpoints/final/model_9.pt",
+        )
+        assert result is True
+        kwargs = backend.register_checkpoint.call_args.kwargs
+        assert kwargs["artifact_uri"] == "runs:/r1/checkpoints/final/model_9.pt"
+        assert str(kwargs["local_path"]) == "/logs/model_9.pt"
 
 
 class TestCreateEnhancedLog:
@@ -703,8 +713,8 @@ class TestMain:
         monkeypatch.setattr(_MOD.args_cli, "max_iterations", None, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "device", None, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "distributed", False, raising=False)
-        monkeypatch.setattr(_MOD.args_cli, "disable_azure", True, raising=False)
-        monkeypatch.setattr(_MOD.args_cli, "azure_primary_rank_only", True, raising=False)
+        monkeypatch.setattr(_MOD.args_cli, "tracking_backend", "none", raising=False)
+        monkeypatch.setattr(_MOD.args_cli, "tracking_all_ranks", False, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "video", False, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "export_io_descriptors", False, raising=False)
 
@@ -725,8 +735,8 @@ class TestMain:
         monkeypatch.setattr(_MOD.args_cli, "max_iterations", 1, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "device", "cpu", raising=False)
         monkeypatch.setattr(_MOD.args_cli, "distributed", False, raising=False)
-        monkeypatch.setattr(_MOD.args_cli, "disable_azure", False, raising=False)
-        monkeypatch.setattr(_MOD.args_cli, "azure_primary_rank_only", True, raising=False)
+        monkeypatch.setattr(_MOD.args_cli, "tracking_backend", "azureml", raising=False)
+        monkeypatch.setattr(_MOD.args_cli, "tracking_all_ranks", False, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "video", True, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "video_interval", 100, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "video_length", 50, raising=False)
@@ -742,12 +752,19 @@ class TestMain:
             tracking_uri="uri",
             client=SimpleNamespace(models=SimpleNamespace(create_or_update=MagicMock())),
         )
-        monkeypatch.setattr(_MOD, "bootstrap_azure_ml", lambda experiment_name=None: ctx)
+        monkeypatch.setattr(
+            _MOD,
+            "create_tracking_backend",
+            lambda name=None, **_: AzureMLTracking(context=ctx),
+        )
+        monkeypatch.setattr(_MOD.args_cli, "register_checkpoint", "walk-policy", raising=False)
 
         fake_mlflow = ModuleType("mlflow")
         fake_mlflow.set_tracking_uri = MagicMock()
+        fake_mlflow.set_registry_uri = MagicMock()
         fake_mlflow.set_experiment = MagicMock()
         fake_mlflow.start_run = MagicMock()
+        fake_mlflow.active_run = MagicMock(return_value=SimpleNamespace(info=SimpleNamespace(run_id="run-1")))
         fake_mlflow.set_tags = MagicMock()
         fake_mlflow.set_tag = MagicMock()
         fake_mlflow.log_params = MagicMock()
@@ -764,6 +781,8 @@ class TestMain:
 
         _MOD.main(env_cfg, agent_cfg)
         fake_mlflow.end_run.assert_called_once()
+        fake_mlflow.set_experiment.assert_called_once_with("exp")
+        assert fake_mlflow.set_tags.call_args_list[0].args[0]["azureml_workspace"] == "ws"
 
     def test_main_distillation_resume(self, monkeypatch, tmp_path):
         env_cfg, agent_cfg = self._make_cfgs()
@@ -778,8 +797,8 @@ class TestMain:
         monkeypatch.setattr(_MOD.args_cli, "max_iterations", None, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "device", None, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "distributed", False, raising=False)
-        monkeypatch.setattr(_MOD.args_cli, "disable_azure", True, raising=False)
-        monkeypatch.setattr(_MOD.args_cli, "azure_primary_rank_only", True, raising=False)
+        monkeypatch.setattr(_MOD.args_cli, "tracking_backend", "none", raising=False)
+        monkeypatch.setattr(_MOD.args_cli, "tracking_all_ranks", False, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "video", False, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "export_io_descriptors", False, raising=False)
 
@@ -804,8 +823,8 @@ class TestMain:
         monkeypatch.setattr(_MOD.args_cli, "max_iterations", None, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "device", None, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "distributed", True, raising=False)
-        monkeypatch.setattr(_MOD.args_cli, "disable_azure", True, raising=False)
-        monkeypatch.setattr(_MOD.args_cli, "azure_primary_rank_only", True, raising=False)
+        monkeypatch.setattr(_MOD.args_cli, "tracking_backend", "none", raising=False)
+        monkeypatch.setattr(_MOD.args_cli, "tracking_all_ranks", False, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "video", False, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "export_io_descriptors", False, raising=False)
         monkeypatch.setattr(_MOD.app_launcher, "local_rank", 0, raising=False)
@@ -827,8 +846,8 @@ class TestMain:
         monkeypatch.setattr(_MOD.args_cli, "max_iterations", None, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "device", None, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "distributed", False, raising=False)
-        monkeypatch.setattr(_MOD.args_cli, "disable_azure", True, raising=False)
-        monkeypatch.setattr(_MOD.args_cli, "azure_primary_rank_only", True, raising=False)
+        monkeypatch.setattr(_MOD.args_cli, "tracking_backend", "none", raising=False)
+        monkeypatch.setattr(_MOD.args_cli, "tracking_all_ranks", False, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "video", False, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "export_io_descriptors", False, raising=False)
 
@@ -851,8 +870,8 @@ class TestMain:
         monkeypatch.setattr(_MOD.args_cli, "max_iterations", None, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "device", None, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "distributed", False, raising=False)
-        monkeypatch.setattr(_MOD.args_cli, "disable_azure", True, raising=False)
-        monkeypatch.setattr(_MOD.args_cli, "azure_primary_rank_only", True, raising=False)
+        monkeypatch.setattr(_MOD.args_cli, "tracking_backend", "none", raising=False)
+        monkeypatch.setattr(_MOD.args_cli, "tracking_all_ranks", False, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "video", False, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "export_io_descriptors", False, raising=False)
 
@@ -876,8 +895,8 @@ class TestMain:
         monkeypatch.setattr(_MOD.args_cli, "max_iterations", None, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "device", None, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "distributed", False, raising=False)
-        monkeypatch.setattr(_MOD.args_cli, "disable_azure", True, raising=False)
-        monkeypatch.setattr(_MOD.args_cli, "azure_primary_rank_only", True, raising=False)
+        monkeypatch.setattr(_MOD.args_cli, "tracking_backend", "none", raising=False)
+        monkeypatch.setattr(_MOD.args_cli, "tracking_all_ranks", False, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "video", False, raising=False)
         monkeypatch.setattr(_MOD.args_cli, "export_io_descriptors", False, raising=False)
 

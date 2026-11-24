@@ -8,15 +8,15 @@
 .SYNOPSIS
     Verifies committed uv.lock files stay consistent with their pyproject.toml manifests.
 .DESCRIPTION
-    Discovers every directory carrying a pyproject.toml (excluding .venv/, external/,
-    node_modules/, .git/, .copilot-tracking/, docs/docusaurus/), requires a matching
-    uv.lock, runs `uv lock --check` in each, and writes results to logs/. Missing or
-    stale locks are surfaced as CI annotations and a GitHub step summary.
+    Discovers tracked pyproject.toml projects (excluding .venv/, external/, node_modules/,
+    .git/, .copilot-tracking/, docs/docusaurus/), resolves explicit workspace lock owners, and runs
+    `uv lock --check`. The script writes results to logs/. Missing or stale locks are
+    surfaced as CI annotations and a GitHub step summary.
 .PARAMETER OutputPath
     Path for the JSON results file. Defaults to logs/uv-lock-consistency-results.json.
 .PARAMETER Projects
     Explicit list of repository-relative project directories to check. When omitted, every
-    directory containing a pyproject.toml is discovered automatically.
+    directory containing a tracked pyproject.toml is discovered automatically.
 .PARAMETER ChangedFilesOnly
     When set, only check projects whose uv.lock or pyproject.toml changed relative to BaseBranch.
 .PARAMETER BaseBranch
@@ -45,15 +45,15 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Modules/CIHelpers.psm1') -Force
 
 #region Helper Functions
 
-function Get-UvProject {
+function Get-UvProjectOwner {
     <#
     .SYNOPSIS
-        Discovers repository-relative directories that contain a pyproject.toml file.
+        Resolves tracked manifests to their explicit workspace or standalone lock owner.
     .OUTPUTS
-        [string[]] Sorted, unique directory paths (forward-slash, '.' for the root).
+        [hashtable] Repository-relative manifest directories mapped to lock owners.
     #>
     [CmdletBinding()]
-    [OutputType([string[]])]
+    [OutputType([hashtable])]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -62,8 +62,13 @@ function Get-UvProject {
 
     $excludeDirs = @('.venv', 'external', 'node_modules', '.git', '.copilot-tracking', 'docs/docusaurus')
 
-    $manifests = @(Get-ChildItem -Path $RepoRoot -Filter 'pyproject.toml' -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
-            $relativePath = $_.FullName.Substring($RepoRoot.Length + 1) -replace '\\', '/'
+    $PSNativeCommandUseErrorActionPreference = $false
+    $manifestFiles = @(& git -C $RepoRoot ls-files -- 'pyproject.toml' '**/pyproject.toml')
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to discover tracked project manifests.'
+    }
+    $manifestFiles = @($manifestFiles | Where-Object {
+            $relativePath = $_ -replace '\\', '/'
             $excluded = $false
             foreach ($dir in $excludeDirs) {
                 if ($relativePath -like "$dir/*" -or $relativePath -like "*/$dir/*") {
@@ -74,12 +79,76 @@ function Get-UvProject {
             -not $excluded
         })
 
-    $dirs = foreach ($manifest in $manifests) {
-        $parent = (Split-Path $manifest.FullName -Parent).Substring($RepoRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, '/', '\') -replace '\\', '/'
-        if ([string]::IsNullOrEmpty($parent)) { '.' } else { $parent }
+    if ($manifestFiles.Count -eq 0) {
+        return @{}
     }
 
-    return @($dirs | Sort-Object -Unique)
+    $parser = @'
+import json
+import sys
+import tomllib
+from pathlib import Path, PurePosixPath
+
+root = Path(sys.argv[1])
+manifests = {}
+for filename in json.load(sys.stdin):
+    directory = PurePosixPath(filename).parent.as_posix()
+    with (root / filename).open("rb") as source:
+        manifests[directory] = tomllib.load(source)
+owners = {directory: directory for directory in manifests}
+claimed = set()
+for directory, manifest in manifests.items():
+    workspace = manifest.get("tool", {}).get("uv", {}).get("workspace")
+    if workspace is None:
+        continue
+    if not isinstance(workspace, dict) or not isinstance(workspace.get("members"), list):
+        raise ValueError(f"Invalid workspace membership in {directory}")
+    for member in workspace["members"]:
+        if not isinstance(member, str) or not member or any(char in member for char in "*?[]"):
+            raise ValueError(f"Workspace members must be explicit relative directories: {directory}")
+        relative = PurePosixPath(member)
+        if relative.is_absolute() or ".." in relative.parts or member == ".":
+            raise ValueError(f"Invalid workspace member: {member}")
+        target = (PurePosixPath(directory) / relative).as_posix()
+        if target not in manifests:
+            raise ValueError(f"Missing tracked workspace member manifest: {target}")
+        if target in claimed or manifests[target].get("tool", {}).get("uv", {}).get("workspace") is not None:
+            raise ValueError(f"Conflicting workspace member ownership: {target}")
+        if (root / target / "uv.lock").exists():
+            raise ValueError(f"Workspace member has an orphan lock: {target}/uv.lock")
+        claimed.add(target)
+        owners[target] = directory
+print(json.dumps(owners))
+'@
+    $uvExecutable = (Get-Command uv -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    $python = & $uvExecutable python find --offline
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Workspace discovery requires an available Python interpreter with tomllib.'
+    }
+    $ownerJson = $manifestFiles | ConvertTo-Json -AsArray -Compress | & $python -I -c $parser $RepoRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to resolve explicit workspace member and lock ownership.'
+    }
+    return ($ownerJson | ConvertFrom-Json -AsHashtable)
+}
+
+function Get-UvProject {
+    <#
+    .SYNOPSIS
+        Discovers each standalone or explicit workspace lock owner once.
+    .OUTPUTS
+        [string[]] Sorted, unique repository-relative lock-owner directories.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$RepoRoot
+    )
+
+    $owners = Get-UvProjectOwner -RepoRoot $RepoRoot
+    return @($owners.Values | Sort-Object -Unique)
 }
 
 function Get-CommittedUvLockProject {
@@ -105,6 +174,9 @@ function Get-CommittedUvLockProject {
     $excludeDirs = @('.venv', 'external', 'node_modules', '.git', '.copilot-tracking', 'docs/docusaurus')
     $projects = foreach ($lockFile in $lockFiles) {
         $normalized = $lockFile -replace '\\', '/'
+        if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot $normalized) -PathType Leaf)) {
+            continue
+        }
         if ($excludeDirs | Where-Object { $normalized -like "$_/*" -or $normalized -like "*/$_/*" }) {
             continue
         }
@@ -214,12 +286,21 @@ function Test-UvLockProject {
 
     $absDir = if ($Project -eq '.') { $RepoRoot } else { Join-Path $RepoRoot $Project }
     $manifestPath = Join-Path $absDir 'pyproject.toml'
-    $lockPath = Join-Path $absDir 'uv.lock'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
         return [pscustomobject]@{ Project = $Project; Passed = $false; Detail = 'pyproject.toml is missing' }
     }
-    if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath (Join-Path $absDir 'uv.lock') -PathType Leaf)) {
         return [pscustomobject]@{ Project = $Project; Passed = $false; Detail = 'uv.lock is missing' }
+    }
+    $lockPath = if ($Project -eq '.') { 'uv.lock' } else { "$Project/uv.lock" }
+    $PSNativeCommandUseErrorActionPreference = $false
+    $trackedLock = @(& git -C $RepoRoot ls-files --error-unmatch -- $lockPath 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $trackedLock.Count -ne 1) {
+        return [pscustomobject]@{
+            Project = $Project
+            Passed  = $false
+            Detail  = 'Project requires its tracked uv.lock and pyproject.toml.'
+        }
     }
     $check = Invoke-UvLockCheck -ProjectDirectory $absDir
 
@@ -244,7 +325,10 @@ function Select-ChangedProject {
         [string[]]$Project,
 
         [Parameter(Mandatory = $false)]
-        [string]$Base = 'origin/main'
+        [string]$Base = 'origin/main',
+
+        [Parameter(Mandatory = $false)]
+        [string]$RepoRoot
     )
 
     $changedFiles = @(Get-ChangedFilesFromGit -BaseBranch $Base -FileExtensions @('*uv.lock', '*pyproject.toml'))
@@ -252,12 +336,15 @@ function Select-ChangedProject {
         return @()
     }
 
-    $changedDirs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $owners = if ($RepoRoot) { Get-UvProjectOwner -RepoRoot $RepoRoot } else { @{} }
+    $changedDirs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach ($file in $changedFiles) {
         $normalized = $file -replace '\\', '/'
         $dir = Split-Path $normalized -Parent
         if ([string]::IsNullOrEmpty($dir)) { $dir = '.' }
-        [void]$changedDirs.Add(($dir -replace '\\', '/'))
+        $dir = $dir -replace '\\', '/'
+        $owner = if ($owners.ContainsKey($dir)) { $owners[$dir] } else { $dir }
+        [void]$changedDirs.Add($owner)
     }
 
     return @($Project | Where-Object { $changedDirs.Contains($_) })
@@ -387,10 +474,13 @@ function Invoke-UvLockConsistencyCheckCore {
 
     if ($Projects.Count -eq 0) {
         $Projects = @(Get-UvProject -RepoRoot $repoRoot)
+        if ($Projects.Count -gt 0) {
+            $Projects = @($Projects + $lockProjects | Sort-Object -Unique)
+        }
     }
 
     if ($ChangedFilesOnly) {
-        $Projects = @(Select-ChangedProject -Project $Projects -Base $BaseBranch)
+        $Projects = @(Select-ChangedProject -Project $Projects -Base $BaseBranch -RepoRoot $repoRoot)
         if ($Projects.Count -eq 0) {
             Write-Host 'No uv.lock or pyproject.toml files changed — skipping check'
             New-UvLockReport -Results @() -OutputPath $OutputPath | Out-Null
@@ -399,7 +489,7 @@ function Invoke-UvLockConsistencyCheckCore {
     }
 
     if ($Projects.Count -eq 0) {
-        Write-CIAnnotation -Level Error -Message 'No pyproject.toml files found to check'
+        Write-CIAnnotation -Level Error -Message 'Full lock validation has no tracked project manifests.'
         return 1
     }
 

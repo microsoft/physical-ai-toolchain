@@ -101,6 +101,7 @@ registry_wait_until_answering() {
   for _attempt in $(seq 1 30); do
     # A cache that requires credentials answers /v2/ with 401, which still
     # proves the listener is up, so any HTTP response counts as ready.
+    # pinning-ignore: registry health probe; no downloaded artifact
     if curl --silent --output /dev/null --max-time 2 "http://$endpoint/v2/"; then
       return 0
     fi

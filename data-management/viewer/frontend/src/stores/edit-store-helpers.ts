@@ -1,8 +1,10 @@
 import { persistEditDraft } from '@/lib/edit-draft-storage'
 import type {
+  EpisodeEditDraft,
   EpisodeEditOperations,
   FrameInsertion,
   ImageTransform,
+  SavedEditBaseline,
   SubtaskSegment,
   TrajectoryAdjustment,
 } from '@/types/episode-edit'
@@ -20,19 +22,23 @@ export interface EditStateSnapshot {
   datasetId: string | null
   episodeIndex: number | null
   principalScopeId?: string
+  serverBaseline?: SavedEditBaseline | null
+  isDirty?: boolean
   globalTransform: ImageTransform | null
   cameraTransforms: Record<string, ImageTransform>
   removedFrames: Set<number>
   insertedFrames: Map<number, FrameInsertion>
   subtasks: SubtaskSegment[]
   trajectoryAdjustments: Map<number, TrajectoryAdjustment>
+  /** Subtasks recorded with the episode; subtasks matching them are not an edit */
+  recordedSubtasks?: SubtaskSegment[]
 }
 
 export interface EditStateWithDerived extends EditStateSnapshot {
   originalState: EditOriginalStateSnapshot | null
   isDirty: boolean
   validationErrors: string[]
-  savedEpisodeDrafts: Record<string, EpisodeEditOperations>
+  savedEpisodeDrafts: Record<string, EpisodeEditDraft>
 }
 
 interface EditStateUpdateOptions {
@@ -60,6 +66,28 @@ export function buildOriginalEditState(
   }
 }
 
+/** Restore recorded subtasks when omitted and exclude legacy preview-only trajectory edits. */
+export function buildEditStateFromOperations(
+  operations: EpisodeEditOperations,
+  recordedSubtasks: SubtaskSegment[] = [],
+): EditOriginalStateSnapshot {
+  const snapshot = structuredClone(operations)
+  return {
+    globalTransform: snapshot.globalTransform ?? null,
+    cameraTransforms: snapshot.cameraTransforms ?? {},
+    removedFrames: new Set(snapshot.removedFrames ?? []),
+    insertedFrames: new Map(
+      (snapshot.insertedFrames ?? []).map((entry) => [entry.afterFrameIndex, entry]),
+    ),
+    subtasks: snapshot.subtasks ?? structuredClone(recordedSubtasks),
+    trajectoryAdjustments: new Map(
+      (snapshot.trajectoryAdjustments ?? [])
+        .filter((entry) => entry.channelDeltas !== undefined || entry.channelValues !== undefined)
+        .map((entry) => [entry.frameIndex, entry]),
+    ),
+  }
+}
+
 export function buildEditOperations(state: EditStateSnapshot): EpisodeEditOperations | null {
   if (!state.datasetId || state.episodeIndex === null) {
     return null
@@ -81,12 +109,20 @@ export function buildEditOperations(state: EditStateSnapshot): EpisodeEditOperat
             (a, b) => a.afterFrameIndex - b.afterFrameIndex,
           )
         : undefined,
-    subtasks: state.subtasks.length > 0 ? state.subtasks : undefined,
+    subtasks: subtaskEdits(state.subtasks, state.recordedSubtasks ?? []),
     trajectoryAdjustments:
       state.trajectoryAdjustments.size > 0
         ? Array.from(state.trajectoryAdjustments.values())
         : undefined,
   }
+}
+
+/**
+ * Return the subtasks an export should write: none when they match the recorded ones, which the
+ * export keeps, and an explicit empty list when every recorded subtask was removed.
+ */
+function subtaskEdits(subtasks: SubtaskSegment[], recorded: SubtaskSegment[]) {
+  return JSON.stringify(subtasks) === JSON.stringify(recorded) ? undefined : subtasks
 }
 
 export function hasEditContent(operations: EpisodeEditOperations) {
@@ -170,7 +206,10 @@ export function buildEditStateUpdate<T extends EditStateWithDerived>(
 
 export function buildDraftPersistencePayload(state: EditStateSnapshot) {
   const operations = buildEditOperations(state)
-  const persistedDraft = operations && hasEditContent(operations) ? operations : null
+  const persistedDraft =
+    operations && state.isDirty !== false && (hasEditContent(operations) || state.serverBaseline)
+      ? operations
+      : null
 
   return {
     datasetId: state.datasetId,
@@ -187,5 +226,11 @@ export async function persistEditStateDraft(state: EditStateSnapshot) {
     return
   }
 
-  await persistEditDraft(datasetId, episodeIndex, state.principalScopeId ?? 'local', persistedDraft)
+  await persistEditDraft(
+    datasetId,
+    episodeIndex,
+    state.principalScopeId ?? 'local',
+    persistedDraft,
+    state.serverBaseline ?? null,
+  )
 }

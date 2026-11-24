@@ -23,6 +23,15 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.frontmatter-validation.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.frontmatter-validation.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.frontmatter-validation.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.frontmatter-validation.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.frontmatter-validation.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.frontmatter-validation.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.frontmatter-validation.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.frontmatter-validation.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -35,6 +44,16 @@ jobs:
   frontmatter-validation:
     name: Validate Markdown Frontmatter
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -49,30 +68,48 @@ jobs:
           New-Item -ItemType Directory -Force -Path logs | Out-Null
 
       - name: Install powershell-yaml
+        timeout-minutes: 3
         run: |
-          Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Force -Scope CurrentUser
+          for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
+            try {
+              Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Repository PSGallery -Force -Scope CurrentUser -ErrorAction Stop
+              Import-Module powershell-yaml -RequiredVersion 0.4.12 -ErrorAction Stop
+              break
+            }
+            catch {
+              if ($Attempt -eq 3) {
+                throw
+              }
+              Write-Warning "PowerShell-Yaml installation attempt $Attempt failed: $($_.Exception.Message)"
+              Start-Sleep -Seconds 5
+            }
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.14.1'
+          cache: 'npm'
 
       - name: Run Frontmatter Validation
+        id: frontmatter
         run: |
-          $args = @()
-          if ('${{ inputs.changed-files-only }}' -eq 'true') {
-            $args += '-ChangedFilesOnly'
+          $validationParams = @{
+            ChangedFilesOnly = '${{ inputs.changed-files-only }}' -eq 'true'
+            WarningsAsErrors = '${{ inputs.warnings-as-errors }}' -eq 'true'
+            EnableSchemaValidation = '${{ inputs.enable-schema-validation }}' -eq 'true'
           }
-          if ('${{ inputs.warnings-as-errors }}' -eq 'true') {
-            $args += '-WarningsAsErrors'
-          }
-          if ('${{ inputs.enable-schema-validation }}' -eq 'true') {
-            $args += '-EnableSchemaValidation'
-          }
-          if ('${{ inputs.soft-fail }}' -eq 'true') {
-            $args += '-SoftFail'
-          }
-          & scripts/linting/Invoke-FrontmatterValidation.ps1 @args
+          & scripts/linting/Invoke-FrontmatterValidation.ps1 @validationParams
+        continue-on-error: ${{ inputs.soft-fail }}
+
+      - name: Validate skill packages
+        shell: bash
+        run: node scripts/ci/validate-skills.mjs
         continue-on-error: ${{ inputs.soft-fail }}
 
       - name: Upload frontmatter validation results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frontmatter-validation-results
           path: logs/frontmatter-validation-results.json
@@ -85,3 +122,14 @@ jobs:
             Write-Host "Frontmatter validation failed. Failing the job."
             exit 1
           }
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: frontmatter-validation
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["frontmatter"]'
+          reports: '[{"path":"logs/frontmatter-validation-results.json","kind":"json"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

@@ -9,7 +9,10 @@ module.exports = {
     'src/theme/**/*.{js,ts,tsx}',
   ],
   coverageDirectory: 'coverage',
-  coverageReporters: ['text', 'lcov'],
+  coverageReporters: [
+    'text',
+    ['lcov', { projectRoot: require('node:path').resolve(__dirname, '../..') }],
+  ],
   coverageThreshold: {
     global: {
       branches: 80,

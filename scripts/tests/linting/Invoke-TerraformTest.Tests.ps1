@@ -66,10 +66,10 @@ Describe 'Invoke-TerraformTestCore' -Tag 'Unit' {
     }
 
     Context 'no test directories' {
-        It 'Returns 0 when no tests/ directories exist' {
+        It 'Fails when no tests/ directories exist' {
             $result = Invoke-TerraformTestCore -OutputPath $script:TestOutputPath `
                 -TerraformDir $script:TestTerraformDir
-            $result | Should -Be 0
+            $result | Should -Be 1
         }
 
         It 'Creates output JSON file' {
@@ -83,7 +83,7 @@ Describe 'Invoke-TerraformTestCore' -Tag 'Unit' {
                 -TerraformDir $script:TestTerraformDir
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
             $json.summary.modules_tested | Should -Be 0
-            $json.summary.overall_passed | Should -BeTrue
+            $json.summary.overall_passed | Should -BeFalse
         }
 
         It 'Step summary is written' {
@@ -190,11 +190,11 @@ Describe 'Invoke-TerraformTestCore' -Tag 'Unit' {
             } -ParameterFilter { $args[0] -eq 'test' }
         }
 
-        It 'Returns 0 early when no terraform files changed' {
+        It 'Fails when selection contains no modules' {
             Mock Get-ChangedFilesFromGit { return @() }
             $result = Invoke-TerraformTestCore -OutputPath $script:TestOutputPath `
                 -TerraformDir $script:TestTerraformDir -ChangedFilesOnly
-            $result | Should -Be 0
+            $result | Should -Be 1
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
             $json.summary.modules_tested | Should -Be 0
         }
@@ -217,6 +217,54 @@ Describe 'Invoke-TerraformTestCore' -Tag 'Unit' {
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
             $json.summary.modules_tested | Should -Be 1
             $json.modules[0].path | Should -BeLike '*platform*'
+        }
+    }
+
+    Context 'execution evidence' {
+        BeforeEach {
+            New-Item -ItemType Directory -Force -Path (Join-Path $script:TestTerraformDir 'modules/platform/tests') | Out-Null
+        }
+
+        It 'Preserves diagnostic-only native failures' {
+            Mock terraform {
+                $global:LASTEXITCODE = 1
+                '{"type":"diagnostic","diagnostic":{"severity":"error","summary":"Invalid configuration"}}'
+            } -ParameterFilter { $args[0] -eq 'test' }
+            Invoke-TerraformTestCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir | Should -Be 1
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.modules[0].exit_code | Should -Be 1
+            $json.summary.total_errors | Should -BeGreaterThan 0
+        }
+
+        It 'Fails a module with no completed cases' {
+            Invoke-TerraformTestCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir | Should -Be 1
+        }
+
+        It 'Retains skipped cases and file identity without counting them as passes' {
+            Mock terraform {
+                $global:LASTEXITCODE = 0
+                @(
+                    '{"type":"test_run","test_run":{"path":"tests/a.tftest.hcl","run":"naming","progress":"complete","status":"pass"}}'
+                    '{"type":"test_run","test_run":{"path":"tests/b.tftest.hcl","run":"naming","progress":"complete","status":"skip"}}'
+                )
+            } -ParameterFilter { $args[0] -eq 'test' }
+            Invoke-TerraformTestCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir | Should -Be 0
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.summary.total_skipped | Should -Be 1
+            $json.modules[0].test_runs[0].file | Should -Be 'tests/a.tftest.hcl'
+            $json.modules[0].test_runs[1].file | Should -Be 'tests/b.tftest.hcl'
+        }
+
+        It 'Fails when all module cases are skipped' {
+            Mock terraform {
+                $global:LASTEXITCODE = 0
+                '{"type":"test_run","test_run":{"path":"tests/a.tftest.hcl","run":"naming","progress":"complete","status":"skip"}}'
+            } -ParameterFilter { $args[0] -eq 'test' }
+            Invoke-TerraformTestCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir | Should -Be 1
         }
     }
 

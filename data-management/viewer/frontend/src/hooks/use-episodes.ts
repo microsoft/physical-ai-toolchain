@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo } from 'react'
 
 import { fetchEpisode, fetchEpisodes } from '@/lib/api-client'
+import { fetchPrincipalContext } from '@/lib/principal-context'
 import { useDatasetStore, useEpisodeStore } from '@/stores'
 
 /**
@@ -92,6 +93,13 @@ export function useCurrentEpisode() {
   const setLoading = useEpisodeStore((state) => state.setLoading)
   const setError = useEpisodeStore((state) => state.setError)
   const queryClient = useQueryClient()
+  const principal = useQuery({
+    queryKey: ['auth', 'principal-context'],
+    queryFn: fetchPrincipalContext,
+    staleTime: Infinity,
+    enabled: !!currentDataset && currentIndex >= 0,
+  })
+  const principalScopeId = principal.data?.scopeId
 
   // Adaptive gcTime: shorter for datasets with large episodes to limit memory
   const gcTime = useMemo(() => {
@@ -103,16 +111,16 @@ export function useCurrentEpisode() {
   }, [episodes])
 
   const query = useQuery({
-    queryKey: episodeKeys.detail(currentDataset?.id ?? '', currentIndex),
+    queryKey: [...episodeKeys.detail(currentDataset?.id ?? '', currentIndex), principalScopeId],
     queryFn: () => fetchEpisode(currentDataset!.id, currentIndex),
-    enabled: !!currentDataset && currentIndex >= 0,
+    enabled: !!currentDataset && currentIndex >= 0 && !!principalScopeId && !principal.isError,
     staleTime: 5 * 60 * 1000,
     gcTime,
   })
 
   // Prefetch adjacent episodes for instant back/forward navigation
   useEffect(() => {
-    if (!currentDataset || currentIndex < 0) return
+    if (!currentDataset || currentIndex < 0 || !principalScopeId || principal.isError) return
 
     const datasetId = currentDataset.id
     const totalEpisodes = episodes.length
@@ -122,12 +130,19 @@ export function useCurrentEpisode() {
 
     for (const idx of adjacentIndices) {
       queryClient.prefetchQuery({
-        queryKey: episodeKeys.detail(datasetId, idx),
+        queryKey: [...episodeKeys.detail(datasetId, idx), principalScopeId],
         queryFn: () => fetchEpisode(datasetId, idx),
         staleTime: 5 * 60 * 1000,
       })
     }
-  }, [currentDataset, currentIndex, episodes.length, queryClient])
+  }, [
+    currentDataset,
+    currentIndex,
+    episodes.length,
+    queryClient,
+    principalScopeId,
+    principal.isError,
+  ])
 
   // Sync with Zustand store
   useEffect(() => {
@@ -135,10 +150,10 @@ export function useCurrentEpisode() {
   }, [query.isLoading, setLoading])
 
   useEffect(() => {
-    if (query.data) {
-      setCurrentEpisode(query.data)
+    if (query.data && currentDataset && principalScopeId && !principal.isError) {
+      setCurrentEpisode(query.data, { datasetId: currentDataset.id, principalScopeId })
     }
-  }, [query.data, setCurrentEpisode])
+  }, [currentDataset, query.data, setCurrentEpisode, principalScopeId, principal.isError])
 
   useEffect(() => {
     if (query.error) {

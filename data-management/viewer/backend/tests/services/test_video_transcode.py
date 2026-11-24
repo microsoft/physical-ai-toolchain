@@ -13,6 +13,18 @@ import pytest
 from src.api.services import video_transcode
 
 
+async def test_given_output_outside_cache_when_transcoding_then_rejected_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(video_transcode, "_CACHE_DIR", tmp_path / "cache")
+    target = tmp_path / "outside" / "video.mp4"
+
+    with pytest.raises(ValueError, match="Invalid video cache path"):
+        await video_transcode._transcode_to_h264(tmp_path / "source.mp4", target, 100)
+
+    assert not target.parent.exists()
+
+
 class _FakeProcess:
     def __init__(self, returncode: int, stdout: bytes = b"", stderr: bytes = b"") -> None:
         self.returncode = returncode
@@ -91,7 +103,6 @@ def test_transcoding_available_requires_both_tools(
     assert video_transcode.transcoding_available() is expected
 
 
-@pytest.mark.asyncio
 async def test_ensure_browser_compatible_returns_source_when_tools_are_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -108,7 +119,6 @@ async def test_ensure_browser_compatible_returns_source_when_tools_are_missing(
     subprocess.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_ensure_browser_compatible_returns_source_for_supported_probe_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -134,7 +144,6 @@ async def test_ensure_browser_compatible_returns_source_for_supported_probe_resu
         (_FakeProcess(0, stdout=b'{"streams": []}'), "missing video stream"),
     ],
 )
-@pytest.mark.asyncio
 async def test_ensure_browser_compatible_returns_source_when_probe_has_no_codec(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -153,7 +162,6 @@ async def test_ensure_browser_compatible_returns_source_when_probe_has_no_codec(
     _assert_probe_call(calls[0], source)
 
 
-@pytest.mark.asyncio
 async def test_ensure_browser_compatible_atomically_replaces_successful_transcode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -201,7 +209,9 @@ async def test_ensure_browser_compatible_atomically_replaces_successful_transcod
         "+faststart",
         "-f",
         "mp4",
-        str(result.with_suffix(".mp4.part")),
+        "-fs",
+        str(video_transcode._CACHE_MAX_BYTES),
+        str(ffmpeg_args[-1]),
     )
     assert ffmpeg_kwargs == {
         "stdout": asyncio.subprocess.DEVNULL,
@@ -209,7 +219,27 @@ async def test_ensure_browser_compatible_atomically_replaces_successful_transcod
     }
 
 
-@pytest.mark.asyncio
+async def test_transcode_budget_rejects_new_conversion_without_evicting_readers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "input.mp4"
+    source.write_bytes(b"source")
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    retained = cache_dir / "reader.mp4"
+    retained.write_bytes(b"full")
+    monkeypatch.setattr(video_transcode, "_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(video_transcode, "_CACHE_MAX_BYTES", 4)
+    monkeypatch.setattr(video_transcode, "transcoding_available", lambda: True)
+    monkeypatch.setattr(video_transcode, "_probe_video_codec", AsyncMock(return_value="mpeg4"))
+    subprocess = AsyncMock()
+    monkeypatch.setattr(video_transcode.asyncio, "create_subprocess_exec", subprocess)
+    assert await video_transcode.ensure_browser_compatible(source) == source
+    subprocess.assert_not_awaited()
+    assert retained.read_bytes() == b"full"
+
+
 async def test_ensure_browser_compatible_removes_failed_transcode_partial(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -235,7 +265,6 @@ async def test_ensure_browser_compatible_removes_failed_transcode_partial(
     _assert_probe_call(calls[0], source)
 
 
-@pytest.mark.asyncio
 async def test_ensure_browser_compatible_reuses_completed_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

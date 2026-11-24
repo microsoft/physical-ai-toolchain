@@ -8,7 +8,7 @@ workflow:
       cpu: {{ cpu }}
       memory: {{ memory }}
       storage: {{ storage }}
-      platform: gpu_platform
+      platform: "{{ platform }}"
   tasks:
     - name: isaac-training
       image: "{{ image }}"
@@ -38,6 +38,8 @@ workflow:
         MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES: "{{ mlflow_token_refresh_retries }}"
         MLFLOW_HTTP_REQUEST_TIMEOUT: "{{ mlflow_http_request_timeout }}"
         MLFLOW_CORRELATION_ID: "{{ mlflow_correlation_id }}"
+        TRACKING_BACKEND: "{{ tracking_backend }}"
+        MLFLOW_TRACKING_URI: "{{ mlflow_tracking_uri }}"
         RUN_AZURE_SMOKE_TEST: "{{ run_azure_smoke_test }}"
         PYTHON: "{{ python }}"
         CHECKPOINT_URI: "{{ checkpoint_uri }}"
@@ -67,6 +69,8 @@ default-values:
   mlflow_token_refresh_retries: "3"
   mlflow_http_request_timeout: "60"
   mlflow_correlation_id: ""
+  tracking_backend: azureml
+  mlflow_tracking_uri: ""
   python: "/workspace/isaaclab/isaaclab.sh -p"
   run_azure_smoke_test: "0"
   checkpoint_uri: ""
@@ -77,3 +81,4 @@ default-values:
   cpu: "30"
   memory: 400Gi
   storage: 200Gi
+  platform: gpu_platform

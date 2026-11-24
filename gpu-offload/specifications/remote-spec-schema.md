@@ -1,7 +1,7 @@
 ---
 title: remote.yaml Schema
 description: Schema and examples for remote.yaml offload specification
-ms.date: 2026-09-22
+ms.date: 2026-11-03
 ms.topic: reference
 ---
 
@@ -34,14 +34,14 @@ keeps the robot container lightweight while GPU capacity is reserved for inferen
 configured without `serverstages`, the controller materializes the default
 unnamed stage.
 
-| Key              | Type             | Required | Purpose                                      |
-|------------------|------------------|----------|----------------------------------------------|
-| `serverstages`   | list of objects  | No       | Define named GPU worker pods                 |
-| `remoteclasses`  | list of mappings | No       | Classes whose methods execute in stages      |
-| `remotefuncs`    | list of mappings | No       | Functions that execute in stages             |
-| `allowedmodules` | list of strings  | No       | Permit additional runtime module imports     |
+| Key              | Type             | Required | Purpose                                               |
+|------------------|------------------|----------|-------------------------------------------------------|
+| `serverstages`   | list of objects  | No       | Define named GPU worker pods                          |
+| `remoteclasses`  | list of mappings | No       | Classes whose methods execute in stages               |
+| `remotefuncs`    | list of mappings | No       | Functions that execute in stages                      |
+| `allowedmodules` | list of strings  | No       | Permit additional runtime module imports              |
 | `encryption`     | boolean          | No       | Encrypt and authenticate RPC payloads; default `true` |
-| `networkPolicy`  | boolean          | No       | Restrict server ingress to the namespace     |
+| `networkPolicy`  | boolean          | No       | Restrict server ingress to the namespace              |
 
 ## networkPolicy
 
@@ -72,9 +72,17 @@ stores it in a controller-managed Kubernetes Secret, and mounts the same key
 read-only into the client containers and every generated server stage.
 
 Encrypted frames authenticate their protocol version and issuance time. The
-runtime rejects stale or future-dated frames and tracks recently accepted
-nonces in a bounded process-wide replay window, so a captured frame cannot be
-dispatched more than once while the receiving process is running.
+runtime rejects frames older than 300 seconds or more than 30 seconds ahead of
+the receiver's wall clock, and tracks recently accepted nonces in a bounded
+process-wide replay window. Nonces still in the window are rejected before RPC
+decoding and handler dispatch. If the cache still holds 250,000 entries after expiry
+cleanup, new frames are rejected without evicting unexpired nonces. This
+fail-closed capacity limit remains; receiver/session sequencing is separate
+work tracked in [#1938](https://github.com/microsoft/physical-ai-toolchain/issues/1938)
+and [#1693](https://github.com/microsoft/physical-ai-toolchain/issues/1693).
+Peers must keep clocks synchronized (for example with NTP). Frames outside
+the freshness limits are rejected with a stale or future-dated error that
+includes the observed age or skew and a clock synchronization reminder.
 
 ```yaml
 encryption: true

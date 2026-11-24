@@ -194,7 +194,7 @@ else
 fi
 
 info "Syncing dependencies from uv.lock..."
-uv sync --frozen
+uv sync --frozen --group azureml-tracking
 
 section "Isaac Lab Setup"
 

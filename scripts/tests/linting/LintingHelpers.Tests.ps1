@@ -53,7 +53,7 @@ Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {
         }
     }
 
-    Context 'Merge-base fails, HEAD~1 fallback' {
+    Context 'Merge-base fails despite available HEAD~1' {
         BeforeEach {
             Mock git {
                 $global:LASTEXITCODE = 128
@@ -73,13 +73,13 @@ Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {
             Mock Test-Path { return $true } -ModuleName 'LintingHelpers' -ParameterFilter { $PathType -eq 'Leaf' }
         }
 
-        It 'Falls back to HEAD~1 comparison and returns files' {
-            $result = Get-ChangedFilesFromGit -FileExtensions @('*.ps1')
-            $result | Should -Contain 'fallback-file.ps1'
+        It 'Rejects an unverified comparison instead of using HEAD~1' {
+            { Get-ChangedFilesFromGit -FileExtensions @('*.ps1') } | Should -Throw '*merge base*'
+            Should -Not -Invoke git -ModuleName LintingHelpers -ParameterFilter { $args[0] -eq 'diff' }
         }
     }
 
-    Context 'Both fallbacks fail, uses diff-filter ACMR on HEAD' {
+    Context 'Merge-base and previous commit are unavailable' {
         BeforeEach {
             Mock git {
                 $global:LASTEXITCODE = 128
@@ -99,9 +99,8 @@ Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {
             Mock Test-Path { return $true } -ModuleName 'LintingHelpers' -ParameterFilter { $PathType -eq 'Leaf' }
         }
 
-        It 'Falls back to git diff --diff-filter=ACMR HEAD and returns files' {
-            $result = Get-ChangedFilesFromGit -FileExtensions @('*.ps1')
-            $result | Should -Contain 'unstaged-file.ps1'
+        It 'Rejects a working-tree fallback' {
+            { Get-ChangedFilesFromGit -FileExtensions @('*.ps1') } | Should -Throw '*merge base*'
         }
     }
 
@@ -207,9 +206,8 @@ Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {
             } -ModuleName 'LintingHelpers' -ParameterFilter { $args[0] -eq 'diff' }
         }
 
-        It 'Returns empty array when git diff fails' {
-            $result = Get-ChangedFilesFromGit
-            $result | Should -BeNullOrEmpty
+        It 'Fails when git diff fails rather than reporting no changes' {
+            { Get-ChangedFilesFromGit } | Should -Throw '*compare Git changes*'
         }
     }
 
@@ -220,13 +218,12 @@ Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {
             } -ModuleName 'LintingHelpers' -ParameterFilter { $args[0] -eq 'merge-base' }
         }
 
-        It 'Catches exceptions and returns empty array' {
-            $result = Get-ChangedFilesFromGit
-            $result | Should -BeNullOrEmpty
+        It 'Propagates comparison exceptions' {
+            { Get-ChangedFilesFromGit } | Should -Throw '*Simulated git failure*'
         }
     }
 
-    Context 'Third fallback explicit staged+unstaged diff' {
+    Context 'Unverified staged and unstaged changes' {
         BeforeEach {
             Mock git {
                 $global:LASTEXITCODE = 128
@@ -246,9 +243,9 @@ Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {
             Mock Test-Path { return $true } -ModuleName 'LintingHelpers' -ParameterFilter { $PathType -eq 'Leaf' }
         }
 
-        It 'Falls through to staged+unstaged diff when merge-base and HEAD~1 both fail' {
-            $result = Get-ChangedFilesFromGit -BaseBranch 'origin/main' -FileExtensions @('*.md')
-            $result | Should -Contain 'docs/new.md'
+        It 'Does not substitute staged and unstaged changes for the requested comparison' {
+            { Get-ChangedFilesFromGit -BaseBranch 'origin/main' -FileExtensions @('*.md') } |
+                Should -Throw '*merge base*'
         }
     }
 
@@ -301,9 +298,8 @@ Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {
             } -ModuleName 'LintingHelpers' -ParameterFilter { $args[0] -eq 'merge-base' }
         }
 
-        It 'Returns empty array when git diff output cannot be parsed' {
-            $result = Get-ChangedFilesFromGit -BaseBranch 'origin/main'
-            $result | Should -BeNullOrEmpty
+        It 'Propagates unexpected comparison failures' {
+            { Get-ChangedFilesFromGit -BaseBranch 'origin/main' } | Should -Throw '*unexpected error*'
         }
     }
 }
@@ -379,6 +375,20 @@ Describe 'Get-FilesRecursive' -Tag 'Unit' {
         It 'Returns all files when gitignore path not provided' {
             $result = Get-FilesRecursive -Path 'TestDrive:/project' -Include @('*.ps1')
             $result.Count | Should -Be 2
+        }
+
+        It 'Excludes an anchored directory only at the gitignore root' {
+            New-Item -Path 'TestDrive:/project/local' -ItemType Directory -Force | Out-Null
+            New-Item -Path 'TestDrive:/project/local/scratch.ps1' -ItemType File -Force | Out-Null
+            New-Item -Path 'TestDrive:/project/src/local' -ItemType Directory -Force | Out-Null
+            New-Item -Path 'TestDrive:/project/src/local/tracked.ps1' -ItemType File -Force | Out-Null
+            '/local/' | Set-Content 'TestDrive:/project/.gitignore'
+
+            $result = Get-FilesRecursive -Path 'TestDrive:/project' `
+                -Include @('*.ps1') `
+                -GitIgnorePath 'TestDrive:/project/.gitignore'
+            $result.Name | Should -Contain 'tracked.ps1'
+            $result.Name | Should -Not -Contain 'scratch.ps1'
         }
     }
 
@@ -499,6 +509,17 @@ Describe 'Get-GitIgnorePatterns' -Tag 'Unit' {
             @('node_modules/', 'dist/', '*.tmp', 'logs/debug.log') | Set-Content 'TestDrive:/.gitignore-multi'
             $result = Get-GitIgnorePatterns -GitIgnorePath 'TestDrive:/.gitignore-multi'
             $result.Count | Should -Be 4
+        }
+
+        It 'Anchors leading-slash patterns to the gitignore directory' {
+            $root = Join-Path $TestDrive 'anchored'
+            New-Item -Path $root -ItemType Directory -Force | Out-Null
+            @('/local/', '/notes.txt') | Set-Content (Join-Path $root '.gitignore')
+            $result = @(Get-GitIgnorePatterns -GitIgnorePath (Join-Path $root '.gitignore'))
+            $sep = [System.IO.Path]::DirectorySeparatorChar
+            $escapedRoot = [System.Management.Automation.WildcardPattern]::Escape((Resolve-Path $root).ProviderPath)
+            $result[0] | Should -Be "$escapedRoot${sep}local${sep}*"
+            $result[1] | Should -Be "$escapedRoot${sep}notes.txt*"
         }
     }
 

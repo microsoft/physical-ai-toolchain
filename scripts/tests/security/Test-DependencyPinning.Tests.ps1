@@ -1677,12 +1677,31 @@ Describe 'Get-NpmDependencyViolations' -Tag 'Unit' {
         }
 
         It 'Does not flag exact-pinned overrides or resolutions' {
+            Set-StrictMode -Version Latest
             $violations = Get-NpmDependencyViolations -FileInfo $script:overridesFileInfo
             $names = $violations | ForEach-Object { $_.Name }
 
             $names | Should -Not -Contain 'semver'
             $names | Should -Not -Contain 'minimatch'
             $names | Should -Not -Contain 'foo'
+        }
+
+        It 'Handles <Label> optional npm sections under strict mode' -ForEach @(
+            @{ Label = 'absent'; Sections = @{}; ExpectedNames = @() }
+            @{ Label = 'null and empty'; Sections = @{ overrides = $null; resolutions = @{} }; ExpectedNames = @() }
+            @{ Label = 'only overrides'; Sections = @{ overrides = @{ foo = @{ '.' = '1.2.3'; bar = '^2.0.0' } } }; ExpectedNames = @('bar') }
+            @{ Label = 'only resolutions'; Sections = @{ resolutions = @{ foo = '1.2.3'; bar = '~2.0.0' } }; ExpectedNames = @('bar') }
+        ) {
+            Set-StrictMode -Version Latest
+            $package = @{ name = 'optional-sections'; dependencies = @{ pinned = '1.2.3' } } + $Sections
+            $path = Join-Path $TestDrive 'package.json'
+            $package | ConvertTo-Json -Depth 10 | Set-Content -Path $path
+            $violations = @(Get-NpmDependencyViolations -FileInfo @{
+                Path = $path
+                Type = 'npm'
+                RelativePath = 'package.json'
+            })
+            @($violations | ForEach-Object { $_.Name }) | Should -Be $ExpectedNames
         }
     }
 }
@@ -1762,6 +1781,27 @@ Describe 'Get-PipDependencyViolations' -Tag 'Unit' {
     }
 
     Context 'Pinned pyproject.toml' {
+        It 'Accepts pinned punctuation-bearing extras in <FileName> without accepting ranges' -ForEach @(
+            @{ FileName = 'pyproject.toml' }
+            @{ FileName = 'requirements.txt' }
+        ) {
+            $path = Join-Path $TestDrive $FileName
+            $specs = @('lerobot[av-dep,core_scripts,example.extra]==0.6.1', 'lerobot[av-dep]>=0.6.1')
+            $content = if ($FileName -eq 'pyproject.toml') {
+                "[project]`nname = `"fixture`"`ndependencies = [`"$($specs[0])`", `"$($specs[1])`"]"
+            } else {
+                $specs -join "`n"
+            }
+            Set-Content -Path $path -Value $content
+            $violations = @(Get-PipDependencyViolations -FileInfo @{
+                Path = $path
+                RelativePath = $FileName
+                Type = 'pip'
+            })
+            $violations | Should -HaveCount 1
+            $violations[0].Version | Should -Be '[av-dep]>=0.6.1'
+        }
+
         It 'Returns zero violations when all deps use ==' {
             $fileInfo = @{
                 Path         = Join-Path $script:FixturesPath 'pinned-pyproject.toml'

@@ -48,10 +48,10 @@ describe('auth-config', () => {
     expect(mod.msalConfig.auth.authority).toBe('https://login.microsoftonline.com/tenant-xyz')
   })
 
-  it('redirectUri matches window.location.origin and postLogoutRedirectUri is /', async () => {
+  it('uses the same-origin redirect bridge and preserves the logout destination', async () => {
     vi.stubEnv('VITE_AZURE_CLIENT_ID', 'client-123')
     const mod = await import('@/lib/auth-config')
-    expect(mod.msalConfig.auth.redirectUri).toBe('https://example.test')
+    expect(mod.msalConfig.auth.redirectUri).toBe('https://example.test/redirect.html')
     expect(mod.msalConfig.auth.postLogoutRedirectUri).toBe('/')
   })
 

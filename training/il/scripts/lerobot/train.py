@@ -1,21 +1,28 @@
-"""LeRobot training orchestrator with Azure ML MLflow integration.
+"""LeRobot training orchestrator with MLflow tracking.
 
 Runs lerobot-train as a subprocess while capturing stdout to parse training
 metrics and log them to MLflow. Collects system metrics (CPU, GPU, memory, disk)
-and uploads checkpoints periodically.
+and uploads checkpoints periodically. ``TRACKING_BACKEND`` selects the tracking
+server and model registry; ``none`` trains without tracking or registration.
 
 Usage:
     python -m training.il.scripts.lerobot.train [lerobot-train args...]
 
 Environment variables:
     DATASET_REPO_ID: HuggingFace dataset repository.
-    POLICY_TYPE: Policy architecture (act, diffusion).
+    DATASET_DIR: Local dataset directory that replaces the Hub download.
+    POLICY_TYPE: Policy architecture (act, diffusion, smolvla).
+    POLICY_PATH: Pretrained policy to fine-tune (HuggingFace repo or local directory).
+    POLICY_PATH_REVISION: Commit SHA pinning a HuggingFace POLICY_PATH.
+    RENAME_MAP: JSON object mapping dataset feature keys to the pretrained policy's.
     OUTPUT_DIR: Container output directory.
     JOB_NAME: Job identifier.
     SYSTEM_METRICS: Enable system metrics collection (default: true).
-    REGISTER_CHECKPOINT: Model name for Azure ML registration.
+    REGISTER_CHECKPOINT: Model name for checkpoint registration (needs a tracking backend).
     EXPERIMENT_NAME: MLflow experiment name.
-    AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZUREML_WORKSPACE_NAME: Azure context.
+    TRACKING_BACKEND: ``azureml`` (default), ``mlflow``, or ``none``.
+    MLFLOW_TRACKING_URI: MLflow server for the ``mlflow`` backend.
+    AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZUREML_WORKSPACE_NAME: Azure context for ``azureml``.
     MIXED_PRECISION: Accelerate mixed-precision mode (``no``/``fp16``/``bf16``).
         Explicit mixed precision uses Accelerate on both single-GPU and
         multi-GPU runs. Under Accelerate the lerobot ``--policy.use_amp`` flag
@@ -42,7 +49,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from training.il.scripts.lerobot._env import has_blob_urls
+from training.il.scripts.lerobot._env import dataset_source
+from training.utils.tracking import mlflow_module_for, resolve_tracking_backend_name
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
@@ -348,6 +356,23 @@ def _init_system_collector() -> Any | None:
         return None
 
 
+def _resolve_policy_path() -> str:
+    """Return a local directory for ``POLICY_PATH``, downloading a Hub policy at its pinned revision.
+
+    LeRobot's ``--policy.path`` takes no revision, so a Hub policy is fetched into the Hugging Face cache at
+    ``POLICY_PATH_REVISION`` first and passed as that local snapshot.
+    """
+    source = os.environ.get("POLICY_PATH", "").strip()
+    if not source or Path(source).is_dir():
+        return source
+    from huggingface_hub import snapshot_download
+
+    revision = os.environ.get("POLICY_PATH_REVISION", "").strip() or None
+    local_path = snapshot_download(repo_id=source, revision=revision)
+    print(f"[Policy] Downloaded {source}@{revision or 'main'} to {local_path}")
+    return local_path
+
+
 def _build_train_params(num_gpus: int) -> dict[str, str]:
     """Build parameter dict from environment for MLflow logging.
 
@@ -381,19 +406,28 @@ def _build_train_params(num_gpus: int) -> dict[str, str]:
     return params
 
 
-def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus: int = 1) -> int:
+def run_training(
+    cmd: list[str],
+    source: str = "osmo-lerobot-training",
+    num_gpus: int = 1,
+    tracking_backend: str | None = None,
+) -> int:
     """Execute lerobot-train and log metrics to MLflow.
 
     Args:
         cmd: Full command to execute (e.g., ["lerobot-train", "--dataset.repo_id=..."]).
         source: Source tag for checkpoint registration.
+        num_gpus: Detected GPU count, logged with the run parameters.
+        tracking_backend: Tracking backend name; ``None`` reads ``TRACKING_BACKEND``. With ``none`` the run
+            logs nothing and checkpoints stay in ``OUTPUT_DIR``.
 
     Returns:
         Process exit code.
     """
-    import mlflow
-
     from training.il.scripts.lerobot.checkpoints import upload_new_checkpoints
+
+    tracking_enabled = resolve_tracking_backend_name(tracking_backend) != "none"
+    mlflow = mlflow_module_for(tracking_backend)
 
     system_collector = _init_system_collector()
     output_dir = Path(os.environ.get("OUTPUT_DIR", "/workspace/outputs/train"))
@@ -407,6 +441,10 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
     peak_reserved_bytes = 0
     training_duration_seconds = 0.0
 
+    def upload_checkpoints(run: Any) -> None:
+        if tracking_enabled:
+            upload_new_checkpoints(run, output_dir, uploaded_checkpoints, source=source)
+
     # AzureML jobs auto-create an MLflow run and expose its ID in MLFLOW_RUN_ID.
     # mlflow.start_run() picks it up automatically when no args are passed; passing
     # a run_name in that case fails because the existing run is already named.
@@ -415,7 +453,8 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
         start_run_kwargs["run_name"] = os.environ.get("JOB_NAME", "lerobot-training")
 
     with mlflow.start_run(**start_run_kwargs) as run:
-        print(f"[MLflow] Run ID: {run.info.run_id}")
+        if tracking_enabled:
+            print(f"[MLflow] Run ID: {run.info.run_id}")
 
         params = _build_train_params(num_gpus)
         mlflow.log_params(params)
@@ -433,12 +472,20 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
         }
         if os.environ.get("DATASET_REPO_ID"):
             lineage_tags["dataset.repo_id"] = os.environ["DATASET_REPO_ID"]
-        if has_blob_urls():
+        source_kind = dataset_source()
+        if source_kind == "local":
+            lineage_tags["dataset.source"] = "local"
+            lineage_tags["dataset.dir"] = os.environ["DATASET_DIR"].strip()
+        elif source_kind == "blob":
             lineage_tags["dataset.source"] = "azure-blob"
         elif os.environ.get("DATASET_REPO_ID"):
             lineage_tags["dataset.source"] = "huggingface"
         if os.environ.get("REGISTER_CHECKPOINT"):
             lineage_tags["model.register_name"] = os.environ["REGISTER_CHECKPOINT"]
+        if pretrained := os.environ.get("POLICY_PATH", "").strip():
+            lineage_tags["policy.pretrained_path"] = pretrained
+            if revision := os.environ.get("POLICY_PATH_REVISION", "").strip():
+                lineage_tags["policy.pretrained_revision"] = revision
         warm_start_source = os.environ.get("INIT_FROM_POLICY_MODEL_SOURCE", "")
         if warm_start_source:
             lineage_tags["warm_start.source"] = warm_start_source
@@ -485,7 +532,7 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
             # would race accelerate workers still writing to checkpoint shards
             # and could mirror a half-written destination.
             with contextlib.suppress(Exception):
-                upload_new_checkpoints(run, output_dir, uploaded_checkpoints, source=source)
+                upload_checkpoints(run)
             with contextlib.suppress(Exception):
                 _sync_checkpoint_output(output_dir)
 
@@ -527,7 +574,7 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
 
                 if current_time - last_checkpoint_check > CHECKPOINT_CHECK_INTERVAL:
                     last_checkpoint_check = current_time
-                    upload_new_checkpoints(run, output_dir, uploaded_checkpoints, source=source)
+                    upload_checkpoints(run)
 
             val_match = _VAL_PATTERN.search(line)
             if val_match:
@@ -556,8 +603,9 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
                 )
             mlflow.log_metrics(peak_metrics)
 
-        print("[MLflow] Uploading final checkpoints...")
-        upload_new_checkpoints(run, output_dir, uploaded_checkpoints, source=source)
+        if tracking_enabled:
+            print("[MLflow] Uploading final checkpoints...")
+        upload_checkpoints(run)
         _sync_checkpoint_output(output_dir)
 
         mlflow.log_param("output_dir", str(output_dir))
@@ -573,7 +621,7 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
         else:
             mlflow.set_tag("training_status", "completed")
 
-    print("[MLflow] Run completed")
+    print("[MLflow] Run completed" if tracking_enabled else f"[Tracking] Training finished; outputs in {output_dir}")
     if pretrained_load_failed:
         return EXIT_FAILURE
     return process.returncode or EXIT_SUCCESS
@@ -582,8 +630,9 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
 def main() -> int:
     """Main entry point for LeRobot MLflow training wrapper.
 
-    Bootstraps Azure ML, builds lerobot-train command from environment
-    variables and CLI arguments, runs training, and registers checkpoints.
+    Bootstraps the selected tracking backend, builds the lerobot-train command
+    from environment variables and CLI arguments, runs training, and registers
+    checkpoints.
     """
     from training.il.scripts.lerobot.bootstrap import authenticate_huggingface, bootstrap_mlflow
     from training.il.scripts.lerobot.checkpoints import register_final_checkpoint
@@ -592,17 +641,23 @@ def main() -> int:
     hf_user = authenticate_huggingface()
 
     policy_type = os.environ.get("POLICY_TYPE", "act")
-    job_name = os.environ.get("JOB_NAME", "lerobot-act-training")
+    job_name = os.environ.get("JOB_NAME") or f"lerobot-{policy_type}-training"
 
-    bootstrap_mlflow(
+    tracking = bootstrap_mlflow(
         experiment_name=os.environ.get("EXPERIMENT_NAME", ""),
         policy_type=policy_type,
         job_name=job_name,
     )
+    if tracking.backend == "none" and os.environ.get("REGISTER_CHECKPOINT"):
+        print(
+            "[ERROR] REGISTER_CHECKPOINT needs a model registry; unset it or set TRACKING_BACKEND to azureml or mlflow",
+            file=sys.stderr,
+        )
+        return EXIT_FAILURE
 
     # Load MLflow config into environment
     config_path = Path("/tmp/mlflow_config.env")
-    if config_path.exists():
+    if tracking.backend != "none" and config_path.exists():
         for line in config_path.read_text().strip().splitlines():
             key, _, value = line.partition("=")
             if key and value:
@@ -622,10 +677,17 @@ def main() -> int:
         if dataset_repo_id:
             cmd.append(f"--dataset.repo_id={dataset_repo_id}")
 
-    # lerobot rejects --policy.path together with --policy.type; when warm-starting
-    # (--policy.path is present) the policy type is read from the loaded config.json.
-    if "--policy.type" not in cli_text and "--policy.path" not in cli_text:
+    # lerobot rejects --policy.path together with --policy.type; when fine-tuning or
+    # warm-starting (--policy.path is present) the type is read from the loaded config.json.
+    policy_path = "" if "--policy.path" in cli_text else _resolve_policy_path()
+    if policy_path:
+        cmd.append(f"--policy.path={policy_path}")
+    elif "--policy.type" not in cli_text and "--policy.path" not in cli_text:
         cmd.append(f"--policy.type={policy_type}")
+
+    rename_map = os.environ.get("RENAME_MAP", "").strip()
+    if rename_map and "--rename_map" not in cli_text:
+        cmd.append(f"--rename_map={rename_map}")
 
     if "--output_dir" not in cli_text:
         output_dir = os.environ.get("OUTPUT_DIR", "/workspace/outputs/train")
@@ -679,10 +741,9 @@ def main() -> int:
 
     # Source tag for MLflow lineage: {platform}-lerobot-{datasource}.
     # AZUREML_RUN_ID is set automatically by Azure ML on job pods; absent on OSMO.
-    # BLOB_URLS discriminates blob-fed runs from HuggingFace downloads on either platform.
+    # The datasource is local, blob, or hf on either platform.
     platform = "azureml" if os.environ.get("AZUREML_RUN_ID") else "osmo"
-    datasource = "blob" if has_blob_urls() else "hf"
-    source = f"{platform}-lerobot-{datasource}"
+    source = f"{platform}-lerobot-{dataset_source()}"
 
     # Detect the GPU count visible to the job container
     # (AzureML-on-Kubernetes: pod's `nvidia.com/gpu` request via InstanceType;
@@ -702,7 +763,7 @@ def main() -> int:
         print("[ACCELERATE] Single-GPU run: launching lerobot-train directly")
 
     # Run training
-    exit_code = run_training(cmd, source=source, num_gpus=num_gpus)
+    exit_code = run_training(cmd, source=source, num_gpus=num_gpus, tracking_backend=tracking.backend)
 
     # Post-training checkpoint registration
     if exit_code == EXIT_SUCCESS and os.environ.get("REGISTER_CHECKPOINT"):

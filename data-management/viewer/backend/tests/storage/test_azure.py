@@ -14,6 +14,68 @@ import pytest
 from .conftest import create_test_annotation
 
 
+@pytest.mark.parametrize("http_error", [False, True])
+async def test_given_revision_listing_failure_when_reading_then_storage_error(
+    monkeypatch: pytest.MonkeyPatch,
+    http_error: bool,
+) -> None:
+    from azure.core.exceptions import HttpResponseError
+
+    from src.api.storage import azure
+
+    monkeypatch.setattr(azure, "AZURE_AVAILABLE", True)
+    error = HttpResponseError("Synthetic listing failure") if http_error else OSError("Synthetic listing failure")
+    if http_error:
+        error.status_code = 503
+        error.error_code = "ServiceUnavailable"
+    client = MagicMock()
+    client.get_container_client.return_value.list_blobs.side_effect = error
+    adapter = azure.AzureBlobStorageAdapter(account_name="testaccount", container_name="datasets", sas_token="test")
+    adapter._client = client
+
+    with pytest.raises(azure.StorageError) as failure:
+        await adapter.list_annotation_revisions("ds")
+
+    assert failure.value.cause is error
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "create_only", "conflict"),
+    [
+        (409, "BlobAlreadyExists", True, True),
+        (409, "Conflict", True, False),
+        (409, "BlobAlreadyExists", False, False),
+        (412, "ConditionNotMet", False, True),
+    ],
+)
+async def test_given_azure_precondition_error_when_saving_then_classifies_conflict(
+    monkeypatch: pytest.MonkeyPatch, status: int, code: str, create_only: bool, conflict: bool
+) -> None:
+    from src.api.storage import azure
+
+    class AzureFailure(Exception):
+        status_code = status
+        error_code = code
+
+    monkeypatch.setattr(azure, "AZURE_AVAILABLE", True)
+    monkeypatch.setattr(azure, "HttpResponseError", AzureFailure)
+    monkeypatch.setattr(azure, "ContentSettings", lambda **kwargs: kwargs)
+    client = MagicMock()
+    client.get_container_client.return_value.get_blob_client.return_value.upload_blob = AsyncMock(
+        side_effect=AzureFailure("synthetic conflict")
+    )
+    adapter = azure.AzureBlobStorageAdapter(
+        account_name="testaccount", container_name="testcontainer", sas_token="test"
+    )
+    adapter._client = client
+
+    expected = azure.RevisionConflictError if conflict else azure.StorageError
+    with pytest.raises(expected):
+        await adapter.save_annotation(
+            "test-dataset", 0, create_test_annotation(episode_index=0), if_none_match=create_only
+        )
+
+
 class TestAzureBlobStorageAdapter:
     """Tests for AzureBlobStorageAdapter."""
 
@@ -221,6 +283,41 @@ class TestAzureBlobStorageAdapter:
         result = await adapter.list_annotated_episodes(self.dataset_id)
 
         assert result == [1, 3, 5]
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.azure.BlobServiceClient")
+    async def test_list_annotation_revisions_uses_listing_etags(self, mock_blob_service):
+        from src.api.storage.azure import AzureBlobStorageAdapter
+
+        blobs = []
+        for name, etag in (
+            ("test-dataset/annotations/episodes/episode_000003.json", '"etag-3"'),
+            ("test-dataset/annotations/episodes/episode_bad.json", '"skip"'),
+            ("test-dataset/annotations/episodes/episode_000001.json", None),
+            ("test-dataset/annotations/episodes/episode_000002.txt", '"skip"'),
+        ):
+            blob = MagicMock()
+            blob.name = name
+            blob.etag = etag
+            blobs.append(blob)
+
+        async def mock_list_blobs(name_starts_with):
+            for blob in blobs:
+                yield blob
+
+        mock_container = MagicMock()
+        mock_container.list_blobs = mock_list_blobs
+        mock_client = MagicMock()
+        mock_client.get_container_client.return_value = mock_container
+        adapter = AzureBlobStorageAdapter(
+            account_name="testaccount",
+            container_name="testcontainer",
+            sas_token="test-sas-token",
+        )
+        adapter._client = mock_client
+
+        assert await adapter.list_annotation_revisions(self.dataset_id) == {3: '"etag-3"', 1: None}
+        mock_container.get_blob_client.assert_not_called()
 
     @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
     @patch("src.api.storage.azure.BlobServiceClient")

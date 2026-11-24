@@ -4,11 +4,11 @@ workflow:
     exec_timeout: 2h
   resources:
     default:
-      gpu: 1
-      cpu: 4
-      memory: 32Gi
-      storage: 40Gi
-      platform: gpu_platform
+      gpu: {{ gpu }}
+      cpu: {{ cpu }}
+      memory: {{ memory }}
+      storage: {{ storage }}
+      platform: "{{ platform }}"
   tasks:
     - name: lerobot-eval
       image: "{{ image }}"
@@ -31,8 +31,13 @@ workflow:
         POLICY_REPO_ID: "{{ policy_repo_id }}"
         POLICY_REVISION: "{{ policy_revision }}"
         POLICY_TYPE: "{{ policy_type }}"
+        POLICY_URI: "{{ policy_uri }}"
+        # Single-quoted: {{ rename_map }} expands to a JSON object literal.
+        RENAME_MAP: '{{ rename_map }}'
+        LEROBOT_PROJECT: "{{ lerobot_project }}"
         DATASET_REPO_ID: "{{ dataset_repo_id }}"
         DATASET_REVISION: "{{ dataset_revision }}"
+        DATASET_DIR: "{{ dataset_dir }}"
         EVAL_EPISODES: "{{ eval_episodes }}"
         EVAL_BATCH_SIZE: "{{ eval_batch_size }}"
         OUTPUT_DIR: "{{ output_dir }}"
@@ -47,6 +52,8 @@ workflow:
         AZURE_AUTHORITY_HOST: "{{ azure_authority_host }}"
         MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES: "{{ mlflow_token_refresh_retries }}"
         MLFLOW_HTTP_REQUEST_TIMEOUT: "{{ mlflow_http_request_timeout }}"
+        TRACKING_BACKEND: "{{ tracking_backend }}"
+        MLFLOW_TRACKING_URI: "{{ mlflow_tracking_uri }}"
         REGISTER_MODEL: "{{ register_model }}"
         AML_MODEL_NAME: "{{ aml_model_name }}"
         AML_MODEL_VERSION: "{{ aml_model_version }}"
@@ -67,8 +74,12 @@ default-values:
   policy_repo_id: ""
   policy_revision: ""
   policy_type: act
+  policy_uri: ""
+  rename_map: ""
+  lerobot_project: training/il/lerobot
   dataset_repo_id: ""
   dataset_revision: ""
+  dataset_dir: ""
   eval_episodes: "10"
   eval_batch_size: "10"
   output_dir: /workspace/outputs/eval
@@ -83,6 +94,13 @@ default-values:
   azure_authority_host: https://login.microsoftonline.com
   mlflow_token_refresh_retries: "5"
   mlflow_http_request_timeout: "600"
+  tracking_backend: azureml
+  mlflow_tracking_uri: ""
+  gpu: "1"
+  cpu: "4"
+  memory: 32Gi
+  storage: 40Gi
+  platform: gpu_platform
   register_model: ""
   aml_model_name: ""
   aml_model_version: ""

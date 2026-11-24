@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Migrate LeRobot Checkpoints
 description: Convert LeRobot checkpoints trained before 0.6 to the processor-based checkpoint format
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-14
+ms.date: 2026-10-13
 ms.topic: how-to
 keywords:
   - lerobot
@@ -226,3 +226,7 @@ Register the migrated output as a new immutable model version. Keep its source i
 * [LeRobot Training](lerobot-training.md) for Azure ML and OSMO training workflows
 * [LeRobot ACT Policy Evaluation](../evaluation/lerobot-evaluation.md) for processor-aware inference
 * [Experiment Tracking](experiment-tracking.md) for model registration and lineage
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

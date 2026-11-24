@@ -14,6 +14,8 @@ source "$REPO_ROOT/scripts/lib/hil.sh"
 source "$SCRIPT_DIR/../defaults.conf"
 # shellcheck source=../../../infrastructure/setup/defaults.conf
 source "$REPO_ROOT/infrastructure/setup/defaults.conf"
+# shellcheck source=../../../scripts/lib/osmo-cluster.sh
+source "$REPO_ROOT/scripts/lib/osmo-cluster.sh"
 
 show_help() {
   cat << EOF
@@ -115,7 +117,7 @@ if [[ "$config_preview" == "true" ]]; then
 fi
 
 require_tools az base64 curl helm jq kubectl osmo
-identity_file=/var/lib/physical-ai-toolchain/k3s-identity.json
+identity_file="$EDGE_STATE_DIR/k3s-identity.json"
 
 hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir" "$use_managed_identity"
 
@@ -236,28 +238,10 @@ jq -e --arg client_id "$workload_identity_client_id" '
   fatal "Local OSMO workflow service account does not have the required workload identity metadata"
 
 # Install or update KAI Scheduler with architecture-specific immutable images.
-case "$(uname -m)" in
-  x86_64)
-    kai_operator_sha="$KAI_OPERATOR_SHA256_AMD64"
-    kai_crd_upgrader_sha="$KAI_CRD_UPGRADER_SHA256_AMD64"
-    ;;
-  aarch64|arm64)
-    kai_operator_sha="$KAI_OPERATOR_SHA256_ARM64"
-    kai_crd_upgrader_sha="$KAI_CRD_UPGRADER_SHA256_ARM64"
-    ;;
-  *) fatal "Unsupported KAI image architecture: $(uname -m)" ;;
-esac
-kai_helm_args=(
-  --namespace "$NS_KAI_SCHEDULER"
-  -f "$REPO_ROOT/infrastructure/setup/values/kai-scheduler-edge.yaml"
-  --set-string "operator.image.tag=${KAI_SCHEDULER_VERSION}@sha256:${kai_operator_sha}"
-  --set-string "crdupgrader.image.tag=${KAI_SCHEDULER_VERSION}@sha256:${kai_crd_upgrader_sha}"
-  --set-string "postCleanup.image.tag=${KAI_SCHEDULER_VERSION}@sha256:${kai_crd_upgrader_sha}"
-)
-kube_helm "$kubeconfig" "$context" upgrade --install kai-scheduler "$kai_chart" \
-  --namespace "$NS_KAI_SCHEDULER" --create-namespace \
-  "${kai_helm_args[@]}" \
-  --wait --timeout "$TIMEOUT_DEPLOY"
+kai_image_args_text=$(kai_scheduler_image_args)
+mapfile -t kai_image_args <<< "$kai_image_args_text"
+install_kai_scheduler "$kubeconfig" "$context" "$kai_chart" \
+  "$REPO_ROOT/infrastructure/setup/values/kai-scheduler-edge.yaml" "${kai_image_args[@]}"
 
 # Create or update the namespaces and secrets used by local workloads.
 ensure_namespace "$kubeconfig" "$context" "$operator_namespace"

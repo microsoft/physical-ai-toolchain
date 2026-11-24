@@ -3,6 +3,23 @@ name: Pytest GPU Offload
 
 'on':
   workflow_call:
+    outputs:
+      work-status:
+        value: ${{ jobs.aggregate.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.aggregate.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.aggregate.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.aggregate.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.aggregate.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.aggregate.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.aggregate.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.aggregate.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -19,6 +36,7 @@ jobs:
           - name: runtime
             path: gpu-offload/runtime
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -28,27 +46,41 @@ jobs:
           persist-credentials: false
 
       - name: Setup Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: '3.12'
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
           version: '0.12.20'
           checksum: '6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f'
 
       - name: Install dependencies
+        id: install
         working-directory: ${{ matrix.path }}
         run: uv sync --frozen --extra test
 
       - name: Run pytest
+        id: test
         working-directory: ${{ matrix.path }}
-        run: uv run --frozen pytest -o addopts="" tests -v
+        run: uv run --frozen pytest -o addopts="" tests -v --junitxml="$GITHUB_WORKSPACE/logs/pytest-gpu-offload-${{ matrix.name }}-results.xml"
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: pytest-gpu-offload
+          shard: ${{ matrix.name }}
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["install","test"]'
+          reports: '[{"path":"logs/pytest-gpu-offload-${{ matrix.name }}-results.xml","kind":"junit"}]'
 
   pytest-gpu-offload-ur10e-single:
     name: Pytest GPU Offload (ur10e-single)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -58,12 +90,12 @@ jobs:
           persist-credentials: false
 
       - name: Setup Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: '3.12'
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
           version: '0.12.20'
           checksum: '6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f'
@@ -71,7 +103,51 @@ jobs:
       # The example has no environment of its own. The root dev group provides torch,
       # and the tests finalize candidates with the training pipeline's code.
       - name: Install dependencies
+        id: install
         run: uv sync --frozen --group dev
 
       - name: Run pytest
-        run: uv run --frozen pytest -o addopts="" gpu-offload/examples/ur10e-single/tests -v
+        id: test
+        run: uv run --frozen pytest -o addopts="" gpu-offload/examples/ur10e-single/tests -v --junitxml="$GITHUB_WORKSPACE/logs/pytest-gpu-offload-ur10e-single-results.xml"
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: pytest-gpu-offload
+          shard: ur10e-single
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["install","test"]'
+          reports: '[{"path":"logs/pytest-gpu-offload-ur10e-single-results.xml","kind":"junit"}]'
+
+  aggregate:
+    name: Aggregate GPU offload tests
+    if: always()
+    needs: [pytest-gpu-offload, pytest-gpu-offload-ur10e-single]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Aggregate execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: pytest-gpu-offload
+          needs-json: ${{ toJSON(needs) }}
+          expected-shards: '{"pytest-gpu-offload":["controller","runtime"],"pytest-gpu-offload-ur10e-single":["ur10e-single"]}'

@@ -432,9 +432,15 @@ function Get-HelmRepoLatestVersion {
 }
 
 function Get-HelmOciLatestVersion {
+    <#
+    .SYNOPSIS
+        Return the highest stable (vX.Y.Z) chart tag in a ghcr.io OCI repository,
+        skipping any tag listed in ExcludeVersions (for example, retracted releases).
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Chart,
+        [string[]]$ExcludeVersions = @(),
         [scriptblock]$RequestInvoker = {
             param($Uri, $Headers)
             Invoke-RestMethod -Uri $Uri -Headers $Headers -ErrorAction Stop
@@ -445,6 +451,7 @@ function Get-HelmOciLatestVersion {
         throw "Unsupported OCI chart source: $Chart"
     }
     $repository = $Matches.Repository
+    $excluded = @($ExcludeVersions | Where-Object { $_ } | ForEach-Object { $_.TrimStart('v') })
     $tokenUrl = "https://ghcr.io/token?service=ghcr.io&scope=repository:${repository}:pull"
     $auth = & $RequestInvoker $tokenUrl @{}
     if (-not $auth.token) {
@@ -465,7 +472,7 @@ function Get-HelmOciLatestVersion {
         }
         $tags = @($response.tags)
         foreach ($tag in $tags) {
-            if ($tag -match '^v?\d+\.\d+\.\d+$') {
+            if ($tag -match '^v?\d+\.\d+\.\d+$' -and $excluded -notcontains $tag.TrimStart('v')) {
                 $versions.Add($tag)
             }
         }
@@ -477,7 +484,7 @@ function Get-HelmOciLatestVersion {
     } while ($true)
 
     if ($versions.Count -eq 0) {
-        throw "GHCR has no stable chart versions for $Chart"
+        throw "GHCR has no stable, non-excluded chart versions for $Chart"
     }
     return ($versions | Sort-Object { [version]($_ -replace '^v', '') } -Descending | Select-Object -First 1)
 }
@@ -688,6 +695,7 @@ function Invoke-BinaryFreshnessCheck {
         $osmoPinned = Get-ShellVariable -Path $defaultsConf -Name 'OSMO_CHART_VERSION'
         $gpuRepo = Get-ShellVariable -Path $defaultsConf -Name 'HELM_REPO_GPU_OPERATOR'
         $kaiRepo = Get-ShellVariable -Path $defaultsConf -Name 'HELM_REPO_KAI'
+        $kaiRetracted = @((Get-ShellVariable -Path $defaultsConf -Name 'KAI_SCHEDULER_RETRACTED_VERSIONS') -split '\s+' | Where-Object { $_ })
         $osmoRepo = Get-ShellVariable -Path $defaultsConf -Name 'HELM_REPO_OSMO'
         if ($kaiRepo -notmatch '^oci://ghcr\.io/[a-zA-Z0-9._/-]+$') {
             throw "Invalid KAI OCI chart source in $defaultsConf"
@@ -703,7 +711,7 @@ function Invoke-BinaryFreshnessCheck {
             @{
                 Name   = 'KAI Scheduler'
                 Pinned = $kaiPinned
-                Latest = (Invoke-WithRetry -MaxAttempts 3 -Action { Get-HelmOciLatestVersion -Chart "$kaiRepo/kai-scheduler" })
+                Latest = (Invoke-WithRetry -MaxAttempts 3 -Action { Get-HelmOciLatestVersion -Chart "$kaiRepo/kai-scheduler" -ExcludeVersions $kaiRetracted })
                 Source = 'OCI registry'
             }
             @{

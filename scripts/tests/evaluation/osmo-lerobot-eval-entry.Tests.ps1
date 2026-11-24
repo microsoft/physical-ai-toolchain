@@ -46,7 +46,8 @@ BeforeAll {
     function New-PayloadArchive {
         param(
             [Parameter(Mandatory)][string]$Workspace,
-            [Parameter()][bool]$IncludeLockfile = $true
+            [Parameter()][bool]$IncludeLockfile = $true,
+            [string[]]$LockProjects = @('training/il/lerobot')
         )
 
         $inputRoot = Join-Path $Workspace 'osmo-input'
@@ -57,9 +58,11 @@ BeforeAll {
         Set-Content -Path (Join-Path $archiveSource 'payload.txt') -Value 'payload' -Encoding utf8
 
         if ($IncludeLockfile) {
-            $lockfilePath = Join-Path $archiveSource 'training/il/lerobot/uv.lock'
-            New-Item -ItemType Directory -Path (Split-Path $lockfilePath -Parent) -Force | Out-Null
-            Set-Content -Path $lockfilePath -Value 'version = 1' -Encoding utf8
+            foreach ($project in $LockProjects) {
+                $lockfilePath = Join-Path $archiveSource "$project/uv.lock"
+                New-Item -ItemType Directory -Path (Split-Path $lockfilePath -Parent) -Force | Out-Null
+                Set-Content -Path $lockfilePath -Value 'version = 1' -Encoding utf8
+            }
         }
 
         Compress-Archive -Path (Join-Path $archiveSource '*') -DestinationPath $archivePath -Force
@@ -87,7 +90,7 @@ if [[ "$1" == "sync" ]]; then
   [[ " $* " == *" --frozen "* ]] || exit 92
   [[ " $* " == *" --no-config "* ]] || exit 93
   [[ " $* " == *" --no-install-project "* ]] || exit 94
-  [[ " $* " == *" --project "*"training/il/lerobot"* ]] || exit 95
+  [[ " $* " == *" --project "*"${HARNESS_EXPECTED_PROJECT:-training/il/lerobot}"* ]] || exit 95
   exit 0
 fi
 
@@ -118,9 +121,15 @@ EOF
       printf "POLICY_REPO_ID=%s\n" "${POLICY_REPO_ID:-}"
       printf "DATASET_DIR=%s\n" "${DATASET_DIR:-}"
       printf "MLFLOW_TRACKING_URI=%s\n" "${MLFLOW_TRACKING_URI:-}"
+      printf "MLFLOW_ENABLE=%s\n" "${MLFLOW_ENABLE:-}"
     } > "$HARNESS_ENV_SNAPSHOT"
     ;;
   *register_model.py)
+    ;;
+  -)
+    # The tracked policy download reads its program from stdin and writes the downloaded path.
+    grep -q 'download_artifacts(os.environ\["POLICY_URI"\]' || exit 96
+    printf '%s' "/workspace/policy/${POLICY_URI##*/}" > /tmp/policy_path
     ;;
   -c)
     ;;
@@ -135,11 +144,12 @@ exit 0
         param(
             [Parameter(Mandatory)][string]$Workspace,
             [Parameter(Mandatory)][bool]$IncludeLockfile,
+            [string[]]$LockProjects = @('training/il/lerobot'),
             [hashtable]$EnvOverrides = @{},
             [hashtable]$StubOverrides = @{}
         )
 
-        $archive = New-PayloadArchive -Workspace $Workspace -IncludeLockfile:$IncludeLockfile
+        $archive = New-PayloadArchive -Workspace $Workspace -IncludeLockfile:$IncludeLockfile -LockProjects $LockProjects
         $bashEnvPath = New-BashEnvOverride -Workspace $Workspace
         $payloadRoot = Join-Path $Workspace 'payload-root'
         $outputDir = Join-Path $Workspace 'output'
@@ -269,6 +279,73 @@ Describe 'osmo-lerobot-eval-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPrese
             $invocation.Result.StdErr | Should -Match 'ERROR: MLflow requires AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, and AZUREML_WORKSPACE_NAME'
             ($invocation.Result.Calls -join "`n") | Should -Not -Match 'bootstrap_mlflow\.py'
         }
+
+        It 'configures a self-hosted MLflow server without Azure variables' {
+            $workspace = New-TestWorkspace -Name 'mlflow-backend'
+            $invocation = Invoke-LerobotEntry -Workspace $workspace -IncludeLockfile $true -EnvOverrides @{
+                MLFLOW_ENABLE       = 'true'
+                TRACKING_BACKEND    = 'mlflow'
+                MLFLOW_TRACKING_URI = 'http://mlflow.local:5000'
+            }
+
+            $invocation.Result.ExitCode | Should -Be 0
+            ($invocation.Result.Calls -join "`n") | Should -Match 'python3 .*/bootstrap_mlflow\.py'
+            Get-Content -Path $invocation.EnvSnapshot | Should -Contain ("MLFLOW_TRACKING_URI=file://{0}" -f $invocation.MlflowDir)
+            Get-Content -Path $invocation.EnvSnapshot | Should -Contain 'MLFLOW_ENABLE=true'
+        }
+
+        It 'turns MLflow off when the tracking backend is none' {
+            $workspace = New-TestWorkspace -Name 'mlflow-none-backend'
+            $invocation = Invoke-LerobotEntry -Workspace $workspace -IncludeLockfile $true -EnvOverrides @{
+                MLFLOW_ENABLE    = 'true'
+                TRACKING_BACKEND = 'None'
+            }
+
+            $invocation.Result.ExitCode | Should -Be 0
+            $invocation.Result.StdOut | Should -Match 'Tracking disabled \(TRACKING_BACKEND=none\)'
+            ($invocation.Result.Calls -join "`n") | Should -Not -Match 'bootstrap_mlflow\.py'
+            Get-Content -Path $invocation.EnvSnapshot | Should -Contain 'MLFLOW_ENABLE=false'
+        }
+    }
+
+    Context 'policy sources and LeRobot project' {
+        It 'evaluates a policy downloaded through the tracking backend' {
+            $workspace = New-TestWorkspace -Name 'policy-uri'
+            $invocation = Invoke-LerobotEntry -Workspace $workspace -IncludeLockfile $true -EnvOverrides @{
+                POLICY_URI       = 'models:/so101-act/3'
+                TRACKING_BACKEND = 'mlflow'
+                DATASET_DIR      = (Join-Path $workspace 'dataset')
+            }
+
+            $invocation.Result.ExitCode | Should -Be 0
+            Get-Content $invocation.EnvSnapshot | Should -Contain 'POLICY_REPO_ID=/workspace/policy/3'
+            $invocation.Result.StdOut | Should -Match 'Downloading models:/so101-act/3 through the mlflow tracking backend'
+        }
+
+        It 'installs from the LeRobot project the submission names' {
+            $workspace = New-TestWorkspace -Name 'vla-project'
+            $invocation = Invoke-LerobotEntry -Workspace $workspace -IncludeLockfile $true `
+                -LockProjects @('training/il/lerobot', 'training/vla/lerobot') -EnvOverrides @{
+                LEROBOT_PROJECT          = 'training/vla/lerobot'
+                HARNESS_EXPECTED_PROJECT = 'training/vla/lerobot'
+                POLICY_REPO_ID           = '/policy'
+                POLICY_TYPE              = 'smolvla'
+                DATASET_DIR              = (Join-Path $workspace 'dataset')
+            }
+
+            $invocation.Result.ExitCode | Should -Be 0
+            ($invocation.Result.Calls | Where-Object { $_ -match '^uv sync ' }) | Should -Match '--project \S+/training/vla/lerobot$'
+        }
+
+        It 'rejects a LeRobot project outside the payload' {
+            $workspace = New-TestWorkspace -Name 'project-traversal'
+            $invocation = Invoke-LerobotEntry -Workspace $workspace -IncludeLockfile $true -EnvOverrides @{
+                LEROBOT_PROJECT = '../outside'
+            }
+
+            $invocation.Result.ExitCode | Should -Not -Be 0
+            $invocation.Result.StdErr | Should -Match 'LEROBOT_PROJECT must be a repo-relative path without parent traversal'
+        }
     }
 
     Context 'builtin policy guard' {
@@ -277,7 +354,7 @@ Describe 'osmo-lerobot-eval-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPrese
             $invocation = Invoke-LerobotEntry -Workspace $workspace -IncludeLockfile $true -EnvOverrides @{ BUILTIN_POLICY = 'true' }
 
             $invocation.Result.ExitCode | Should -Not -Be 0
-            $invocation.Result.StdErr | Should -Match 'ERROR: --builtin-policy requires a local dataset; set --from-blob-dataset\.'
+            $invocation.Result.StdErr | Should -Match 'ERROR: --builtin-policy requires a local dataset; set --from-blob-dataset or --local-dataset\.'
         }
     }
 
@@ -302,6 +379,21 @@ Describe 'osmo-lerobot-eval-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPrese
 
             $invocation.Result.ExitCode | Should -Be 0
             ($invocation.Result.Calls -join "`n") | Should -Match 'python3 .*/register_model\.py'
+        }
+
+        It 'skips Azure ML registration for a self-hosted tracking backend' {
+            $workspace = New-TestWorkspace -Name 'register-model-mlflow-backend'
+            $invocation = Invoke-LerobotEntry -Workspace $workspace -IncludeLockfile $true -EnvOverrides @{
+                REGISTER_MODEL         = 'registered-policy'
+                TRACKING_BACKEND       = 'mlflow'
+                AZURE_SUBSCRIPTION_ID  = '00000000-0000-0000-0000-000000000000'
+                AZURE_RESOURCE_GROUP   = 'rg-eval'
+                AZUREML_WORKSPACE_NAME = 'aml-eval'
+            }
+
+            $invocation.Result.ExitCode | Should -Be 0
+            $invocation.Result.StdOut | Should -Match 'skipping for the mlflow backend'
+            ($invocation.Result.Calls -join "`n") | Should -Not -Match 'register_model\.py'
         }
     }
 }

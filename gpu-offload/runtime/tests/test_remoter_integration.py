@@ -186,6 +186,7 @@ def test_authenticated_remoter_routes_functions_and_classes_across_processes(tmp
             "singleton_shared_value": 110,
             "stub_proxy_type": "StubAccumulator",
             "stub_added_value": 55,
+            "stub_synced_value": 55,
             "stub_attribute_value": 55,
             "stub_description": "stubbed:StubbedAccumulator",
             "stub_server_pid": result["stub_server_pid"],

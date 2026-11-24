@@ -51,7 +51,10 @@ dependencies = [
     "datasets==5.0.1",
     "pyarrow==25.0.1",
     "huggingface-hub==1.33.0",
-    # LeRobot policy extras keep PI and SmolVLA behind the same pinned runtime.
+    # lerobot[dataset,pi,smolvla] supplies the dataset/video runtime plus
+    # dependencies required by the pi0 / pi0_fast / pi05 and SmolVLA policy
+    # implementations (smolvla adds num2words to the shared transformers and
+    # accelerate dependencies).
     "lerobot[dataset,pi,smolvla]==0.6.1",
     "torch==2.14.0",
     "torchvision==0.29.0",
@@ -73,7 +76,7 @@ dependencies = [
     "torchcodec==0.16.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via
     # mlflow-skinny and wandb).
-    "gitpython==3.1.62",
+    "gitpython==3.2.1",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.8.0",
     # Pin cryptography above the 48.0.1 security floor for
@@ -134,6 +137,11 @@ override-dependencies = [
     "torchvision==0.29.0",
 ]
 package = false
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
 
 [[tool.uv.index]]
 name = "pytorch-cu130"

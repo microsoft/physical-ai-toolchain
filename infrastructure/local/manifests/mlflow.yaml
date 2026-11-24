@@ -1,0 +1,141 @@
+# MLflow tracking server and model registry for the local profile, at the pinned ClusterIP so pods and host
+# CLIs share one URL. Runs, metrics, and registered models live in the platform PostgreSQL; the server proxies
+# artifacts into the object store, so clients need only the tracking URI.
+# Rendered by 03-deploy-mlflow.sh, which substitutes only LOCAL_ placeholders.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow
+  namespace: ${LOCAL_MLFLOW_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: mlflow
+    app.kubernetes.io/component: tracking
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  type: ClusterIP
+  clusterIP: ${LOCAL_MLFLOW_CLUSTER_IP}
+  selector:
+    app.kubernetes.io/name: mlflow
+  ports:
+    - name: http
+      port: ${LOCAL_MLFLOW_PORT}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow
+  namespace: ${LOCAL_MLFLOW_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: mlflow
+    app.kubernetes.io/component: tracking
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mlflow
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mlflow
+        app.kubernetes.io/component: tracking
+        app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Creates the schema on a new database and applies migrations after an MLflow upgrade.
+        - name: db-upgrade
+          image: ${LOCAL_MLFLOW_IMAGE}
+          command: ["/bin/sh", "-c", "mlflow db upgrade \"$MLFLOW_BACKEND_STORE_URI\""]
+          env:
+            - name: HOME
+              value: /tmp
+            # libpq reads the password from PGPASSWORD, so the URI carries none.
+            - name: MLFLOW_BACKEND_STORE_URI
+              value: postgresql+psycopg2://${LOCAL_MLFLOW_DATABASE}@postgres.${LOCAL_PLATFORM_NAMESPACE}.svc.cluster.local:5432/${LOCAL_MLFLOW_DATABASE}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${LOCAL_MLFLOW_DATABASE_SECRET}
+                  key: db-password
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: mlflow
+          image: ${LOCAL_MLFLOW_IMAGE}
+          command: ["mlflow", "server"]
+          env:
+            - name: HOME
+              value: /tmp
+            - name: MLFLOW_HOST
+              value: 0.0.0.0
+            - name: MLFLOW_PORT
+              value: "${LOCAL_MLFLOW_PORT}"
+            - name: MLFLOW_WORKERS
+              value: "${LOCAL_MLFLOW_WORKERS}"
+            - name: MLFLOW_BACKEND_STORE_URI
+              value: postgresql+psycopg2://${LOCAL_MLFLOW_DATABASE}@postgres.${LOCAL_PLATFORM_NAMESPACE}.svc.cluster.local:5432/${LOCAL_MLFLOW_DATABASE}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${LOCAL_MLFLOW_DATABASE_SECRET}
+                  key: db-password
+            - name: MLFLOW_SERVE_ARTIFACTS
+              value: "true"
+            - name: MLFLOW_ARTIFACTS_DESTINATION
+              value: s3://${LOCAL_MLFLOW_BUCKET}/artifacts
+            # Host headers clients send: cluster DNS from pods, the pinned ClusterIP from the host, and
+            # loopback through kubectl port-forward. /health answers any host, so probes need no entry.
+            - name: MLFLOW_SERVER_ALLOWED_HOSTS
+              value: mlflow.${LOCAL_MLFLOW_NAMESPACE}.svc.cluster.local:${LOCAL_MLFLOW_PORT},mlflow.${LOCAL_MLFLOW_NAMESPACE}.svc:${LOCAL_MLFLOW_PORT},mlflow.${LOCAL_MLFLOW_NAMESPACE}:${LOCAL_MLFLOW_PORT},${LOCAL_MLFLOW_CLUSTER_IP}:${LOCAL_MLFLOW_PORT},localhost:*,127.0.0.1:*
+            - name: MLFLOW_S3_ENDPOINT_URL
+              value: http://${LOCAL_S3_CLUSTER_IP}:${LOCAL_S3_PORT}
+            - name: MLFLOW_BOTO_CLIENT_ADDRESSING_STYLE
+              value: path
+            - name: AWS_DEFAULT_REGION
+              value: ${LOCAL_S3_REGION}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: ${LOCAL_MLFLOW_STORAGE_SECRET}
+                  key: aws-access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ${LOCAL_MLFLOW_STORAGE_SECRET}
+                  key: aws-secret-access-key
+          ports:
+            - name: http
+              containerPort: ${LOCAL_MLFLOW_PORT}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 3Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

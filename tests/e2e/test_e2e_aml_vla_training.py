@@ -27,6 +27,7 @@ from typing import Any
 import pytest
 
 from tests.e2e._aml import (
+    AzureMLCompute,
     AzureMLJob,
     AzureMLWorkspace,
     cancel_aml_job,
@@ -70,7 +71,7 @@ def _load_output_json(job: AzureMLJob, repo_root: Path, output_name: str, filena
 def test_aml_vla_calibrated_training_e2e(
     request: pytest.FixtureRequest,
     aml_workspace: AzureMLWorkspace,
-    aml_compute_target: str,
+    aml_compute_target: AzureMLCompute,
     repo_root: Path,
     tmp_path: Path,
 ) -> None:
@@ -104,7 +105,7 @@ def test_aml_vla_calibrated_training_e2e(
     sweep_job = submit_aml_vla_calibration_sweep(
         repo_root,
         aml_workspace,
-        compute_target=aml_compute_target,
+        compute_target=aml_compute_target.name,
         vla_inputs=vla_inputs,
         headroom_fraction=0.1,
     )
@@ -116,7 +117,7 @@ def test_aml_vla_calibrated_training_e2e(
     training_job = submit_aml_vla_pipeline(
         repo_root,
         aml_workspace,
-        compute_target=aml_compute_target,
+        compute_target=aml_compute_target.name,
         vla_inputs=vla_inputs,
         calibration_trial=calibration_trial,
         pipeline_contract_fingerprint=hashlib.sha256(pipeline_path.read_bytes()).hexdigest(),

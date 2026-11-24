@@ -1,9 +1,43 @@
+# Keep all add_header directives shared; location overrides disable inheritance.
+map $uri $frame_ancestors {
+    default "'none'";
+    /redirect.html "'self'";
+}
+
+map $uri $frame_options {
+    default "DENY";
+    /redirect.html "SAMEORIGIN";
+}
+
+map $uri $redirect_cache_control {
+    default "";
+    /redirect.html "no-store";
+}
+
+map $caller_token $caller_gated_upstream {
+    default "";
+    "~^(?=.{1,8192}$)[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$" ${NGINX_BACKEND_SCHEME}://${NGINX_BACKEND_HOST};
+}
+
 server {
     listen 8080;
     server_name _;
+    large_client_header_buffers 4 16k;
 
     root /usr/share/nginx/html;
     index index.html;
+
+    # style-src 'unsafe-inline' is required because Radix UI's portal-based
+    # positioning primitives and recharts SVG rendering set inline `style`
+    # attributes at runtime; nonce/hash-based CSP would require replacing
+    # those libraries. Accepted as a residual risk.
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; frame-ancestors $frame_ancestors; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self' https://login.microsoftonline.com; frame-src 'self' https://login.microsoftonline.com" always;
+    add_header X-Frame-Options $frame_options always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()" always;
+    add_header Cache-Control $redirect_cache_control always;
 
     # Container Apps internal DNS; forces per-request resolution via variables
     resolver ${NGINX_RESOLVER} valid=10s;
@@ -19,14 +53,52 @@ server {
     # For HTTPS, set it to the certificate-valid backend FQDN.
     # Custom HTTPS backends must chain to a CA in ca-certificates.crt.
     # Using a variable forces nginx to resolve DNS per-request via the resolver.
+    location = /_caller_proof {
+        internal;
+        proxy_pass http://127.0.0.1:8090/token;
+        proxy_pass_request_headers off;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_buffer_size 16k;
+        proxy_buffers 4 16k;
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 6s;
+        proxy_send_timeout 2s;
+    }
+
+    location = /_caller_ready {
+        internal;
+        proxy_pass http://127.0.0.1:8090/ready;
+        proxy_pass_request_headers off;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 6s;
+        proxy_send_timeout 2s;
+    }
+
     location /api/ {
         set $backend_upstream ${NGINX_BACKEND_SCHEME}://${NGINX_BACKEND_HOST};
-        proxy_pass $backend_upstream;
+        set $caller_token "";
+        include /etc/nginx/conf.d/caller-api.inc;
         proxy_http_version 1.1;
         proxy_set_header Host ${NGINX_BACKEND_HOST};
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Dataviewer-Proxy-Key "";
+
+        # Strip the backend's own security headers so only nginx's canonical
+        # add_header values reach the client; otherwise both sets are sent,
+        # producing duplicate/conflicting headers (e.g. two different
+        # Permissions-Policy values).
+        proxy_hide_header X-Content-Type-Options;
+        proxy_hide_header X-Frame-Options;
+        proxy_hide_header Referrer-Policy;
+        proxy_hide_header Permissions-Policy;
+        proxy_hide_header Cross-Origin-Opener-Policy;
+        proxy_hide_header Content-Security-Policy;
+        proxy_hide_header X-Dataviewer-Caller-Token;
 
         # Support large video file streaming
         proxy_buffering off;
@@ -36,11 +108,41 @@ server {
     }
 
     # Health endpoint proxied from backend
-    location /health {
+    location = /health {
+        limit_except GET HEAD {
+            deny all;
+        }
+
+        if ($request_uri !~ "^/health(\?.*)?$") {
+            return 404;
+        }
+
         set $backend_health ${NGINX_BACKEND_SCHEME}://${NGINX_BACKEND_HOST}/health;
+        include /etc/nginx/conf.d/caller-health.inc;
         proxy_pass $backend_health;
         proxy_http_version 1.1;
         proxy_set_header Host ${NGINX_BACKEND_HOST};
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 3s;
+        proxy_send_timeout 3s;
+
+        # See /api/ above: strip the backend's own security headers to avoid
+        # duplicate/conflicting headers with nginx's canonical add_header values.
+        proxy_hide_header X-Content-Type-Options;
+        proxy_hide_header X-Frame-Options;
+        proxy_hide_header Referrer-Policy;
+        proxy_hide_header Permissions-Policy;
+        proxy_hide_header Cross-Origin-Opener-Policy;
+        proxy_hide_header Content-Security-Policy;
+        proxy_hide_header X-Dataviewer-Caller-Token;
+    }
+
+    location /health {
+        return 404;
+    }
+
+    location = /redirect.html {
+        try_files $uri =404;
     }
 
     # SPA fallback: all other routes served by index.html

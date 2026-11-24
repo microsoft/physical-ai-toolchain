@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from src.api import config as config_mod
@@ -71,6 +73,24 @@ class TestLoadConfig:
         monkeypatch.setenv("CORS_ORIGINS", "http://a.test , http://b.test ,, ")
         cfg = load_config()
         assert cfg.cors_origins == ["http://a.test", "http://b.test"]
+        assert cfg.cors_origin_regex is None
+
+    def test_cors_wildcard_origins_become_regex(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv(
+            "CORS_ORIGINS",
+            "http://localhost:5173,https://*.nicegrass-1a2b3c4d.eastus.azurecontainerapps.io",
+        )
+        cfg = load_config()
+        assert cfg.cors_origins == ["http://localhost:5173"]
+        assert cfg.cors_origin_regex is not None
+        assert "localhost" not in cfg.cors_origin_regex
+        import re
+
+        assert re.fullmatch(
+            cfg.cors_origin_regex,
+            "https://frontend.nicegrass-1a2b3c4d.eastus.azurecontainerapps.io",
+        )
+        assert re.fullmatch(cfg.cors_origin_regex, "https://evil.example.com") is None
 
     def test_int_env_coercion(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("BACKEND_PORT", "9090")
@@ -199,15 +219,24 @@ class TestCreateBlobDatasetProvider:
         )
         assert create_blob_dataset_provider(cfg) is None
 
-    def test_returns_none_when_account_missing(self):
+    @pytest.mark.parametrize("missing", ["account", "container", "dependency"])
+    def test_given_unavailable_azure_provider_when_creating_then_rejects_local_fallback(
+        self, monkeypatch: pytest.MonkeyPatch, missing: str
+    ) -> None:
         cfg = AppConfig(
             storage_backend="azure",
             data_path="./data",
-            azure_account_name=None,
-            azure_dataset_container="ds",
+            azure_account_name=None if missing == "account" else "synthetic",
+            azure_dataset_container=None if missing == "container" else "ds",
             azure_annotation_container=None,
             azure_sas_token=None,
             backend_host="127.0.0.1",
             backend_port=8000,
         )
-        assert create_blob_dataset_provider(cfg) is None
+        if missing == "dependency":
+            monkeypatch.setitem(sys.modules, "src.api.storage.blob_dataset", None)
+            with pytest.raises(ImportError, match="Azure dataset"):
+                create_blob_dataset_provider(cfg)
+        else:
+            with pytest.raises(ValueError, match="AZURE_STORAGE"):
+                create_blob_dataset_provider(cfg)

@@ -19,11 +19,11 @@ The Sigstore identity attached during publication is the trust anchor for the pu
 
 Write original impact, remediation, and status-note prose. Reference advisory identifiers and URLs rather than copying advisory text.
 
-| Source | Licensing guidance |
-|--------|--------------------|
-| NVD | US government public-domain data may be used for CVSS vectors and CWE classifications. |
-| GitHub Advisory Database | Records are CC-BY-4.0. Link to advisory URLs and identifiers; do not copy prose without satisfying attribution requirements. |
-| OSV.dev | Licensing follows the upstream record. Check record provenance before paraphrasing; when unclear, write original prose and cite the record URL. |
+| Source                   | Licensing guidance                                                                                                                              |
+|--------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| NVD                      | US government public-domain data may be used for CVSS vectors and CWE classifications.                                                          |
+| GitHub Advisory Database | Records are CC-BY-4.0. Link to advisory URLs and identifiers; do not copy prose without satisfying attribution requirements.                    |
+| OSV.dev                  | Licensing follows the upstream record. Check record provenance before paraphrasing; when unclear, write original prose and cite the record URL. |
 
 ## Status Determination
 

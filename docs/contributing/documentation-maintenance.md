@@ -3,7 +3,7 @@ sidebar_position: 11
 title: Documentation Maintenance Policy
 description: Update triggers, ownership, review criteria, freshness policy, and release lifecycle for project documentation
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-10-01
 ms.topic: reference
 keywords:
   - documentation
@@ -59,6 +59,7 @@ Run validation commands before approving documentation PRs:
 
 ```bash
 npm run lint:md        # Markdownlint
+npm run lint:tables    # Markdown table format check
 npm run lint:links     # Language-specific URL check
 npm run spell-check    # cspell
 ```

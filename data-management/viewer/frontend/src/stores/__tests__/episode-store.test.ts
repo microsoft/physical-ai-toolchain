@@ -60,6 +60,41 @@ describe('useEpisodeStore', () => {
   })
 
   describe('setCurrentEpisode', () => {
+    it('resets playback when the principal changes on the same source', () => {
+      const episode = {
+        ...mockEpisodeData,
+        sourceId: 'source-one',
+        sourceRevision: 'generation-one',
+      }
+      useEpisodeStore
+        .getState()
+        .setCurrentEpisode(episode, { datasetId: 'dataset', principalScopeId: 'principal-one' })
+      useEpisodeStore.getState().setCurrentFrame(42)
+      useEpisodeStore.getState().togglePlayback()
+      useEpisodeStore
+        .getState()
+        .setCurrentEpisode(episode, { datasetId: 'dataset', principalScopeId: 'principal-two' })
+      expect(useEpisodeStore.getState().currentFrame).toBe(0)
+      expect(useEpisodeStore.getState().isPlaying).toBe(false)
+    })
+
+    it('preserves playback on a same-source refresh and resets on source replacement', () => {
+      const episode = {
+        ...mockEpisodeData,
+        sourceId: 'source-one',
+        sourceRevision: 'generation-one',
+      }
+      useEpisodeStore.getState().setCurrentEpisode(episode)
+      useEpisodeStore.getState().setCurrentFrame(42)
+      useEpisodeStore.getState().togglePlayback()
+      useEpisodeStore.getState().setCurrentEpisode(structuredClone(episode))
+      expect(useEpisodeStore.getState().currentFrame).toBe(42)
+      expect(useEpisodeStore.getState().isPlaying).toBe(true)
+      useEpisodeStore.getState().setCurrentEpisode({ ...episode, sourceRevision: 'generation-two' })
+      expect(useEpisodeStore.getState().currentFrame).toBe(0)
+      expect(useEpisodeStore.getState().isPlaying).toBe(false)
+    })
+
     it('sets current episode and resets frame/playback', () => {
       useEpisodeStore.getState().setCurrentEpisode(mockEpisodeData)
 
@@ -75,6 +110,17 @@ describe('useEpisodeStore', () => {
       useEpisodeStore.getState().setCurrentEpisode(null)
 
       expect(useEpisodeStore.getState().currentIndex).toBe(-1)
+    })
+
+    it('records the dataset the episode belongs to', () => {
+      const scope = { datasetId: 'dataset-a', principalScopeId: 'principal-one' }
+      useEpisodeStore.getState().setCurrentEpisode(mockEpisodeData, scope)
+      expect(useEpisodeStore.getState().currentDatasetId).toBe('dataset-a')
+      expect(useEpisodeStore.getState().principalScopeId).toBe('principal-one')
+
+      useEpisodeStore.getState().setCurrentEpisode(null, scope)
+      expect(useEpisodeStore.getState().currentDatasetId).toBeNull()
+      expect(useEpisodeStore.getState().principalScopeId).toBeNull()
     })
   })
 

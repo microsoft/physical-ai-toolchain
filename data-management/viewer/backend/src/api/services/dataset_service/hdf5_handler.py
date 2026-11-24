@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import logging
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,7 @@ from ...models.datasources import (
     EpisodeData,
     EpisodeMeta,
     FeatureSchema,
+    RecordedSubtask,
     TrajectoryPoint,
 )
 from .base import build_trajectory, build_trajectory_variables
@@ -297,13 +299,16 @@ class HDF5FormatHandler:
                 cameras=cameras,
                 trajectory_variables=trajectory_variables,
                 trajectory_data=trajectory_data,
+                subtasks=[
+                    RecordedSubtask(**asdict(segment))
+                    for segment in loader.recorded_subtasks(episode_idx, hdf5_data.length)
+                ],
             )
-        except Exception as e:
+        except Exception:
             logger.warning(
-                "HDF5 load_episode failed for %s ep %d: %s",
-                dataset_id,
-                episode_idx,
-                e,
+                "HDF5 load_episode failed for %s ep %d: unavailable",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                int(episode_idx),
             )
             return None
 

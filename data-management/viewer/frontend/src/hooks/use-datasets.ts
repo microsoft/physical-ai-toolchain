@@ -2,17 +2,20 @@
  * TanStack Query hooks for dataset data fetching.
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 
 import {
+  type DatasetCatalogOptions,
   fetchCacheStats,
   fetchCapabilities,
   fetchDataset,
+  fetchDatasetCatalog,
   fetchDatasets,
   fetchEpisode,
   fetchEpisodes,
 } from '@/lib/api-client'
+import { fetchPrincipalContext } from '@/lib/principal-context'
 import { useDatasetStore } from '@/stores'
 
 /**
@@ -32,6 +35,47 @@ export const datasetKeys = {
 export const capabilityKeys = {
   all: ['capabilities'] as const,
   detail: (datasetId: string) => [...capabilityKeys.all, datasetId] as const,
+}
+
+export function useDatasetCatalog(options: DatasetCatalogOptions, enabled = true) {
+  const client = useQueryClient()
+  const principal = useQuery({
+    queryKey: ['auth', 'principal-context'],
+    queryFn: fetchPrincipalContext,
+    staleTime: Infinity,
+    enabled,
+  })
+  const catalogKey = [...datasetKeys.all, 'catalog', principal.data?.scopeId]
+  const query = useQuery({
+    queryKey: [...catalogKey, options],
+    queryFn: () => fetchDatasetCatalog(options),
+    enabled: enabled && !!principal.data?.scopeId && !principal.isError,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  })
+  const denied =
+    principal.isError ||
+    (query.error && 'status' in query.error && [401, 403].includes(Number(query.error.status)))
+  return {
+    ...query,
+    data: denied ? undefined : query.data,
+    error: principal.error ?? query.error,
+    isLoading: principal.isLoading || query.isLoading,
+    refreshCatalog: async () => {
+      const page = await fetchDatasetCatalog({
+        ...options,
+        offset: 0,
+        snapshotId: undefined,
+        refresh: true,
+      })
+      client.setQueryData(
+        [...catalogKey, { ...options, offset: 0, snapshotId: page.snapshotId }],
+        page,
+      )
+      return page
+    },
+  }
 }
 
 /**
@@ -138,13 +182,32 @@ export function useEpisodes(datasetId: string | undefined, options?: UseEpisodes
  * ```
  */
 export function useEpisode(datasetId: string | undefined, episodeIndex: number | undefined) {
-  return useQuery({
-    queryKey: datasetKeys.episode(datasetId ?? '', episodeIndex ?? -1),
-    queryFn: () => fetchEpisode(datasetId!, episodeIndex!),
-    enabled: !!datasetId && episodeIndex !== undefined && episodeIndex >= 0,
+  const enabled = !!datasetId && episodeIndex !== undefined && episodeIndex >= 0
+  const principal = useQuery({
+    queryKey: ['auth', 'principal-context'],
+    queryFn: fetchPrincipalContext,
+    staleTime: Infinity,
+    enabled,
+  })
+  const query = useQuery({
+    queryKey: [
+      ...datasetKeys.episode(datasetId ?? '', episodeIndex ?? -1),
+      principal.data?.scopeId,
+    ],
+    queryFn: ({ signal }) => fetchEpisode(datasetId!, episodeIndex!, signal),
+    enabled: enabled && !!principal.data?.scopeId && !principal.isError,
     staleTime: 30 * 1000, // 30 seconds
     gcTime: 30 * 60 * 1000, // 30 minutes
+    refetchOnWindowFocus: false,
   })
+  return {
+    ...query,
+    principalScopeId: principal.data?.scopeId,
+    data: principal.isError ? undefined : query.data,
+    error: principal.error ?? query.error,
+    isLoading: query.isLoading || (enabled && principal.isLoading),
+    isError: principal.isError || query.isError,
+  }
 }
 
 /**

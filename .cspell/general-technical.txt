@@ -7,6 +7,7 @@ activex
 acunetix
 addfinalizer
 addinivalue
+addopts
 adobe
 adrm
 adrs
@@ -140,6 +141,7 @@ buildpack
 bulletsprint
 byol
 byos
+cacheprovider
 caching
 caffe
 cannery
@@ -200,6 +202,7 @@ clickstream
 clickthrough
 Clis
 cloneable
+closefd
 cloudadmin
 cloudamize
 cloudera
@@ -451,6 +454,7 @@ fileshares
 filesystem
 Finalizer
 firewalls
+fixturenames
 flatdict
 flatmap
 flexbox
@@ -471,6 +475,7 @@ fromarray
 frontend
 frontends
 frontmatter
+fspath
 fullstack
 fulltext
 fuser
@@ -489,6 +494,7 @@ georeplicated
 georeplication
 geoserver
 geospatial
+getconf
 gettype
 gigabytes
 git
@@ -851,6 +857,7 @@ nodejs
 nodesource
 nodistro
 nojekyll
+nonblock
 noncompliance
 noncompliant
 nosql
@@ -1099,6 +1106,7 @@ rdbms
 rdma
 reactjs
 readall
+readback
 readonly
 realtime
 rearchitect
@@ -1142,6 +1150,7 @@ Remotable
 renumbered
 reoccur
 reorganising
+reparsing
 replication
 repoint
 repointed
@@ -1181,6 +1190,7 @@ rsa
 rslrl
 rtde
 rtmp
+rtol
 rubrik
 runbooks
 Rundeck
@@ -1306,6 +1316,7 @@ stonith
 stopwords
 storsimple
 strategizing
+strerror
 striim
 strpos
 stylecop
@@ -1423,6 +1434,7 @@ trivy
 trufflehog
 trustexitcode
 tryfirst
+trylast
 turbonomic
 twilio
 typeparam
@@ -1562,6 +1574,8 @@ wwwroot
 xamarin
 xbox
 xcode
+xffprivate
+xhigh
 xlat
 xlong
 xlsx
@@ -1700,12 +1714,57 @@ acrdev
 eeuo
 gpustat
 libsm
+libsvtav
 libvulkan
 libxext
 libxrender
 noheader
 PYTHONUNBUFFERED
 torchcodec
+
+# AVOPS: CARLA, Cosmos, ffmpeg, and ODD gap analysis terms
+acceleratingdecelerating
+AVOPS
+BYOM
+carlasim
+clipgt
+coeffs
+egomotion
+extrinsics
+ffprobe
+frombuffer
+ftheta
+imaginaire
+imencode
+inclinedecline
+jsons
+lanelines
+libegl
+multiview
+navmesh
+NOENTRY
+nofile
+noprint
+nosound
+nounits
+PAIDF
+pixeldistance
+polyfit
+pythonapi
+RDSHQ
+SOLIDSOLID
+srunner
+straightish
+stype
+tele
+timebase
+trackline
+trafficmanager
+underrep
+underrepresentation
+vcodec
+vframes
+xstack
 
 # Matplotlib / plotting API terms
 axhline
@@ -1828,3 +1887,23 @@ textareas
 unclipped
 unreviewed
 zoomable
+
+# Local OSMO profile: PostgreSQL, Valkey, RustFS, and jq terms
+appendonly
+datname
+isready
+pgdata
+pgdatabase
+pghost
+pguser
+psqlrc
+rediscli
+requirepass
+rolname
+rustfs
+slurpfile
+urandom
+valkey
+envoyproxy
+unpadded
+urlsafe

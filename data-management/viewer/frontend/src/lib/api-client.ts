@@ -7,20 +7,23 @@
 import type {
   AnnotationSummary,
   AutoQualityAnalysis,
+  Contribution,
+  ContributionLedger,
   DatasetCapabilities,
   DatasetInfo,
   EpisodeAnnotation,
   EpisodeAnnotationFile,
   EpisodeData,
   EpisodeMeta,
+  SavedInputSnapshot,
   VlmJudgeResult,
   VlmJudgeRunOptions,
   VlmJudgeStatus,
 } from '@/types'
+import type { JudgeJob } from '@/types/vlm-judge'
 
 import { getAuthHeaders } from './auth-headers'
-
-export const API_BASE = '/api'
+import { recordDiagnosticEvent } from './playback-diagnostics'
 
 /** Cached CSRF token fetched from the server. */
 let _csrfToken: string | null = null
@@ -30,7 +33,7 @@ let _csrfTokenFetch: Promise<string> | null = null
 async function getCsrfToken(): Promise<string> {
   if (_csrfToken) return _csrfToken
   if (!_csrfTokenFetch) {
-    _csrfTokenFetch = fetch(`${API_BASE}/csrf-token`)
+    _csrfTokenFetch = fetch(apiPath('csrf-token'))
       .then((response) => {
         if (!response.ok) {
           throw new Error(`Failed to fetch CSRF token: ${response.statusText}`)
@@ -58,7 +61,10 @@ export async function mutationHeaders(): Promise<Record<string, string>> {
   return { 'X-CSRF-Token': await getCsrfToken(), ...(await getAuthHeaders()) }
 }
 
-/** Fetch wrapper that attaches CSRF + auth headers; caller headers win on key collision. */
+/**
+ * Fetch wrapper that attaches CSRF + auth headers; caller headers win on key collision.
+ * String bodies default to JSON because fetch would otherwise send them as text/plain.
+ */
 export async function mutationFetch(
   input: RequestInfo | URL,
   init: RequestInit = {},
@@ -67,6 +73,7 @@ export async function mutationFetch(
   const needsCsrf = method !== 'GET' && method !== 'HEAD'
   const baseHeaders = needsCsrf ? await mutationHeaders() : await requestHeaders()
   const headers = new Headers(baseHeaders)
+  if (typeof init.body === 'string') headers.set('Content-Type', 'application/json')
   new Headers(init.headers).forEach((value, name) => headers.set(name, value))
   return fetch(input, {
     ...init,
@@ -74,8 +81,12 @@ export async function mutationFetch(
   })
 }
 
+/**
+ * Backend path for `path`, resolved against the document base so the app also works under a path
+ * prefix such as a `kubectl proxy` service URL.
+ */
 export function apiPath(path: string): string {
-  return `${API_BASE}/${path.replace(/^\/+/, '')}`
+  return `${new URL('api', document.baseURI).pathname}/${path.replace(/^\/+/, '')}`
 }
 
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -114,6 +125,31 @@ export function transformKeys<T>(obj: unknown): T {
   return obj as T
 }
 
+export function preserveProvenance<T extends { provenance?: Record<string, ContributionLedger> }>(
+  data: unknown,
+): T {
+  const result = transformKeys<T>(data)
+  const raw = data as { provenance?: Record<string, Record<string, unknown>> }
+  if (raw.provenance) {
+    result.provenance = Object.fromEntries(
+      Object.entries(raw.provenance).map(([scope, ledger]) => [
+        scope,
+        {
+          ...transformKeys<ContributionLedger>(ledger),
+          acceptances: structuredClone(ledger.acceptances ?? {}) as Record<string, string[]>,
+          contributions: ((ledger.contributions ?? []) as Record<string, unknown>[]).map(
+            (contribution) => ({
+              ...transformKeys<Contribution>(contribution),
+              value: structuredClone(contribution.value),
+            }),
+          ),
+        },
+      ]),
+    )
+  }
+  return result
+}
+
 function transformKeysToSnake<T>(obj: unknown): T {
   if (Array.isArray(obj)) {
     return obj.map(transformKeysToSnake) as T
@@ -150,7 +186,8 @@ function preserveDatasetFeatureKeys(raw: Record<string, unknown>): DatasetInfo {
  * trajectory variable map keys (e.g. ``observation.gripper.is_closed``) which
  * must not be camelCased so frontend lookups via ``trajectoryVariables[i].key``
  * remain valid. Also preserves the ``video_urls`` map keys so they match the
- * raw camera names returned in ``cameras`` (e.g. ``observation.images.cam_0``).
+ * raw camera names returned in ``cameras`` (e.g. ``observation.images.cam_0``),
+ * and resolves the backend's ``/api/`` video paths against the document base.
  */
 function preserveEpisodeVariableKeys(raw: Record<string, unknown>): EpisodeData {
   const rawTrajectory = raw.trajectory_data as Array<Record<string, unknown>> | undefined
@@ -168,7 +205,12 @@ function preserveEpisodeVariableKeys(raw: Record<string, unknown>): EpisodeData 
     })
   }
   if (rawVideoUrls) {
-    episode.videoUrls = { ...(rawVideoUrls as Record<string, string>) }
+    episode.videoUrls = Object.fromEntries(
+      Object.entries(rawVideoUrls as Record<string, string>).map(([camera, url]) => [
+        camera,
+        url.startsWith('/api/') ? apiPath(url.slice('/api/'.length)) : url,
+      ]),
+    )
   }
   if (rawVideoTimeWindows) {
     episode.videoTimeWindows = { ...(rawVideoTimeWindows as Record<string, [number, number]>) }
@@ -212,7 +254,16 @@ export function mutationPreconditionHeaders(
   throw new Error('A mutation precondition is required')
 }
 
-function publicErrorMessage(status: number): string {
+const CODE_ERROR_MESSAGES = new Map<string, string>([
+  ['EPISODE_LOAD_FAILED', "The episode's files couldn't be read; the backend log has the cause"],
+])
+
+function publicErrorMessage(status: number, code: string): string {
+  const known = CODE_ERROR_MESSAGES.get(code)
+  if (known) {
+    return known
+  }
+
   if (status >= 500) {
     return 'The server could not complete the request'
   }
@@ -269,7 +320,12 @@ export async function handleResponse<T>(
       // Non-JSON errors still surface through the status-derived public error.
     }
 
-    throw new ApiClientError(publicErrorMessage(response.status), code, response.status, details)
+    throw new ApiClientError(
+      publicErrorMessage(response.status, code),
+      code,
+      response.status,
+      details,
+    )
   }
 
   if (response.status === 204) {
@@ -307,6 +363,46 @@ export async function apiRequestVersioned<T>(
 /**
  * Fetch all available datasets.
  */
+export interface DatasetSummary {
+  id: string
+  name: string
+  group: string | null
+  totalEpisodes: number
+  format: string | null
+}
+
+export interface DatasetCatalogPage {
+  items: DatasetSummary[]
+  total: number
+  catalogTotal: number
+  groups: string[]
+  snapshotId: string
+  offset: number
+  limit: number
+  stale: boolean
+  refreshFailed: boolean
+}
+
+export interface DatasetCatalogOptions {
+  query?: string
+  group?: string
+  sort?: 'name' | 'episodes' | 'episodes-desc'
+  offset?: number
+  limit?: number
+  snapshotId?: string
+  refresh?: boolean
+}
+
+export async function fetchDatasetCatalog(
+  options: DatasetCatalogOptions,
+): Promise<DatasetCatalogPage> {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(options)) {
+    if (value !== undefined) params.set(key === 'snapshotId' ? 'snapshot_id' : key, String(value))
+  }
+  return apiRequest(`/datasets/catalog?${params}`)
+}
+
 export async function fetchDatasets(): Promise<DatasetInfo[]> {
   return apiRequest('/datasets', {}, (data) =>
     (data as Array<Record<string, unknown>>).map(preserveDatasetFeatureKeys),
@@ -364,10 +460,59 @@ export async function fetchEpisodes(
 /**
  * Fetch a specific episode by index.
  */
-export async function fetchEpisode(datasetId: string, episodeIndex: number): Promise<EpisodeData> {
-  return apiRequest(`/datasets/${datasetId}/episodes/${episodeIndex}`, {}, (data) =>
-    preserveEpisodeVariableKeys(data as Record<string, unknown>),
+export async function fetchEpisode(
+  datasetId: string,
+  episodeIndex: number,
+  signal?: AbortSignal,
+): Promise<EpisodeData> {
+  const controller = new AbortController()
+  const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
+  const started = performance.now()
+  const timeout = setTimeout(
+    () => controller.abort(new DOMException('Episode read timed out', 'TimeoutError')),
+    60_000,
   )
+  let onAbort: (() => void) | undefined
+  let outcome = 'success'
+  let status: number | undefined
+  try {
+    requestSignal.throwIfAborted()
+    const aborted = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(requestSignal.reason)
+      requestSignal.addEventListener('abort', onAbort, { once: true })
+    })
+    return await Promise.race([
+      apiRequest(
+        `/datasets/${datasetId}/episodes/${episodeIndex}`,
+        { cache: 'no-store', signal: requestSignal },
+        (data) => preserveEpisodeVariableKeys(data as Record<string, unknown>),
+      ),
+      aborted,
+    ])
+  } catch (error) {
+    if (requestSignal.aborted) {
+      const timedOut =
+        controller.signal.aborted && requestSignal.reason === controller.signal.reason
+      outcome = timedOut ? 'timeout' : 'cancelled'
+      if (timedOut) {
+        throw new ApiClientError('Episode loading timed out. Try again.', 'EPISODE_TIMEOUT', 0)
+      }
+      throw requestSignal.reason
+    }
+    status = error instanceof ApiClientError ? error.status : undefined
+    outcome = status ? 'http-error' : 'request-error'
+    throw error
+  } finally {
+    clearTimeout(timeout)
+    if (onAbort) requestSignal.removeEventListener('abort', onAbort)
+    recordDiagnosticEvent('workspace', 'episode-request-completed', {
+      datasetId,
+      episodeIndex,
+      outcome,
+      status,
+      durationMs: Math.round(performance.now() - started),
+    })
+  }
 }
 
 // ============================================================================
@@ -383,6 +528,8 @@ export async function fetchAnnotations(
 ): Promise<VersionedResource<EpisodeAnnotationFile>> {
   return apiRequestVersioned<EpisodeAnnotationFile>(
     `/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
+    {},
+    preserveProvenance<EpisodeAnnotationFile>,
   )
 }
 
@@ -403,8 +550,14 @@ export async function saveAnnotation(
         'Content-Type': 'application/json',
         ...mutationPreconditionHeaders(precondition),
       },
-      body: JSON.stringify(transformKeysToSnake(annotation)),
+      body: JSON.stringify({
+        ...transformKeysToSnake<Record<string, unknown>>(annotation),
+        ...(annotation.instructionAdoption
+          ? { instruction_adoption: annotation.instructionAdoption }
+          : {}),
+      }),
     },
+    preserveProvenance<EpisodeAnnotationFile>,
   )
 }
 
@@ -511,16 +664,191 @@ export async function runVlmJudge(
   episodeIndex: number,
   options: VlmJudgeRunOptions = {},
 ): Promise<VlmJudgeResult> {
-  return apiRequest<VlmJudgeResult>(`/datasets/${datasetId}/episodes/${episodeIndex}/judge`, {
+  const accepted = await apiRequest<JudgeJob>(
+    `/datasets/${datasetId}/episodes/${episodeIndex}/judge`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({
+        snapshot_id: options.snapshotId,
+        annotation_author_id: options.annotationAuthorId,
+        views: options.views,
+        process_method: options.processMethod,
+        force: options.force ?? false,
+      }),
+    },
+  )
+  if (!accepted.id || accepted.datasetId !== datasetId) throw new Error('Judge job scope changed.')
+  for (let attempt = 0; attempt < 1800; attempt += 1) {
+    const job = await fetchJudgeJob(accepted.id)
+    if (job.datasetId !== datasetId || job.id !== accepted.id)
+      throw new Error('Judge job scope changed.')
+    if (job.status === 'succeeded') {
+      const target = job.targets?.find((item) => item.episodeIndex === episodeIndex)
+      if (
+        !target?.result ||
+        target.result.episodeId !== `${datasetId}/episode_${String(episodeIndex).padStart(6, '0')}`
+      ) {
+        throw new Error('Judge result does not match the submitted episode.')
+      }
+      return {
+        ...target.result,
+        cached: target.cached === true,
+        processMethod: job.config.processMethod,
+      }
+    }
+    if (['partial', 'failed', 'cancelled'].includes(job.status)) {
+      throw new Error(`Judge job ${job.status}.`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+  throw new Error('Judge job is still running.')
+}
+
+export async function submitJudgeJob(
+  datasetId: string,
+  submission: import('@/types/vlm-judge').JudgeSubmission,
+  requestId: string,
+): Promise<JudgeJob> {
+  const options = submission.options ?? {}
+  return apiRequest('/judge/jobs', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Idempotency-Key': requestId },
     body: JSON.stringify({
-      instruction: options.instruction,
-      views: options.views,
-      process_method: options.processMethod,
-      force: options.force ?? false,
+      dataset_id: datasetId,
+      episode_indices: submission.indices,
+      mode: submission.mode,
+      approval_id: submission.approvalId,
+      snapshot_ids: submission.snapshotIds,
+      samples:
+        submission.samples &&
+        Object.fromEntries(
+          Object.entries(submission.samples).map(([index, reference]) => [
+            index,
+            {
+              annotation_author_id: reference.annotationAuthorId,
+              annotation_revision: reference.annotationRevision,
+              labels_revision: reference.labelsRevision,
+              snapshot_id: reference.snapshotId,
+            },
+          ]),
+        ),
+      options: {
+        process_method: options.processMethod,
+        views: options.views,
+        annotation_author_id: options.annotationAuthorId,
+        force: options.force,
+      },
     }),
   })
+}
+
+export async function fetchJudgeJob(jobId: string): Promise<JudgeJob> {
+  return apiRequest<JudgeJob>(`/judge/jobs/${encodeURIComponent(jobId)}`, { cache: 'no-store' })
+}
+
+export function fetchJudgeEvidence(datasetId: string, episodeIndex: number) {
+  const params = new URLSearchParams({
+    dataset_id: datasetId,
+    episode_index: String(episodeIndex),
+    limit: '25',
+  })
+  return apiRequest<{ items: import('@/types/vlm-judge').JudgeEvidence[]; total: number }>(
+    `/judge/results?${params}`,
+    { cache: 'no-store' },
+  )
+}
+
+export function fetchJudgeInventory(
+  datasetId: string,
+  offset: number,
+  snapshotId?: string,
+  limit = 25,
+) {
+  const params = new URLSearchParams({
+    dataset_id: datasetId,
+    offset: String(offset),
+    limit: String(limit),
+  })
+  if (snapshotId) params.set('snapshot_id', snapshotId)
+  return apiRequest<{ items: number[]; total: number; snapshotId: string }>(
+    `/judge/episodes?${params}`,
+    { cache: 'no-store' },
+  )
+}
+
+export function fetchGroundingOverview(datasetId: string) {
+  return apiRequest<{
+    datasetId: string
+    annotated: number[]
+    usable: { episodeIndex: number; annotatorId: string | null; labelsRevision?: string | null }[]
+  }>(`/datasets/${datasetId}/annotations/grounding`, { cache: 'no-store' })
+}
+
+export function fetchJudgeJobs(datasetId: string, offset = 0) {
+  const params = new URLSearchParams({ dataset_id: datasetId, offset: String(offset), limit: '25' })
+  return apiRequest<{ items: JudgeJob[]; total: number }>(`/judge/jobs?${params}`, {
+    cache: 'no-store',
+  })
+}
+
+export function fetchJudgeApprovals(datasetId: string) {
+  const params = new URLSearchParams({ dataset_id: datasetId, limit: '100' })
+  return apiRequest<{ items: import('@/types/vlm-judge').JudgeApproval[]; total: number }>(
+    `/judge/approvals?${params}`,
+    { cache: 'no-store' },
+  )
+}
+
+export async function fetchJudgeReset(datasetId: string) {
+  return apiRequest<import('@/types/vlm-judge').JudgeReset | null>(
+    `/judge/resets?${new URLSearchParams({ dataset_id: datasetId })}`,
+    { cache: 'no-store' },
+  )
+}
+
+export function mutateJudgeDataset(
+  datasetId: string,
+  action: import('@/types/vlm-judge').JudgeDatasetAction,
+) {
+  const path =
+    'jobId' in action
+      ? `/jobs/${encodeURIComponent(action.jobId)}/${action.kind}`
+      : action.kind === 'preview-reset'
+        ? '/resets/preview'
+        : action.kind === 'retry-reset'
+          ? '/resets/retry'
+          : '/resets'
+  const body =
+    action.kind === 'approve'
+      ? { acknowledge_exceptions: action.acknowledgeExceptions }
+      : action.kind === 'apply'
+        ? { episode_indices: action.indices }
+        : action.kind === 'confirm-reset'
+          ? { dataset_id: datasetId, preview_id: action.previewId }
+          : action.kind === 'preview-reset'
+            ? { dataset_id: datasetId, include_unlisted_runs: action.includeUnlistedRuns ?? false }
+            : 'jobId' in action
+              ? {}
+              : { dataset_id: datasetId }
+  return apiRequest<
+    | JudgeJob
+    | import('@/types/vlm-judge').JudgeApproval
+    | import('@/types/vlm-judge').JudgeResetPreview
+    | import('@/types/vlm-judge').JudgeReset
+  >(`/judge${path}`, { method: 'POST', body: JSON.stringify(body) })
+}
+
+export async function fetchVlmJudgeSnapshot(
+  datasetId: string,
+  episodeIndex: number,
+  authorId?: string,
+): Promise<SavedInputSnapshot> {
+  const query = authorId ? `?annotation_author_id=${encodeURIComponent(authorId)}` : ''
+  return apiRequest<SavedInputSnapshot>(
+    `/datasets/${datasetId}/episodes/${episodeIndex}/judge/snapshot${query}`,
+    { cache: 'no-store' },
+  )
 }
 
 // ============================================================================
@@ -540,6 +868,7 @@ export async function setEpisodeLabels(
   episodeIndex: number,
   labels: string[],
   precondition: MutationPrecondition,
+  intent: 'human-edit' | 'legacy-unknown' = 'legacy-unknown',
 ): Promise<VersionedResource<EpisodeLabelsResult>> {
   return apiRequestVersioned<EpisodeLabelsResult>(
     `/datasets/${datasetId}/episodes/${episodeIndex}/labels`,
@@ -549,7 +878,7 @@ export async function setEpisodeLabels(
         'Content-Type': 'application/json',
         ...mutationPreconditionHeaders(precondition),
       },
-      body: JSON.stringify({ labels }),
+      body: JSON.stringify({ labels, intent }),
     },
   )
 }

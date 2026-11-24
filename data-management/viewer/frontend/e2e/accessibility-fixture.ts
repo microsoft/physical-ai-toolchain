@@ -3,6 +3,12 @@ import { expect } from '@playwright/test'
 
 export const riskComponentRegistry = [
   {
+    id: 'viewer-risk-release-selection',
+    category: 'checkbox-disclosure',
+    sourcePaths: ['release/ReleaseDialog.tsx', 'release/ReleaseWorkspace.tsx'],
+    mappedEvidence: 'e2e/accessibility-keyboard.spec.ts',
+  },
+  {
     id: 'viewer-risk-dialogs',
     category: 'dialog',
     sourcePaths: [
@@ -10,6 +16,7 @@ export const riskComponentRegistry = [
       'annotation-workspace/DraftConflictDialog.tsx',
       'episode-viewer/JointConfigDefaultsEditor.tsx',
       'export/ExportDialog.tsx',
+      'release/ReleaseDialog.tsx',
     ],
     mappedEvidence: 'e2e/accessibility-keyboard.spec.ts',
   },
@@ -27,6 +34,8 @@ export const riskComponentRegistry = [
     id: 'viewer-risk-selects',
     category: 'select',
     sourcePaths: [
+      'app-shell/DatasetCatalog.tsx',
+      'app-shell/DatasetWorkspace.tsx',
       'annotation-panel/AddAnomalyDialog.tsx',
       'annotation-panel/AddIssueDialog.tsx',
       'annotation-panel/LanguageInstructionWidget.tsx',
@@ -71,11 +80,16 @@ export const riskComponentRegistry = [
     id: 'viewer-risk-live-regions',
     category: 'live-region',
     sourcePaths: [
+      'app-shell/DatasetCatalog.tsx',
+      'app-shell/DatasetWorkspace.tsx',
       'annotation-panel/ObjectDetectionWidget.tsx',
       'annotation-workspace/AnnotationWorkspacePlaybackCard.tsx',
       'annotation-workspace/AnnotationWorkspaceTopBar.tsx',
       'app-shell/DataviewerEpisodeViewer.tsx',
       'export/ExportProgress.tsx',
+      'release/ReleaseDialog.tsx',
+      'release/ReleaseWorkspace.tsx',
+      'frame-editor/TrajectoryEditor.tsx',
       'vlm-judge/JudgePanel.tsx',
     ],
     mappedEvidence: 'e2e/accessibility-states.spec.ts',
@@ -84,6 +98,7 @@ export const riskComponentRegistry = [
     id: 'viewer-risk-keyboard-shortcuts',
     category: 'keyboard-shortcut',
     sourcePaths: [
+      'app-shell/DatasetCatalog.tsx',
       'annotation-panel/TaskCompletenessWidget.tsx',
       'annotation-panel/TrajectoryQualityWidget.tsx',
       'annotation-workspace/useAnnotationWorkspaceShell.ts',
@@ -175,24 +190,120 @@ interface ApiFixtureOptions {
   episodeList?: 'error' | 'success'
   export?: 'failure' | 'success'
   trajectoryVariables?: 'joints' | 'named'
+  jointConfig?: 'conflict' | 'success'
 }
 
 export async function installApiFixture(page: Page, options: ApiFixtureOptions = {}) {
   const activeDatasets = options.catalog === 'empty' ? [] : datasets
   const activeEpisodes = options.catalog === 'empty' ? [] : episodes
+  const labelStates = new Map(
+    activeDatasets.map((dataset) => [
+      dataset.id,
+      {
+        revision: 0,
+        episodes: { '0': [] as string[], '1': ['REVIEWED'] } as Record<string, string[]>,
+      },
+    ]),
+  )
+  const savedEdits = new Map<string, { revision: number; operations: Record<string, unknown> }>()
+  const savedAnnotations = new Map<string, { revision: number; annotations: unknown[] }>()
+  const jointConfigStates = new Map(
+    [...activeDatasets.map((dataset) => dataset.id), '_defaults'].map((id) => [
+      id,
+      {
+        revision: 0,
+        labels: { '0': 'shoulder_joint', '1': 'target_joint' } as Record<string, string>,
+        groups: [{ id: 'arm', label: 'Arm', indices: [0, 1] }],
+      },
+    ]),
+  )
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const url = new URL(request.url())
     const path = url.pathname
     const method = request.method()
-    const json = (body: unknown, status = 200) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+    const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+      route.fulfill({
+        status,
+        headers,
+        contentType: 'application/json',
+        body: JSON.stringify(body),
+      })
+    const datasetId = path.split('/')[3]
+    const episodeIndex = Number(path.split('/')[5])
+    const resourceKey = `${datasetId}:${episodeIndex}`
+    const sourceId = `synthetic-source:${datasetId}`
+    const sourceRevision = 'synthetic-generation'
+    const principal = 'a11y-local-scope'
+    const matchesRevision = (revision: string | null) =>
+      revision
+        ? request.headers()['if-match'] === revision
+        : request.headers()['if-none-match'] === '*'
 
     if (path === '/api/csrf-token') return json({ csrf_token: 'synthetic-csrf' })
     if (path === '/api/auth/context') {
       return json({ scope_id: 'a11y-local-scope', auth_mode: 'local' })
     }
+    if (path === '/api/releases/v1/capabilities') {
+      return json({
+        schema: 'curated-release-api/v1',
+        job_store: true,
+        planning: true,
+        destinations: [{ alias: 'local' }],
+        operations: ['preview', 'submit'],
+        target: { name: 'lerobot', version: 'v3.0' },
+        routes: ['local-to-local'],
+        capacity: 'unknown',
+      })
+    }
+    if (path.startsWith('/api/releases/v1/inventory/')) {
+      return json({
+        schema: 'curated-release-api/v1',
+        total: 2,
+        next_cursor: null,
+        items: [0, 1].map((episode_index) => ({
+          episode_index,
+          resources: [],
+          annotation: false,
+          edits: false,
+          labels: episode_index === 1 ? ['REVIEWED'] : [],
+          provenance: null,
+          judge: null,
+        })),
+      })
+    }
+    if (
+      path === '/api/releases/v1/jobs' ||
+      /^\/api\/releases\/v1\/sources\/[^/]+\/releases$/.test(path)
+    ) {
+      return json({ schema: 'curated-release-api/v1', items: [], next_cursor: null })
+    }
     if (path === '/api/datasets') return json(activeDatasets)
+    if (path === '/api/datasets/catalog') {
+      const query = (url.searchParams.get('query') ?? '').toLowerCase()
+      const filtered = activeDatasets.filter((dataset) =>
+        `${dataset.id} ${dataset.name}`.toLowerCase().includes(query),
+      )
+      const offset = Number(url.searchParams.get('offset') ?? 0)
+      const limit = Math.min(100, Number(url.searchParams.get('limit') ?? 25))
+      return json({
+        items: filtered.slice(offset, offset + limit).map(({ id, name, total_episodes }) => ({
+          id,
+          name,
+          total_episodes,
+          group: null,
+          format: 'hdf5',
+        })),
+        total: filtered.length,
+        catalog_total: activeDatasets.length,
+        groups: [],
+        snapshot_id: 'synthetic-catalog',
+        offset,
+        limit,
+        stale: false,
+        refresh_failed: false,
+      })
+    }
     if (/^\/api\/datasets\/[^/]+$/.test(path)) {
       const datasetId = path.split('/').at(-1)
       return json(activeDatasets.find((dataset) => dataset.id === datasetId) ?? activeDatasets[0])
@@ -208,6 +319,43 @@ export async function installApiFixture(page: Page, options: ApiFixtureOptions =
         vlm_judge_enabled: false,
       })
     }
+    if (path === '/api/judge/results') return json({ items: [], total: 0 })
+    if (path.endsWith('/edits')) {
+      let saved = savedEdits.get(resourceKey)
+      if (method === 'PUT') {
+        const revision = saved ? `"edits-${saved.revision}"` : null
+        if (!matchesRevision(revision)) return json({ detail: 'Revision conflict' }, 412)
+        const body = request.postDataJSON() as {
+          source_id: string
+          source_revision: string
+          operations: Record<string, unknown>
+        }
+        if (body.source_id !== sourceId || body.source_revision !== sourceRevision)
+          return json({ detail: 'Source changed' }, 409)
+        saved = { revision: (saved?.revision ?? 0) + 1, operations: body.operations }
+        savedEdits.set(resourceKey, saved)
+      }
+      return json(
+        {
+          source_id: sourceId,
+          source_revision: sourceRevision,
+          author_id: principal,
+          saved: saved
+            ? {
+                schema_version: '1.0.0',
+                dataset_id: datasetId,
+                episode_index: episodeIndex,
+                source_id: sourceId,
+                source_revision: sourceRevision,
+                author_id: principal,
+                operations: saved.operations,
+              }
+            : null,
+        },
+        200,
+        saved ? { ETag: `"edits-${saved.revision}"` } : {},
+      )
+    }
     if (/\/episodes$/.test(path)) {
       if (options.episodeList === 'error') {
         return json({ code: 'SYNTHETIC_FAILURE', message: 'Synthetic episode list failure' }, 500)
@@ -215,28 +363,69 @@ export async function installApiFixture(page: Page, options: ApiFixtureOptions =
       return json(activeEpisodes)
     }
     if (path.endsWith('/labels')) {
-      if (method === 'PUT') return json({ episode_index: 0, labels: ['REVIEWED'] })
-      return json({
-        dataset_id: path.split('/')[3],
-        available_labels: ['REVIEWED', 'NEEDS_ATTENTION'],
-        episodes: { '0': [], '1': ['REVIEWED'] },
-        analysis: {},
-      })
+      const state = labelStates.get(datasetId)
+      if (!state) return json({ detail: 'Dataset not found' }, 404)
+      const revision = `"labels-${state.revision}"`
+      if (method === 'PUT') {
+        if (!matchesRevision(revision)) return json({ detail: 'Revision conflict' }, 412)
+        const body = request.postDataJSON() as { labels: string[] }
+        state.episodes[String(episodeIndex)] = [...body.labels]
+        state.revision++
+        return json({ episode_index: episodeIndex, labels: body.labels }, 200, {
+          ETag: `"labels-${state.revision}"`,
+        })
+      }
+      return json(
+        {
+          dataset_id: datasetId,
+          available_labels: ['REVIEWED', 'NEEDS_ATTENTION'],
+          episodes: state.episodes,
+          analysis: {},
+        },
+        200,
+        { ETag: revision },
+      )
     }
     if (path.endsWith('/joint-config') || path === '/api/joint-config/defaults') {
-      return json({
-        dataset_id: path.split('/')[3] ?? 'a11y-synthetic',
-        labels: { '0': 'shoulder_joint', '1': 'target_joint' },
-        groups: [{ id: 'arm', label: 'Arm', indices: [0, 1] }],
+      const configId = path === '/api/joint-config/defaults' ? '_defaults' : datasetId
+      const state = jointConfigStates.get(configId)
+      if (!state) return json({ detail: 'Dataset not found' }, 404)
+      const revision = state.revision ? `"settings-${state.revision}"` : '"settings-baseline"'
+      if (method === 'PUT') {
+        if (options.jointConfig === 'conflict') {
+          return json({ code: 'REVISION_CONFLICT', message: 'Synthetic settings conflict' }, 412)
+        }
+        if (!matchesRevision(revision)) return json({ detail: 'Revision conflict' }, 412)
+        const body = request.postDataJSON() as {
+          labels: Record<string, string>
+          groups: { id: string; label: string; indices: number[] }[]
+        }
+        state.labels = { ...body.labels }
+        state.groups = body.groups.map((group) => ({ ...group, indices: [...group.indices] }))
+        state.revision++
+      }
+      return json({ dataset_id: configId, labels: state.labels, groups: state.groups }, 200, {
+        ETag: state.revision ? `"settings-${state.revision}"` : revision,
       })
     }
     if (path.endsWith('/annotations')) {
-      return json({
-        schema_version: '1.0.0',
-        episode_index: Number(path.split('/')[5]),
-        dataset_id: path.split('/')[3],
-        annotations: [],
-      })
+      let saved = savedAnnotations.get(resourceKey)
+      if (method === 'PUT') {
+        const revision = saved ? `"annotations-${saved.revision}"` : null
+        if (!matchesRevision(revision)) return json({ detail: 'Revision conflict' }, 412)
+        saved = { revision: (saved?.revision ?? 0) + 1, annotations: [request.postDataJSON()] }
+        savedAnnotations.set(resourceKey, saved)
+      }
+      return json(
+        {
+          schema_version: '1.0.0',
+          episode_index: episodeIndex,
+          dataset_id: datasetId,
+          annotations: saved?.annotations ?? [],
+        },
+        200,
+        saved ? { ETag: `"annotations-${saved.revision}"` } : {},
+      )
     }
     if (path.endsWith('/judge')) {
       return json({
@@ -283,7 +472,12 @@ export async function installApiFixture(page: Page, options: ApiFixtureOptions =
       })
     }
     const episodeMatch = path.match(/\/episodes\/(\d+)$/)
-    if (episodeMatch) return json(episodePayload(Number(episodeMatch[1]), options))
+    if (episodeMatch)
+      return json({
+        ...episodePayload(Number(episodeMatch[1]), options),
+        source_id: sourceId,
+        source_revision: sourceRevision,
+      })
     if (path.endsWith('/cache/warm')) return json({ status: 'ready' })
     if (path.endsWith('/cache/stats')) {
       return json({
@@ -302,7 +496,7 @@ export async function installApiFixture(page: Page, options: ApiFixtureOptions =
 
 export async function attachJson(testInfo: TestInfo, name: string, value: unknown) {
   await testInfo.attach(name, {
-    body: Buffer.from(JSON.stringify(value, null, 2)),
+    body: JSON.stringify(value, null, 2),
     contentType: 'application/json',
   })
 }
@@ -318,7 +512,7 @@ export async function openViewer(page: Page, testInfo: TestInfo, options: ApiFix
   })
   page.on('pageerror', (error) => pageErrors.push(error.message))
   await installApiFixture(page, options)
-  await page.goto('/')
+  await page.goto(`/?dataset=${encodeURIComponent(datasets[0].id)}`)
   await expect(page.getByRole('banner')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Episode 0' })).toBeVisible()
   await attachJson(testInfo, 'state-proof', {
@@ -329,6 +523,27 @@ export async function openViewer(page: Page, testInfo: TestInfo, options: ApiFix
     observed: 'Banner and Episode 0 heading are visible',
   })
   return { consoleErrors, pageErrors }
+}
+
+/** Opens a fixture-backed release dialog using keyboard activation, without publishing data. */
+export async function openReleaseDialog(page: Page, testInfo: TestInfo) {
+  const errors = await openViewer(page, testInfo)
+  const tab = page.getByRole('tab', { name: 'Releases', exact: true })
+  await tab.focus()
+  await tab.press('Enter')
+  const opener = page.getByRole('button', { name: 'Create release', exact: true })
+  await opener.focus()
+  await opener.press('Enter')
+  const dialog = page.getByRole('dialog', { name: 'Release curated dataset' })
+  await expect(dialog.getByRole('checkbox', { name: 'Episode 0', exact: true })).toBeVisible()
+  await attachJson(testInfo, 'release-state-proof', {
+    journeyIds: ['V20', 'V21'],
+    route: '/',
+    fixture: 'a11y-synthetic',
+    expected: 'Release workspace and creation dialog expose the full source inventory',
+    observed: 'Keyboard activation opens the dialog with two source episodes',
+  })
+  return { ...errors, dialog, opener }
 }
 
 export async function openEmptyViewer(page: Page, testInfo: TestInfo) {
@@ -344,13 +559,13 @@ export async function openEmptyViewer(page: Page, testInfo: TestInfo) {
   await installApiFixture(page, { catalog: 'empty' })
   await page.goto('/')
   await expect(page.getByRole('banner')).toBeVisible()
-  await expect(page.getByText('No episode data', { exact: true })).toBeVisible()
+  await expect(page.getByText('No datasets available.', { exact: true })).toBeVisible()
   await attachJson(testInfo, 'state-proof', {
     journeyIds: ['V02', 'V03', 'V04'],
     route: '/',
     fixture: 'a11y-empty',
     expected: 'Viewer shell renders an empty catalog without an episode workspace',
-    observed: 'Banner and No episode data status are visible',
+    observed: 'Banner and No datasets available status are visible',
   })
   return { consoleErrors, pageErrors }
 }

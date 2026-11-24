@@ -97,16 +97,25 @@ function Invoke-YamlLintCore {
 No workflow files to lint.
 "@
         Write-CIStepSummary -Content $summary
+        if (-not $ChangedFilesOnly) {
+            Write-CIAnnotation -Level Error -Message 'Full workflow validation has no workflows.'
+            return 1
+        }
         return 0
     }
 
-    # Run actionlint with JSON output
+    # Preserve invocation failures independently from parsed findings.
+    $PSNativeCommandUseErrorActionPreference = $false
     $jsonOutput = $null
+    $executionFailed = $false
     try {
+        $global:LASTEXITCODE = 0
         $jsonOutput = & actionlint -format '{{json .}}' @filesToLint 2>&1
+        $executionFailed = $LASTEXITCODE -ne 0
     }
     catch {
-        Write-Verbose "actionlint returned non-zero exit code: $_"
+        $executionFailed = $true
+        Write-Warning "actionlint invocation failed: $_"
     }
 
     # Parse results
@@ -119,6 +128,7 @@ No workflow files to lint.
                 $issues = @($parsed)
             }
             catch {
+                $executionFailed = $true
                 Write-Warning "Failed to parse actionlint JSON output: $($_.Exception.Message)"
             }
         }
@@ -154,7 +164,8 @@ No workflow files to lint.
         totalFiles   = @($filesToLint).Count
         errorCount   = $errorCount
         warningCount = $warningCount
-        issues       = $issues | ForEach-Object {
+        lint_passed  = (-not $executionFailed -and $errorCount -eq 0 -and $warningCount -eq 0)
+        issues       = @($issues | ForEach-Object {
             @{
                 file    = $_.filepath
                 line    = $_.line
@@ -162,7 +173,7 @@ No workflow files to lint.
                 kind    = $_.kind
                 message = $_.message
             }
-        }
+        })
     }
 
     $exportData | ConvertTo-Json -Depth 10 | Set-Content -Path $OutputPath -Encoding UTF8
@@ -185,7 +196,7 @@ No workflow files to lint.
 "@
     Write-CIStepSummary -Content $summary
 
-    if ($errorCount -gt 0 -or $warningCount -gt 0) {
+    if ($executionFailed -or $errorCount -gt 0 -or $warningCount -gt 0) {
         Set-CIEnv -Name "YAML_LINT_FAILED" -Value "true"
         Write-CIAnnotation -Message "actionlint found $errorCount error(s) and $warningCount warning(s). Fix the issues above." -Level Error
         return 1

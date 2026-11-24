@@ -9,11 +9,11 @@ Deploy trained robot policies to edge robot fleets using FluxCD GitOps pipelines
 
 ## Prerequisites
 
-| Tool | Requirement |
-|------|-------------|
-| `kubectl` | Authenticated to target cluster |
-| `flux` | FluxCD CLI 2.x |
-| `az` CLI | Azure authentication for ACR access |
+| Tool      | Requirement                         |
+|-----------|-------------------------------------|
+| `kubectl` | Authenticated to target cluster     |
+| `flux`    | FluxCD CLI 2.x                      |
+| `az` CLI  | Azure authentication for ACR access |
 
 ## Deployment Workflow
 
@@ -39,18 +39,18 @@ FluxCD reconciles cluster state from Git. New model images trigger automated man
 
 ## Key Directories
 
-| Directory | Purpose |
-|-----------|---------|
-| `fleet-deployment/gitops/` | FluxCD manifests, sources, releases, and cluster overlays |
-| `fleet-deployment/gating/` | Deployment gating service and Kubernetes manifests |
-| `fleet-deployment/inference/` | On-device inference runtime code |
-| `fleet-deployment/examples/` | Example deployment configurations |
-| `fleet-deployment/specifications/` | Domain specification documents |
+| Directory                          | Purpose                                                   |
+|------------------------------------|-----------------------------------------------------------|
+| `fleet-deployment/gitops/`         | FluxCD manifests, sources, releases, and cluster overlays |
+| `fleet-deployment/gating/`         | Deployment gating service and Kubernetes manifests        |
+| `fleet-deployment/inference/`      | On-device inference runtime code                          |
+| `fleet-deployment/examples/`       | Example deployment configurations                         |
+| `fleet-deployment/specifications/` | Domain specification documents                            |
 
 ## Specifications
 
-| Document | Description |
-|----------|-------------|
+| Document                                                                                                     | Description                             |
+|--------------------------------------------------------------------------------------------------------------|-----------------------------------------|
 | [fleet-deployment.specification.md](../../fleet-deployment/specifications/fleet-deployment.specification.md) | Domain overview and component contracts |
-| [gitops.specification.md](../../fleet-deployment/specifications/gitops.specification.md) | FluxCD GitOps architecture |
-| [gating-service.specification.md](../../fleet-deployment/specifications/gating-service.specification.md) | Deployment gating service |
+| [gitops.specification.md](../../fleet-deployment/specifications/gitops.specification.md)                     | FluxCD GitOps architecture              |
+| [gating-service.specification.md](../../fleet-deployment/specifications/gating-service.specification.md)     | Deployment gating service               |

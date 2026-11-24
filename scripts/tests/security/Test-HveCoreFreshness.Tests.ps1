@@ -42,19 +42,23 @@ Describe 'DerivedFiles configuration' -Tag 'Unit' {
             'scripts/security/Test-WorkflowPermissions.ps1|source-header'
             'scripts/security/Test-DangerousWorkflow.ps1|source-header'
             'scripts/security/Test-PublicDependencyFeeds.ps1|source-header'
+            'scripts/linting/Format-MarkdownTables.ps1|source-header'
+            'scripts/tests/linting/Test-Format-MarkdownTables.Tests.ps1|source-header'
         )
         $actual = @($script:DerivedFiles | ForEach-Object { "$($_.Path)|$($_.Baseline)" })
 
         $actual | Should -Be $expected
     }
 
-    It 'Tracks security linters with source-header baselines' {
+    It 'Tracks the security linters and the table formatter with source-header baselines' {
         $sourceFiles = @($script:DerivedFiles | Where-Object { $_.Baseline -eq 'source-header' })
 
-        $sourceFiles.Count | Should -Be 3
+        $sourceFiles.Count | Should -Be 5
         $sourceFiles.Path | Should -Contain 'scripts/security/Test-WorkflowPermissions.ps1'
         $sourceFiles.Path | Should -Contain 'scripts/security/Test-DangerousWorkflow.ps1'
         $sourceFiles.Path | Should -Contain 'scripts/security/Test-PublicDependencyFeeds.ps1'
+        $sourceFiles.Path | Should -Contain 'scripts/linting/Format-MarkdownTables.ps1'
+        $sourceFiles.Path | Should -Contain 'scripts/tests/linting/Test-Format-MarkdownTables.Tests.ps1'
     }
 
     It 'Parses the provenance header of every source-header entry' {
@@ -67,10 +71,11 @@ Describe 'DerivedFiles configuration' -Tag 'Unit' {
         }
     }
 
-    It 'Tracks every security script with an hve-core provenance header' {
+    It 'Tracks every script with an hve-core provenance header' {
         $provenancePattern = 'Adapted from\s+microsoft/hve-core\s+\S+\s+as of commit\s+[0-9a-fA-F]{40}'
-        $securityRoot = Join-Path $script:RepoRoot 'scripts/security'
-        $provenanceFiles = @(Get-ChildItem -Path $securityRoot -Filter '*.ps1' -Recurse |
+        $scriptRoots = @('scripts/security', 'scripts/linting', 'scripts/tests/linting') |
+            ForEach-Object { Join-Path $script:RepoRoot $_ }
+        $provenanceFiles = @(Get-ChildItem -Path $scriptRoots -Filter '*.ps1' -Recurse |
                 Where-Object { (Get-Content -Path $_.FullName -Raw) -match $provenancePattern } |
                 ForEach-Object { [IO.Path]::GetRelativePath($script:RepoRoot, $_.FullName).Replace('\', '/') } |
                 Sort-Object)
@@ -874,7 +879,7 @@ Describe 'Invoke-HveCoreFreshnessCheck' -Tag 'Unit' {
         $result.DriftCount | Should -Be 0
         $result.ErrorCount | Should -Be 0
         @($result.Files).Count | Should -Be $script:DerivedFiles.Count
-        @($result.Files | Where-Object { $_.Baseline -eq 'source-header' }).Count | Should -Be 3
+        @($result.Files | Where-Object { $_.Baseline -eq 'source-header' }).Count | Should -Be 5
     }
 
     It 'Records a file-level error and continues checking remaining files' {

@@ -1,0 +1,89 @@
+workflow:
+  name: vlm-judge
+  timeout:
+    exec_timeout: 2h
+  resources:
+    default:
+      gpu: {{ gpu }}
+      cpu: {{ cpu }}
+      memory: {{ memory }}
+      storage: {{ storage }}
+      platform: "{{ platform }}"
+  tasks:
+    - name: vlm-judge
+      image: "{{ image }}"
+      command: ["bash", "-euc"]
+      args:
+        - |
+          base64 -d /tmp/entry.sh.b64 > /tmp/entry.sh
+          [ -s /tmp/entry.sh ] || { echo "ERROR: /tmp/entry.sh is empty — submit via evaluation/vlm_judge/scripts/submit-osmo-judge.sh" >&2; exit 1; }
+          exec bash /tmp/entry.sh
+      inputs:
+        - url: "{{ code_url }}"
+          regex: ".*"
+{% if input_dataset %}
+        - dataset:
+            name: "{{ dataset_bucket }}/{{ input_dataset }}"
+{% elif input_url %}
+        - url: "{{ input_url }}"
+{% endif %}
+{% if output_dataset %}
+      # The verdicts as an OSMO dataset version.
+      outputs:
+        - dataset:
+            name: "{{ dataset_bucket }}/{{ output_dataset }}"
+{% endif %}
+{% if use_huggingface_credential == "true" %}
+      credentials:
+        huggingface:
+          HF_TOKEN: hf_token
+{% endif %}
+      environment:
+        NVIDIA_DRIVER_CAPABILITIES: "all"
+        OSMO_INPUT_0: "{{input:0}}"
+{% if input_dataset or input_url %}
+        JUDGE_INPUT_DIR: "{{input:1}}"
+{% else %}
+        JUDGE_INPUT_DIR: "{{ input_dir }}"
+{% endif %}
+        OUTPUT_DIR: "{{output}}"
+        JUDGE_BACKEND: "{{ backend }}"
+        JUDGE_MODEL_ID: "{{ model_id }}"
+        JUDGE_MODEL_REVISION: "{{ model_revision }}"
+        JUDGE_BASE_URL: "{{ base_url }}"
+        JUDGE_N_FRAMES: "{{ n_frames }}"
+        JUDGE_LIMIT: "{{ limit }}"
+        JUDGE_INDICES: "{{ indices }}"
+        # Base64, so quotes and backslashes in the instruction survive this template.
+        JUDGE_INSTRUCTION_B64: "{{ instruction_b64 }}"
+        PAYLOAD_ROOT: "{{ payload_root }}"
+      files:
+        - path: /tmp/entry.sh.b64
+          contents: "{{ entry_script_b64 }}"
+
+default-values:
+  # Submission scripts set image from scripts/lib/common.sh via --set-string.
+  # This value is the direct-workflow fallback; keep it in sync with DEFAULT_LEROBOT_EVAL_IMAGE.
+  image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
+  code_url: ""
+  entry_script_b64: ""
+  payload_root: /workspace/judge_payload
+  input_dir: ""
+  input_dataset: ""
+  input_url: ""
+  output_dataset: ""
+  dataset_bucket: training
+  backend: qwen3-vl
+  model_id: Qwen/Qwen3-VL-4B-Instruct
+  model_revision: ""
+  base_url: ""
+  n_frames: "12"
+  limit: ""
+  indices: ""
+  instruction_b64: ""
+  use_huggingface_credential: "false"
+  gpu: "1"
+  cpu: "8"
+  memory: 32Gi
+  storage: 60Gi
+  platform: gpu_platform

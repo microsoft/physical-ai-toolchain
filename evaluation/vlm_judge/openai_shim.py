@@ -183,8 +183,7 @@ def _decode_image(url: str):
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vlm_judge.openai_shim")
-    # Bind localhost by default; override with --host/VLM_SHIM_HOST only on a
-    # trusted network (the shim performs no auth on /v1/chat/completions).
+    # The shim has no authentication; supported usage stays on trusted-host loopback.
     parser.add_argument("--host", default=os.environ.get("VLM_SHIM_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("VLM_SHIM_PORT", "8001")))
     parser.add_argument(

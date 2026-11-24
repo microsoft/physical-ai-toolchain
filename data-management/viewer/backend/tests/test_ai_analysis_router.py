@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -159,6 +160,46 @@ class TestDetectAnomalies:
 
 
 class TestClusterEpisodes:
+    @pytest.mark.parametrize(
+        "trajectories",
+        [
+            [[[0.0]], [[0.0], [1.3407807929942597e154]]],
+            [[[0.0]], [[1.8961503816218355e154]]],
+            [[[-1e308], [1e308]], [[1e308], [-1e308]]],
+            [[[0.0]], [[1e140]]],
+        ],
+    )
+    def test_extreme_finite_coordinates_produce_finite_results(
+        self, client: TestClient, trajectories: list[list[list[float]]]
+    ) -> None:
+        response = client.post("/api/ai/cluster", json={"trajectories": trajectories})
+
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert len(result["assignments"]) == len(trajectories)
+        assert sum(result["cluster_sizes"].values()) == len(trajectories)
+        assert math.isfinite(result["silhouette_score"])
+        assert all(0.0 <= assignment["similarity_score"] <= 1.0 for assignment in result["assignments"])
+
+    def test_nonfinite_coordinates_return_400(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/ai/cluster",
+            content='{"trajectories": [[[NaN]], [[0.0]]]}',
+            headers={"Content-Type": "application/json"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "trajectories[0] must contain only finite values"
+
+    def test_more_clusters_than_trajectories_returns_400(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/ai/cluster",
+            json={"trajectories": [[[0.0]], [[1.0]]], "num_clusters": 3},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "num_clusters must not exceed the number of trajectories"
+
     def test_success_default_num_clusters(self, client: TestClient) -> None:
         trajectories = []
         for offset in (0.0, 0.1, 5.0, 5.1):

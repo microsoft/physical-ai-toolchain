@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -323,13 +324,18 @@ class TestEpisodeAccess:
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         loader = MagicMock()
-        loader.load_episode.side_effect = RuntimeError("unreadable episode")
+        loader.load_episode.side_effect = RuntimeError("private-loader-payload\r\nforged")
         handler = _handler_with_loader(monkeypatch, tmp_path, loader)
+        handler._loaders["dataset\r\nforged"] = handler._loaders.pop("dataset")
 
-        assert handler.load_episode("dataset", 0) is None
+        assert handler.load_episode("dataset\r\nforged", 0) is None
         assert handler.load_episode("unknown", 0) is None
+        assert "HDF5 load_episode failed" in caplog.text
+        assert "private-loader-payload" not in caplog.text
+        assert all("\r" not in record.getMessage() and "\n" not in record.getMessage() for record in caplog.records)
 
     def test_get_trajectory_returns_episode_points(self, tmp_path: Path) -> None:
         _create_episode(tmp_path / "episode_0.hdf5", length=4)
@@ -406,6 +412,63 @@ class TestEpisodeAccess:
         monkeypatch.setattr(handler_module, "load_single_frame", fail_frame_load)
 
         assert handler.get_frame_image("dataset", 0, 0, "cam0") is None
+
+
+class TestRecordedSubtasks:
+    """The subtask file an HDF5 export writes beside an episode comes back with it."""
+
+    def test_subtask_file_beside_the_episode_comes_back_as_subtasks(self, tmp_path: Path) -> None:
+        _create_episode(tmp_path / "episode_000000.hdf5", length=10)
+        entries = [
+            {
+                "id": "st-1",
+                "label": "Reach",
+                "frame_range": [0, 3],
+                "color": "#ff0000",
+                "source": "manual",
+                "description": "first",
+            },
+            {"id": "st-2", "label": "Past the end", "frame_range": [5, 10], "color": "#00ff00", "source": "manual"},
+            {"id": "st-3", "frame_range": [4, 6]},
+        ]
+        (tmp_path / "episode_000000.subtasks.json").write_text(json.dumps(entries))
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("session", tmp_path)
+
+        recorded = handler.load_episode("session", 0).subtasks
+
+        assert [s.model_dump() for s in recorded] == [
+            {
+                "id": "st-1",
+                "label": "Reach",
+                "frame_range": (0, 3),
+                "color": "#ff0000",
+                "source": "manual",
+                "description": "first",
+            }
+        ]
+
+    def test_hdf5_export_loads_back_with_its_cameras_and_subtasks(self, tmp_path: Path) -> None:
+        from src.api.services.episode_edits import EpisodeEditOperations, SubtaskSegment
+        from src.api.services.hdf5_exporter import HDF5Exporter
+
+        source, output = tmp_path / "source", tmp_path / "export"
+        _create_episode(source / "episode_000000.hdf5", length=10, cameras=("top",))
+        edits = EpisodeEditOperations(
+            dataset_id="source",
+            episode_index=0,
+            subtasks=[SubtaskSegment(id="st-1", label="Reach", frame_range=(0, 4), color="#ff0000", source="manual")],
+        )
+        assert HDF5Exporter(source, output).export_episode(0, edits).success
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("export", output)
+
+        episode = handler.load_episode("export", 0)
+
+        assert episode is not None
+        assert episode.meta.length == 10
+        assert episode.cameras == ["top"]
+        assert [s.label for s in episode.subtasks] == ["Reach"]
 
 
 class TestVideoAccess:

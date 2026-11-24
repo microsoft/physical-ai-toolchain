@@ -17,6 +17,21 @@ BeforeDiscovery {
 
 BeforeAll {
     $script:DiscoverScript = (Resolve-Path (Join-Path $PSScriptRoot '../../security/discover-base-images.sh')).Path
+    $script:BashPath = (Get-Command bash -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    if ($IsWindows) {
+        # Git for Windows Bash accepts the native paths used to create fixture repositories.
+        $gitDirectory = Split-Path (Get-Command git -CommandType Application -ErrorAction Stop).Source -Parent
+        $gitRoot = Split-Path $gitDirectory -Parent
+        $candidates = @(
+            (Join-Path $gitRoot 'bin/bash.exe'),
+            (Join-Path (Split-Path $gitRoot -Parent) 'bin/bash.exe')
+        )
+        $nativeBash = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+        if (-not $nativeBash) {
+            throw 'Discovery tests require Bash from the Git for Windows installation.'
+        }
+        $script:BashPath = $nativeBash
+    }
 
     $script:DigestA = 'a' * 64
     $script:DigestB = 'b' * 64
@@ -37,12 +52,13 @@ BeforeAll {
     function Invoke-Discover {
         param(
             [Parameter(Mandatory)][hashtable]$Files,
+            [string]$RemoveTrackedFile,
             [object]$Lanes,
             [switch]$Matrix,
             [switch]$OmitMap
         )
 
-        $repo = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString('N'))
+        $repo = Join-Path $TestDrive "discovery fixture $([System.Guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $repo -Force | Out-Null
         try {
             if ($Matrix -and -not $OmitMap -and
@@ -60,8 +76,11 @@ BeforeAll {
             }
             & git -C $repo init -q
             & git -C $repo add -A
+            if ($RemoveTrackedFile) {
+                Remove-Item (Join-Path $repo $RemoveTrackedFile) -Force
+            }
             $mode = if ($Matrix) { '--matrix' } else { '' }
-            $out = & bash -c "cd '$repo' && bash '$script:DiscoverScript' $mode" 2>$null
+            $out = & $script:BashPath -c 'cd "$1" && bash "$2" "$3"' -- $repo $script:DiscoverScript $mode 2>$null
             $script:LastDiscoverExit = $LASTEXITCODE
             @($out | Where-Object { $_ -ne '' })
         }
@@ -144,6 +163,47 @@ from busybox@sha256:$script:DigestD
         }
     }
 
+    Context 'discovery failures' {
+        It 'Fails rather than returning partial results when a tracked Dockerfile cannot be read (<Matrix>)' -ForEach @(
+            @{ Matrix = $false }
+            @{ Matrix = $true }
+        ) {
+            $line = "FROM python:3.12-slim@sha256:$script:DigestA`n"
+            $result = Invoke-Discover -Files @{ 'Dockerfile' = $line; 'other.Dockerfile' = $line } `
+                -RemoveTrackedFile 'other.Dockerfile' -Matrix:$Matrix -Lanes @(
+                    @{ id = 'runtime'; sources = @(
+                        @{ path = 'Dockerfile'; from = 0 },
+                        @{ path = 'other.Dockerfile'; from = 0 }
+                    ) }
+                )
+            $script:LastDiscoverExit | Should -Not -Be 0
+            @($result).Count | Should -Be 0
+        }
+
+        It 'Fails when Git cannot enumerate tracked files' {
+            & $script:BashPath -c 'GIT_DIR="$1" bash "$2"' -- (Join-Path $TestDrive 'missing.git') $script:DiscoverScript 2>$null | Out-Null
+            $LASTEXITCODE | Should -Not -Be 0
+        }
+
+        It 'Discards enumerated files if git ls-files subsequently fails (<Matrix>)' -ForEach @(
+            @{ Matrix = $false }
+            @{ Matrix = $true }
+        ) {
+            $enumerationFailure = @'
+git() {
+  command git "$@" || return
+  if [[ "$1" == ls-files ]]; then return 1; fi
+}
+export -f git
+bash "$1" "$2"
+'@
+            $mode = if ($Matrix) { '--matrix' } else { '' }
+            $result = & $script:BashPath -c $enumerationFailure -- $script:DiscoverScript $mode 2>$null
+            $LASTEXITCODE | Should -Not -Be 0
+            @($result).Count | Should -Be 0
+        }
+    }
+
     Context 'checked-in source lanes' {
         It 'resolves all eight stable categories and exact concrete refs' {
             $matrix = & bash $script:DiscoverScript --matrix | ConvertFrom-Json
@@ -161,6 +221,20 @@ from busybox@sha256:$script:DigestD
     }
 
     Context 'source-bound matrix behavior' {
+        It 'counts all FROM slots but binds only the complete image token after platform options' {
+            $dockerfile = @"
+FROM scratch # python:3.12@sha256:$script:DigestA
+FROM python:`${TAG}@sha256:$script:DigestB
+FROM --platform=`$BUILDPLATFORM python:3.12@sha256:$script:DigestC AS base
+FROM base
+"@
+            $matrix = Invoke-Discover -Matrix -Files @{ Dockerfile = $dockerfile } `
+                -Lanes @((Get-Lane 'runtime' 'Dockerfile' 2)) | ConvertFrom-Json
+            $script:LastDiscoverExit | Should -Be 0
+            $matrix.image | Should -Be "python:3.12@sha256:$script:DigestC"
+            $matrix.category | Should -Be 'trivy-image-runtime'
+        }
+
         It 'retains a category across arbitrary tag and digest changes while artifact slugs change' {
             $lane = Get-Lane 'runtime' 'Dockerfile'
             $before = "FROM python:3.12@sha256:$script:DigestA"
@@ -365,14 +439,18 @@ from busybox@sha256:$script:DigestD
     }
 
     Context 'workflow bindings' {
-        It 'uses the lane matrix for uploads and the concrete slug only for filenames' {
+        It 'uses stable lane categories with concrete image shards for execution evidence' {
             $script:ScanWorkflow | Should -Match 'discover-base-images\.sh --matrix'
             $script:ScanWorkflow | Should -Match 'include: \$\{\{ fromJSON\(needs\.discover\.outputs\.images\) \}\}'
             $script:ScanWorkflow | Should -Match 'count=\$\(jq .length.'
             $script:ScanWorkflow | Should -Match 'category: \$\{\{ matrix\.category \}\}'
             $script:ScanWorkflow | Should -Match 'image-ref: \$\{\{ matrix\.image \}\}'
-            @([regex]::Matches($script:ScanWorkflow, 'trivy-\$\{\{ steps\.slug\.outputs\.slug \}\}\.sarif')).Count |
-                Should -Be 2
+            $script:ScanWorkflow | Should -Match 'shard=\$\(bash scripts/security/image-slug\.sh "\$image"\)'
+            @([regex]::Matches($script:ScanWorkflow, 'logs/container/\$\{\{ matrix\.shard \}\}\.sarif')).Count |
+                Should -Be 3
+            $script:ScanWorkflow | Should -Match 'shard: \$\{\{ matrix\.shard \}\}'
+            $script:ScanWorkflow | Should -Match 'target: \$\{\{ matrix\.image \}\}'
+            $script:ScanWorkflow | Should -Match 'expected-targets:.*needs\.discover\.outputs\.targets'
         }
 
         It 'executes the actual PR path filter for scan and Pester triggers' {

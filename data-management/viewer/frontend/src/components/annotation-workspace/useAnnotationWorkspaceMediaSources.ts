@@ -57,28 +57,16 @@ export function useAnnotationWorkspaceMediaSources({
     return Object.keys(currentEpisode?.videoUrls ?? {})
   }, [currentEpisode?.cameras, currentEpisode?.videoUrls])
 
-  // User-selected camera override; null means "follow the default (cameras[0])".
-  // Tracking the override (rather than the resolved camera) keeps the resolved
-  // cameraName synchronous on first render, avoiding a transient null that would
-  // briefly produce an empty videoSrc and disrupt autoplay sequencing.
-  const [cameraOverride, setCameraOverride] = useState<string | null>(null)
-
-  const cameraName = useMemo(() => {
-    if (cameras.length === 0) {
-      return null
-    }
-    if (cameraOverride && cameras.includes(cameraOverride)) {
-      return cameraOverride
-    }
-    return cameras[0]
-  }, [cameras, cameraOverride])
-
-  // Drop a stale override when the camera list no longer contains it.
-  useEffect(() => {
-    if (cameraOverride && !cameras.includes(cameraOverride)) {
-      setCameraOverride(null)
-    }
-  }, [cameras, cameraOverride])
+  const [cameraSelection, setCameraSelection] = useState<string[]>([])
+  const selectedCameras = useMemo(() => {
+    const valid = cameraSelection.filter((camera) => cameras.includes(camera))
+    return valid.length ? valid : cameras.slice(0, 1)
+  }, [cameraSelection, cameras])
+  const cameraName = selectedCameras[0] ?? null
+  const setSelectedCameras = (selection: string[]) => {
+    const valid = [...new Set(selection)].filter((camera) => cameras.includes(camera))
+    if (valid.length) setCameraSelection(valid)
+  }
 
   const videoUrls = useMemo(() => currentEpisode?.videoUrls ?? {}, [currentEpisode?.videoUrls])
   const videoWindow = useMemo<[number, number] | null>(() => {
@@ -153,15 +141,21 @@ export function useAnnotationWorkspaceMediaSources({
     totalFrames,
   ])
 
-  const frameImageUrl = useMemo(() => {
-    if (!currentDataset || !currentEpisode || !cameraName || originalFrameIndex === null) {
-      return null
+  const frameImageUrls = useMemo<Record<string, string>>(() => {
+    if (!currentDataset || !currentEpisode || originalFrameIndex === null) {
+      return {}
     }
 
-    return apiPath(
-      `/datasets/${currentDataset.id}/episodes/${currentEpisode.meta.index}/frames/${originalFrameIndex}?camera=${encodeURIComponent(cameraName)}`,
+    return Object.fromEntries(
+      selectedCameras.map((camera) => [
+        camera,
+        apiPath(
+          `/datasets/${currentDataset.id}/episodes/${currentEpisode.meta.index}/frames/${originalFrameIndex}?camera=${encodeURIComponent(camera)}`,
+        ),
+      ]),
     )
-  }, [cameraName, currentDataset, currentEpisode, originalFrameIndex])
+  }, [selectedCameras, currentDataset, currentEpisode, originalFrameIndex])
+  const frameImageUrl = cameraName ? (frameImageUrls[cameraName] ?? null) : null
 
   useEffect(() => {
     if (!isInsertedFrame || !adjacentFrames || !currentDataset || !currentEpisode || !cameraName) {
@@ -225,9 +219,13 @@ export function useAnnotationWorkspaceMediaSources({
     canvasRef,
     cameras,
     cameraName,
-    setCameraName: setCameraOverride,
+    setCameraName: (camera: string | null) =>
+      setSelectedCameras(camera ? [camera] : cameras.slice(0, 1)),
+    selectedCameras,
+    setSelectedCameras,
     displayFilter,
     frameImageUrl,
+    frameImageUrls,
     interpolatedImageUrl,
     isInsertedFrame,
     videoSrc,

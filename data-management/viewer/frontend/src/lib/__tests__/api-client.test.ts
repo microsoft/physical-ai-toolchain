@@ -1,4 +1,9 @@
+import type { Page, Route } from '@playwright/test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { installApiFixture } from '../../../e2e/accessibility-fixture'
+
+vi.mock('@playwright/test', () => ({ expect: vi.fn() }))
 
 import {
   installFetchMock,
@@ -21,14 +26,25 @@ import {
   fetchDatasets,
   fetchEpisode,
   fetchEpisodes,
+  fetchJudgeEvidence,
+  fetchJudgeInventory,
   fetchVlmJudgeStatus,
+  mutateJudgeDataset,
   mutationFetch,
   mutationHeaders,
+  mutationPreconditionHeaders,
   runVlmJudge,
   saveAnnotation,
+  submitJudgeJob,
   triggerAutoAnalysis,
   warmCache,
 } from '../api-client'
+import {
+  clearDiagnosticEvents,
+  disableDiagnostics,
+  enableDiagnostics,
+  readDiagnosticEvents,
+} from '../playback-diagnostics'
 
 beforeEach(() => {
   installFetchMock({ csrf: false })
@@ -36,10 +52,211 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  disableDiagnostics()
+  clearDiagnosticEvents()
   vi.useRealTimers()
   vi.restoreAllMocks()
 })
 describe('ApiClientError', () => {
+  it('reads saved evidence and a revision-pinned inventory page without submitting inference', async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [1005], total: 26, snapshot_id: 'revision' }))
+    await expect(fetchJudgeEvidence('synthetic', 1005)).resolves.toEqual({ items: [], total: 0 })
+    await expect(fetchJudgeInventory('synthetic', 25, 'revision', 250)).resolves.toMatchObject({
+      items: [1005],
+      snapshotId: 'revision',
+    })
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      '/api/judge/results?dataset_id=synthetic&episode_index=1005&limit=25',
+    )
+    expect(mockFetch.mock.lastCall![0]).toContain('snapshot_id=revision')
+    expect(
+      mockFetch.mock.calls.every(([, options]) => !options.method && options.cache === 'no-store'),
+    ).toBe(true)
+  })
+
+  it('submits label-only sample references without inventing annotation ownership', async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ csrf_token: 'token' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'sample', dataset_id: 'synthetic' }, 202))
+    await submitJudgeJob(
+      'synthetic',
+      {
+        indices: [0],
+        mode: 'sample',
+        samples: {
+          0: { snapshotId: 'saved-input', labelsRevision: 'saved-label' },
+        },
+      },
+      'request',
+    )
+    const body = JSON.parse(mockFetch.mock.lastCall![1].body as string)
+    expect(body.samples).toEqual({
+      0: { snapshot_id: 'saved-input', labels_revision: 'saved-label' },
+    })
+    expect(body.samples[0]).not.toHaveProperty('annotation_author_id')
+  })
+
+  it.each([
+    [400, 'The request is invalid'],
+    [401, 'Authentication is required'],
+    [403, 'You do not have permission to perform this action'],
+    [404, 'The requested resource was not found'],
+    [409, 'The request conflicts with the current state'],
+    [413, 'The request is too large'],
+    [422, 'The request contains invalid data'],
+    [429, 'Too many requests; try again later'],
+    [418, 'The request could not be completed'],
+  ])('reports a safe public message for status %i', async (status, message) => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ detail: 'private details' }, status as number))
+    await expect(apiRequest('/synthetic')).rejects.toMatchObject({ message, status })
+  })
+
+  it('rejects missing and contradictory mutation preconditions', () => {
+    expect(() => mutationPreconditionHeaders({})).toThrow('A mutation precondition is required')
+    expect(() => mutationPreconditionHeaders({ etag: 'revision', createOnly: true })).toThrow(
+      'Specify only one mutation precondition',
+    )
+  })
+
+  it('uses revision-bound saved-edit, label, and joint-config responses in the accessibility fixture', async () => {
+    let handler: ((route: Route) => Promise<unknown>) | undefined
+    await installApiFixture({
+      route: async (_pattern: string, callback: typeof handler) => {
+        handler = callback
+      },
+    } as unknown as Page)
+    const request = async (
+      path: string,
+      method = 'GET',
+      body?: unknown,
+      headers: Record<string, string> = {},
+    ): Promise<Response> => {
+      let fulfilled: Parameters<Route['fulfill']>[0] | undefined
+      await handler!({
+        request: () => ({
+          url: () => `http://fixture${path}`,
+          method: () => method,
+          headers: () => headers,
+          postDataJSON: () => body,
+        }),
+        fulfill: async (response: Parameters<Route['fulfill']>[0]) => {
+          fulfilled = response
+        },
+      } as unknown as Route)
+      if (!fulfilled) throw new Error('Fixture did not fulfill the request')
+      return new Response(fulfilled.body as string, {
+        status: fulfilled.status,
+        headers: fulfilled.headers,
+      })
+    }
+    const base = '/api/datasets/a11y-synthetic'
+    const episode = await (await request(`${base}/episodes/0`)).json()
+    expect(episode.source_id).toBeTruthy()
+    expect(episode.source_revision).toBeTruthy()
+    const emptyEdits = await request(`${base}/episodes/0/edits`)
+    expect(emptyEdits.status).toBe(200)
+    expect(await emptyEdits.json()).toEqual({
+      source_id: episode.source_id,
+      source_revision: episode.source_revision,
+      author_id: 'a11y-local-scope',
+      saved: null,
+    })
+    const operations = { datasetId: 'a11y-synthetic', episodeIndex: 0, removedFrames: [1] }
+    const editSave = await request(
+      `${base}/episodes/0/edits`,
+      'PUT',
+      {
+        source_id: episode.source_id,
+        source_revision: episode.source_revision,
+        operations,
+      },
+      { 'if-none-match': '*' },
+    )
+    expect(editSave.headers.get('ETag')).toBeTruthy()
+    expect((await (await request(`${base}/episodes/0/edits`)).json()).saved.operations).toEqual(
+      operations,
+    )
+    expect(
+      (await request(`${base}/episodes/0/edits`, 'PUT', {}, { 'if-none-match': '*' })).status,
+    ).toBe(412)
+    const baseline = await request(`${base}/labels`)
+    const revision = baseline.headers.get('ETag')
+    expect(revision).toBeTruthy()
+    const saved = await request(
+      `${base}/episodes/0/labels`,
+      'PUT',
+      { labels: ['REVIEWED'] },
+      { 'if-match': revision! },
+    )
+    expect(saved.headers.get('ETag')).not.toBe(revision)
+    expect(await saved.json()).toEqual({ episode_index: 0, labels: ['REVIEWED'] })
+    expect((await (await request(`${base}/labels`)).json()).episodes['0']).toEqual(['REVIEWED'])
+    expect(
+      (await request(`${base}/episodes/0/labels`, 'PUT', { labels: [] }, { 'if-match': revision! }))
+        .status,
+    ).toBe(412)
+
+    const configPaths = [
+      `${base}/joint-config`,
+      '/api/datasets/a11y-secondary/joint-config',
+      '/api/joint-config/defaults',
+    ]
+    const baselineConfig = {
+      labels: { '0': 'shoulder_joint', '1': 'target_joint' },
+      groups: [{ id: 'arm', label: 'Arm', indices: [0, 1] }],
+    }
+    for (const [index, path] of configPaths.entries()) {
+      const baselineResponse = await request(path)
+      expect(await baselineResponse.json()).toMatchObject(baselineConfig)
+      const baselineRevision = baselineResponse.headers.get('ETag')
+      expect(baselineRevision).toBeTruthy()
+      const config = {
+        labels: { '0': `saved-shoulder-${index}`, '1': `saved-target-${index}` },
+        groups: [{ id: 'arm', label: `Saved arm ${index}`, indices: [1, 0] }],
+      }
+      const configSave = await request(path, 'PUT', config, { 'if-match': baselineRevision! })
+      expect(configSave.status).toBe(200)
+      expect(await configSave.json()).toMatchObject(config)
+      const savedRevision = configSave.headers.get('ETag')
+      expect(savedRevision).toBeTruthy()
+      expect(savedRevision).not.toBe(baselineRevision)
+      const readback = await request(path)
+      expect(await readback.json()).toMatchObject(config)
+      expect(readback.headers.get('ETag')).toBe(savedRevision)
+      expect(
+        (await request(path, 'PUT', baselineConfig, { 'if-match': baselineRevision! })).status,
+      ).toBe(412)
+      const afterConflict = await request(path)
+      expect(await afterConflict.json()).toMatchObject(config)
+      expect(afterConflict.headers.get('ETag')).toBe(savedRevision)
+    }
+    for (const [index, path] of configPaths.entries()) {
+      expect(await (await request(path)).json()).toMatchObject({
+        dataset_id: index === 2 ? '_defaults' : path.split('/')[3],
+        labels: { '0': `saved-shoulder-${index}`, '1': `saved-target-${index}` },
+        groups: [{ id: 'arm', label: `Saved arm ${index}`, indices: [1, 0] }],
+      })
+    }
+    await installApiFixture(
+      {
+        route: async (_pattern: string, callback: typeof handler) => {
+          handler = callback
+        },
+      } as unknown as Page,
+      { jointConfig: 'conflict' },
+    )
+    const conflictBaseline = await request(configPaths[0])
+    expect(
+      (
+        await request(configPaths[0], 'PUT', baselineConfig, {
+          'if-match': conflictBaseline.headers.get('ETag')!,
+        })
+      ).status,
+    ).toBe(412)
+  })
+
   it('captures code, status, and details', () => {
     const err = new ApiClientError('not found', 'NOT_FOUND', 404, { id: '1' })
     expect(err.message).toBe('not found')
@@ -53,6 +270,36 @@ describe('ApiClientError', () => {
     it('builds all backend paths from the shared API base', () => {
       expect(apiPath('/datasets')).toBe('/api/datasets')
       expect(apiPath('datasets/ds-1')).toBe('/api/datasets/ds-1')
+    })
+
+    describe('under a path prefix such as kubectl proxy', () => {
+      const prefix = '/api/v1/namespaces/dataviewer/services/http:dataviewer-frontend:http/proxy/'
+      let base: HTMLBaseElement
+
+      beforeEach(() => {
+        base = document.createElement('base')
+        base.href = `http://127.0.0.1:8001${prefix}`
+        document.head.append(base)
+      })
+
+      afterEach(() => {
+        base.remove()
+      })
+
+      it('resolves backend paths against the document base', () => {
+        expect(apiPath('/datasets')).toBe(`${prefix}api/datasets`)
+      })
+
+      it('requests data and the CSRF token under the prefix', async () => {
+        mockMutationFetch(jsonResponse({ ok: true }))
+
+        await mutationFetch(apiPath('datasets/ds-1/labels/save'), { method: 'POST' })
+
+        expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
+          `${prefix}api/csrf-token`,
+          `${prefix}api/datasets/ds-1/labels/save`,
+        ])
+      })
     })
 
     it('attaches request headers and camelCases successful JSON responses', async () => {
@@ -99,6 +346,25 @@ describe('ApiClientError', () => {
       await expect(apiRequest('/datasets/ds-1')).rejects.toMatchObject({
         message: 'The server could not complete the request',
         details: undefined,
+      })
+    })
+
+    it('explains an episode that fails to load without exposing server text', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(
+          {
+            code: 'EPISODE_LOAD_FAILED',
+            message: "Episode 3 of dataset 'ds-1' could not be loaded",
+          },
+          500,
+        ),
+      )
+
+      await expect(apiRequest('/datasets/ds-1/episodes/3')).rejects.toMatchObject({
+        name: 'ApiClientError',
+        code: 'EPISODE_LOAD_FAILED',
+        status: 500,
+        message: "The episode's files couldn't be read; the backend log has the cause",
       })
     })
   })
@@ -179,6 +445,78 @@ describe('fetchEpisodes', () => {
 })
 
 describe('fetchEpisode', () => {
+  it('does not start a read that is already cancelled', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(fetchEpisode('ds-1', 5, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('keeps the deadline active until the response body is read', async () => {
+    vi.useFakeTimers()
+    const response = jsonResponse({})
+    vi.spyOn(response, 'json').mockImplementation(() => new Promise(() => {}))
+    mockFetch.mockResolvedValueOnce(response)
+    const failure = expect(fetchEpisode('ds-1', 5)).rejects.toMatchObject({
+      code: 'EPISODE_TIMEOUT',
+    })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await failure
+    expect(response.json).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('bounds a stalled episode read and permits a fresh retry without leaking timers', async () => {
+    vi.useFakeTimers()
+    enableDiagnostics('workspace')
+    mockFetch.mockImplementationOnce(() => new Promise<Response>(() => {}))
+    const request = fetchEpisode('ds-1', 5)
+    const failure = expect(request).rejects.toMatchObject({ code: 'EPISODE_TIMEOUT', status: 0 })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await failure
+    expect(mockFetch.mock.calls[0][1]?.signal?.aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+    mockFetch.mockResolvedValueOnce(jsonResponse({ meta: { index: 5 } }))
+    await expect(fetchEpisode('ds-1', 5)).resolves.toMatchObject({ meta: { index: 5 } })
+    expect(vi.getTimerCount()).toBe(0)
+    expect(readDiagnosticEvents('workspace').map((event) => event.data?.outcome)).toEqual([
+      'timeout',
+      'success',
+    ])
+  })
+
+  it('cancels an obsolete read without waiting for the deadline', async () => {
+    vi.useFakeTimers()
+    enableDiagnostics('workspace')
+    const controller = new AbortController()
+    mockFetch.mockImplementationOnce(() => new Promise<Response>(() => {}))
+    const request = fetchEpisode('ds-1', 5, controller.signal)
+    const failure = expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort()
+    await failure
+    expect(mockFetch.mock.calls[0][1]?.signal?.aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(readDiagnosticEvents('workspace')[0].data?.outcome).toBe('cancelled')
+  })
+
+  it('records safe HTTP failure details and duration without provider content', async () => {
+    enableDiagnostics('workspace')
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ code: 'private-provider-detail', detail: 'private-body' }, 503),
+    )
+    await expect(fetchEpisode('ds-1', 5)).rejects.toMatchObject({ status: 503 })
+    expect(readDiagnosticEvents('workspace')[0]).toMatchObject({
+      type: 'episode-request-completed',
+      data: { outcome: 'http-error', status: 503, durationMs: expect.any(Number) },
+    })
+    expect(JSON.stringify(readDiagnosticEvents('workspace'))).not.toContain('private')
+  })
+
   it('calls GET /api/datasets/:id/episodes/:index and transforms keys', async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
@@ -189,6 +527,11 @@ describe('fetchEpisode', () => {
     )
 
     const result = await fetchEpisode('ds-1', 5)
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/5', {
+      cache: 'no-store',
+      headers: {},
+      signal: expect.any(AbortSignal),
+    })
     expect(result.meta).toHaveProperty('episodeIndex', 5)
     expect(result).toHaveProperty('videoUrls')
     expect(result).toHaveProperty('trajectoryData')
@@ -211,6 +554,35 @@ describe('fetchEpisode', () => {
       'observation.images.cam_0': '/v0.mp4',
       'observation.images.wrist_cam': '/v1.mp4',
     })
+  })
+
+  it('resolves backend video paths against the document base path', async () => {
+    const base = document.createElement('base')
+    base.href = 'http://127.0.0.1:8001/proxy/'
+    document.head.append(base)
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        meta: { episode_index: 0 },
+        video_urls: {
+          'observation.images.scene':
+            '/api/datasets/ds-1/episodes/0/video/observation.images.scene?v=7',
+          external: 'https://cdn.example.com/v.mp4',
+        },
+        trajectory_data: [],
+      }),
+    )
+
+    try {
+      const result = await fetchEpisode('ds-1', 0)
+
+      expect(result.videoUrls).toEqual({
+        'observation.images.scene':
+          '/proxy/api/datasets/ds-1/episodes/0/video/observation.images.scene?v=7',
+        external: 'https://cdn.example.com/v.mp4',
+      })
+    } finally {
+      base.remove()
+    }
   })
 
   it('preserves video_time_windows camera keys and tuple values', async () => {
@@ -275,6 +647,51 @@ describe('fetchEpisode', () => {
 })
 
 describe('fetchAnnotations', () => {
+  it.each(['read', 'save'])(
+    'preserves provenance identities and opaque values on %s',
+    async (operation) => {
+      const response = jsonResponse(
+        {
+          dataset_id: 'ds',
+          episode_index: 0,
+          annotations: [],
+          provenance: {
+            user_scope: {
+              schema_version: '1.0.0',
+              acceptances: { result_key: ['user_scope'] },
+              withdrawn: [],
+              contributions: [
+                { id: 'result_key', author_id: 'user_scope', value: { camera_name: 'front' } },
+              ],
+            },
+          },
+        },
+        { headers: { ETag: '"revision"' } },
+      )
+      if (operation === 'read') mockFetch.mockResolvedValueOnce(response)
+      else mockMutationFetch(response)
+
+      const result =
+        operation === 'read'
+          ? await fetchAnnotations('ds', 0)
+          : await saveAnnotation('ds', 0, { annotatorId: 'user_scope' } as never, {
+              createOnly: true,
+            })
+
+      expect(result.data).toMatchObject({
+        provenance: {
+          user_scope: {
+            schemaVersion: '1.0.0',
+            acceptances: { result_key: ['user_scope'] },
+            contributions: [
+              { id: 'result_key', authorId: 'user_scope', value: { camera_name: 'front' } },
+            ],
+          },
+        },
+      })
+    },
+  )
+
   it('returns the camelCased annotation response with its revision', async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse(
@@ -287,7 +704,10 @@ describe('fetchAnnotations', () => {
               annotator_id: 'u1',
               language_instruction: {
                 instruction: 'Pick up the cube',
-                subtask_instructions: ['Reach', 'Grasp'],
+                subtask_instructions: [
+                  { id: 'reach', text: 'Reach' },
+                  { id: 'grasp', text: 'Grasp' },
+                ],
               },
             },
           ],
@@ -307,7 +727,10 @@ describe('fetchAnnotations', () => {
             annotatorId: 'u1',
             languageInstruction: {
               instruction: 'Pick up the cube',
-              subtaskInstructions: ['Reach', 'Grasp'],
+              subtaskInstructions: [
+                { id: 'reach', text: 'Reach' },
+                { id: 'grasp', text: 'Grasp' },
+              ],
             },
           },
         ],
@@ -326,7 +749,10 @@ describe('saveAnnotation', () => {
       annotatorId: 'u1',
       languageInstruction: {
         instruction: 'Pick up the cube',
-        subtaskInstructions: ['Reach', 'Grasp'],
+        subtaskInstructions: [
+          { id: 'reach', text: 'Reach' },
+          { id: 'grasp', text: 'Grasp' },
+        ],
       },
     }
     mockMutationFetch(
@@ -340,7 +766,10 @@ describe('saveAnnotation', () => {
               annotator_id: 'u1',
               language_instruction: {
                 instruction: 'Pick up the cube',
-                subtask_instructions: ['Reach', 'Grasp'],
+                subtask_instructions: [
+                  { id: 'reach', text: 'Reach' },
+                  { id: 'grasp', text: 'Grasp' },
+                ],
               },
             },
           ],
@@ -359,7 +788,10 @@ describe('saveAnnotation', () => {
         annotator_id: 'u1',
         language_instruction: {
           instruction: 'Pick up the cube',
-          subtask_instructions: ['Reach', 'Grasp'],
+          subtask_instructions: [
+            { id: 'reach', text: 'Reach' },
+            { id: 'grasp', text: 'Grasp' },
+          ],
         },
       }),
     })
@@ -608,6 +1040,60 @@ describe('mutationFetch', () => {
     expect(headers.get('X-CSRF-Token')).toBe('caller-override')
     expect([...headers.keys()].filter((name) => name === 'x-csrf-token')).toHaveLength(1)
   })
+
+  it('declares JSON for string bodies while keeping CSRF and caller overrides', async () => {
+    mockMutationFetch(jsonResponse({ ok: true }))
+    await mutationFetch('/api/thing', { method: 'POST', body: '{"a":1}' })
+    const headers = new Headers((mockFetch.mock.calls[1][1] as RequestInit).headers)
+    expect(headers.get('Content-Type')).toBe('application/json')
+    expect(headers.get('X-CSRF-Token')).toBe('test-csrf-token')
+
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
+    await mutationFetch('/api/thing', {
+      method: 'POST',
+      body: 'plain',
+      headers: { 'content-type': 'text/plain' },
+    })
+    expect(
+      new Headers((mockFetch.mock.calls[2][1] as RequestInit).headers).get('Content-Type'),
+    ).toBe('text/plain')
+  })
+
+  it('leaves FormData and bodiless requests without a JSON content type', async () => {
+    mockMutationFetch(jsonResponse({ ok: true }))
+    await mutationFetch('/api/upload', { method: 'POST', body: new FormData() })
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
+    await mutationFetch('/api/thing', { method: 'POST' })
+    for (const call of mockFetch.mock.calls.slice(1)) {
+      expect(new Headers((call[1] as RequestInit).headers).has('Content-Type')).toBe(false)
+    }
+  })
+})
+
+describe('judge JSON mutations', () => {
+  it.each([
+    [{ kind: 'apply', jobId: 'job-1', indices: [0] }, { episode_indices: [0] }],
+    [
+      { kind: 'approve', jobId: 'job-1', acknowledgeExceptions: true },
+      { acknowledge_exceptions: true },
+    ],
+    [{ kind: 'cancel', jobId: 'job-1' }, {}],
+    [{ kind: 'preview-reset' }, { dataset_id: 'ds-1', include_unlisted_runs: false }],
+  ] as const)('sends %o as an application/json object', async (action, body) => {
+    mockMutationFetch(jsonResponse({ id: 'job-1' }, 202))
+    await mutateJudgeDataset('ds-1', action as never)
+    const init = mockFetch.mock.calls[1][1] as RequestInit
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/json')
+    expect(JSON.parse(init.body as string)).toEqual(body)
+  })
+
+  it('declares JSON when submitting dataset jobs', async () => {
+    mockMutationFetch(jsonResponse({ id: 'job-1' }, 202))
+    await submitJudgeJob('ds-1', { indices: [0], mode: 'judge' } as never, 'request-1')
+    const headers = new Headers((mockFetch.mock.calls[1][1] as RequestInit).headers)
+    expect(headers.get('Content-Type')).toBe('application/json')
+    expect(headers.get('Idempotency-Key')).toBe('request-1')
+  })
 })
 
 describe('fetchVlmJudgeStatus', () => {
@@ -640,33 +1126,104 @@ describe('fetchVlmJudgeStatus', () => {
 })
 
 describe('runVlmJudge', () => {
-  it('returns the completed synchronous judge response without polling', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse({ csrf_token: 'csrf-1' })).mockResolvedValueOnce(
-      jsonResponse({
-        episode_id: 'ds-1/episode_000000',
-        instruction: 'Pick',
-        judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
-        prompt_version: 'outcome-mcq-v1',
-        n_frames: 6,
-        outcome_success: true,
-        outcome_confidence: 1,
-        outcome_n_valid_votes: 3,
-        progress_per_frame: [100],
-        voc: 1,
-        milestones: [],
-        failure_mode: null,
-        cached: true,
-      }),
+  it.each(['partial', 'failed', 'cancelled'])(
+    'rejects a terminal %s job instead of reporting a result',
+    async (status) => {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ csrf_token: 'token' }))
+        .mockResolvedValueOnce(jsonResponse({ id: 'job', dataset_id: 'synthetic' }, 202))
+        .mockResolvedValueOnce(jsonResponse({ id: 'job', dataset_id: 'synthetic', status }))
+      await expect(runVlmJudge('synthetic', 0)).rejects.toThrow(`Judge job ${status}.`)
+    },
+  )
+
+  it.each(['acceptance', 'poll', 'result'])(
+    'rejects changed %s identity rather than accepting another scope',
+    async (stage) => {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ csrf_token: 'token' }))
+        .mockResolvedValueOnce(
+          jsonResponse(
+            { id: 'job', dataset_id: stage === 'acceptance' ? 'other' : 'synthetic' },
+            202,
+          ),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: 'job',
+            dataset_id: stage === 'poll' ? 'other' : 'synthetic',
+            status: 'succeeded',
+            config: {},
+            targets: [{ episode_index: 0, result: { episode_id: 'other/episode_000000' } }],
+          }),
+        )
+      await expect(runVlmJudge('synthetic', 0)).rejects.toThrow(
+        stage === 'result' ? 'Judge result does not match' : 'Judge job scope changed',
+      )
+    },
+  )
+
+  it('bounds polling and reports unfinished durable work without inventing completion', async () => {
+    vi.useFakeTimers()
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ csrf_token: 'token' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'job', dataset_id: 'synthetic' }, 202))
+      .mockImplementation(async () =>
+        jsonResponse({ id: 'job', dataset_id: 'synthetic', status: 'running' }),
+      )
+    const assertion = expect(runVlmJudge('synthetic', 0)).rejects.toThrow(
+      'Judge job is still running.',
     )
+    await vi.advanceTimersByTimeAsync(1_800_000)
+    await assertion
+  })
+
+  it('submits durable work and reads its saved result through status polling', async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ csrf_token: 'csrf-1' }))
+      .mockResolvedValueOnce(
+        jsonResponse({ id: 'job-1', dataset_id: 'ds-1', status: 'queued' }, 202),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 'job-1',
+          dataset_id: 'ds-1',
+          status: 'succeeded',
+          config: { process_method: 'gvl' },
+          targets: [
+            {
+              episode_index: 0,
+              status: 'succeeded',
+              input: { snapshot_id: 'snapshot-1' },
+              cached: true,
+              result: {
+                episode_id: 'ds-1/episode_000000',
+                instruction: 'Pick',
+                judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
+                prompt_version: 'outcome-mcq-v1',
+                n_frames: 6,
+                outcome_success: true,
+                outcome_confidence: 1,
+                outcome_n_valid_votes: 3,
+                progress_per_frame: [100],
+                voc: 1,
+                milestones: [],
+                failure_mode: null,
+                cached: true,
+              },
+            },
+          ],
+        }),
+      )
 
     await expect(runVlmJudge('ds-1', 0, { processMethod: 'gvl' })).resolves.toMatchObject({
       episodeId: 'ds-1/episode_000000',
       cached: true,
     })
-    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(mockFetch).toHaveBeenCalledTimes(3)
     expect(mockFetch).toHaveBeenLastCalledWith(
-      '/api/datasets/ds-1/episodes/0/judge',
-      expect.objectContaining({ method: 'POST' }),
+      '/api/judge/jobs/job-1',
+      expect.objectContaining({ cache: 'no-store' }),
     )
   })
 })

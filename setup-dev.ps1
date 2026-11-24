@@ -313,7 +313,7 @@ else {
 }
 
 Write-Info 'Syncing dependencies from pyproject.toml...'
-uv sync
+uv sync --group azureml-tracking
 if ($LASTEXITCODE -ne 0) {
     Write-Error "uv sync failed (exit code $LASTEXITCODE)"
 }

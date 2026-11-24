@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 
 import { loginRequest } from '@/lib/auth-config'
 
+import { MediaAuthGate } from './MediaAuthGate'
+
 /**
  * Checks if Azure Container Apps Easy Auth is handling authentication.
  * When Easy Auth is active, /.auth/me returns user claims and MSAL should not run.
@@ -31,7 +33,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <AuthenticatedTemplate>{children}</AuthenticatedTemplate>
+      <AuthenticatedTemplate>
+        <MediaAuthGate>{children}</MediaAuthGate>
+      </AuthenticatedTemplate>
       <UnauthenticatedTemplate>
         <LoginRedirect />
       </UnauthenticatedTemplate>

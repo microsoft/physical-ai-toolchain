@@ -1,4 +1,7 @@
-# T1 — Lab: Add Your First Cloud Resource (Storage)
+---
+title: "T1 — Lab: Add Your First Cloud Resource (Storage)"
+description: Add Azure Blob Storage to the local robotics training lifecycle for a small lab without introducing Kubernetes or a fleet control plane.
+---
 
 The small-lab and integrator tier. You keep the local training lifecycle loop from
 [T0 — Dev](../tier-0-dev/README.md) and add exactly **one** cloud resource: a single Azure Blob
@@ -85,3 +88,7 @@ with `docker pull` across 2–3 robots) are unchanged from T0.
 - [Architecture: T1 — Lab](../../contributing/architecture.md#t1--lab)
 - [Blob storage structure](../../cloud/blob-storage-structure.md)
 - [T0 — Dev](../tier-0-dev/README.md) · [T2 — Pilot](../tier-2-pilot/README.md)
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

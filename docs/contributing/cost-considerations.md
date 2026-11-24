@@ -124,3 +124,7 @@ GPU VM costs vary by region. Use [Azure Pricing Calculator](https://azure.micros
 * [Contributing Guide](README.md) - Prerequisites, workflow, commit messages
 * [Deployment Validation](deployment-validation.md) - Validation levels and testing templates
 * [Security Review](security-review.md) - Security checklist and reporting
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

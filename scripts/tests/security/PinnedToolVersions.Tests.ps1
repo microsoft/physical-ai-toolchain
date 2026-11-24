@@ -355,6 +355,18 @@ UV_VERSION=0.12.8
         $pins[0].Version | Should -Be '0.12.8'
     }
 
+    It 'Does not treat here-strings as heredoc declarations' {
+        @'
+python -m pip install --requirement /dev/stdin <<<"uv==${UV_VERSION}"
+UV_VERSION=0.12.8
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'here-string.sh')
+
+        $pins = Get-PinnedToolVersionAssignments @script:Parameters -Files @('here-string.sh')
+
+        $pins.Count | Should -Be 1
+        $pins[0].Version | Should -Be '0.12.8'
+    }
+
     It 'Rejects unterminated heredocs' {
         @'
 cat <<EOF

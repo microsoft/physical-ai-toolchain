@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+LAUNCH_TIMEOUT = 30
+
 
 def _get_unused_port() -> int:
     with socket.socket() as listener:
@@ -45,7 +47,8 @@ def launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     uv.write_text(
         "#!/usr/bin/env bash\n"
         f"printf '%q ' \"$@\" >> {shlex.quote(str(backend / 'uv-calls.txt'))}\n"
-        f"printf '\\n' >> {shlex.quote(str(backend / 'uv-calls.txt'))}\n",
+        f"printf '\\n' >> {shlex.quote(str(backend / 'uv-calls.txt'))}\n"
+        'if [[ "$1 $2" == "pip check" ]]; then exit "${TEST_DEPENDENCY_CHECK_EXIT:-0}"; fi\n',
         encoding="utf-8",
     )
     uv.chmod(0o755)
@@ -58,9 +61,10 @@ def launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
         encoding="utf-8",
     )
     uvicorn.chmod(0o755)
+    shutil.copy2(uvicorn, backend_bin / "python")
     (backend / ".env").write_text(f"DATA_DIR={root}\n", encoding="utf-8")
 
-    for name in ("DATA_DIR", "VLM_JUDGE_ENABLED", "VLM_JUDGE_BACKEND", "LOG_LEVEL"):
+    for name in ("DATA_DIR", "VLM_JUDGE_ENABLED", "VLM_JUDGE_BACKEND", "LOG_LEVEL", "CURATION_RELEASE_AZUREML_ENABLED"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("PATH", f"{backend_bin}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("HEALTH_TIMEOUT", "5")
@@ -78,7 +82,7 @@ def test_check_resolves_hoisted_vite_without_starting_services(launcher: Path) -
         ["bash", str(launcher), "--check"],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=LAUNCH_TIMEOUT,
         check=False,
     )
 
@@ -100,7 +104,7 @@ def test_config_preview_preserves_mode_without_starting_services(
         ["bash", str(launcher), "--config-preview", "--data-dir", str(data_dir), *mode_args],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=LAUNCH_TIMEOUT,
         check=False,
     )
 
@@ -119,7 +123,7 @@ def test_backend_failure_is_reported_with_optional_env_keys_absent(launcher: Pat
         ["bash", str(launcher), "--backend"],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=LAUNCH_TIMEOUT,
         check=False,
     )
 
@@ -135,7 +139,7 @@ def test_vlm_setup_preserves_existing_optional_dependencies(launcher: Path, monk
         ["bash", str(launcher), "--backend"],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=LAUNCH_TIMEOUT,
         check=False,
     )
 
@@ -146,23 +150,93 @@ def test_vlm_setup_preserves_existing_optional_dependencies(launcher: Path, monk
     ]
     sync_calls = [args for args in calls if args and args[0] == "sync"]
     assert len(sync_calls) == 1
-    assert "--inexact" in sync_calls[0]
+    assert "--inexact" not in sync_calls[0]
+    assert "--no-default-groups" in sync_calls[0]
+    assert "--all-packages" in sync_calls[0]
+    assert _option_value(sync_calls[0], "--project") == str(launcher.parents[2])
+    for extra in ("analysis", "export", "azure", "auth"):
+        assert ["--extra", extra] in [sync_calls[0][index : index + 2] for index in range(len(sync_calls[0]) - 1)]
+
+
+@pytest.mark.parametrize("shell_value", [None, "false", "true"])
+def test_given_azureml_configuration_when_launching_then_optional_sdk_restore_follows_precedence(
+    launcher: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    shell_value: str | None,
+) -> None:
+    environment = launcher.parent / "backend/.env"
+    environment.write_text(environment.read_text() + "CURATION_RELEASE_AZUREML_ENABLED=true\n")
+    if shell_value is not None:
+        monkeypatch.setenv("CURATION_RELEASE_AZUREML_ENABLED", shell_value)
+    result = subprocess.run(
+        ["bash", str(launcher), "--backend"],
+        capture_output=True,
+        text=True,
+        timeout=LAUNCH_TIMEOUT,
+        check=False,
+    )
+    assert result.returncode == 23, result.stdout + result.stderr
+    args = shlex.split((launcher.parent / "backend/uv-calls.txt").read_text().splitlines()[0])
+    assert (["--extra", "azureml"] in [args[index : index + 2] for index in range(len(args) - 1)]) is (
+        shell_value != "false"
+    )
 
 
 def _option_value(args: list[str], option: str) -> str | None:
     return args[args.index(option) + 1] if option in args else None
 
 
+@pytest.mark.parametrize(("backend", "extra"), [("qwen3-vl", "qwen3-vl"), ("openai-compat", "openai")])
+@pytest.mark.parametrize("dependency_status", [0, 19])
+def test_judge_runtime_uses_frozen_evaluator_profile(
+    launcher: Path, monkeypatch: pytest.MonkeyPatch, backend: str, extra: str, dependency_status: int
+) -> None:
+    monkeypatch.setenv("VLM_JUDGE_ENABLED", "true")
+    monkeypatch.setenv("VLM_JUDGE_BACKEND", backend)
+    monkeypatch.setenv("TEST_DEPENDENCY_CHECK_EXIT", str(dependency_status))
+    result = subprocess.run(
+        ["bash", str(launcher), "--backend"], capture_output=True, text=True, timeout=LAUNCH_TIMEOUT, check=False
+    )
+    assert result.returncode == (dependency_status or 23), result.stdout + result.stderr
+    assert ("Backend child invoked" in result.stdout) is (dependency_status == 0)
+    calls = [shlex.split(line) for line in (launcher.parent / "backend" / "uv-calls.txt").read_text().splitlines()]
+    assert len(calls) == 2
+    assert calls[0][0] == "sync"
+    assert "--frozen" in calls[0]
+    assert "--inexact" not in calls[0]
+    assert "--no-default-groups" in calls[0]
+    assert "--no-editable" in calls[0]
+    assert "--all-packages" in calls[0]
+    assert ["--extra", extra] in [calls[0][index : index + 2] for index in range(len(calls[0]) - 1)]
+    assert _option_value(calls[0], "--project") == str(launcher.parents[2])
+    assert _option_value(calls[0], "--python") == "3.12"
+    assert "--group" not in calls[0]
+    assert calls[1] == ["pip", "check", "--python", str(launcher.parent / "backend/.venv/bin/python")]
+
+
 @pytest.mark.parametrize(("log_level", "expected_level"), [(None, "info"), ("debug", "debug")])
+@pytest.mark.parametrize("entrypoint", ["bash", "node"])
 def test_backend_runs_on_loopback_with_logging_config(
-    launcher: Path, monkeypatch: pytest.MonkeyPatch, log_level: str | None, expected_level: str
+    launcher: Path, monkeypatch: pytest.MonkeyPatch, log_level: str | None, expected_level: str, entrypoint: str
 ) -> None:
     if log_level is not None:
         monkeypatch.setenv("LOG_LEVEL", log_level)
-    subprocess.run(["bash", str(launcher), "--backend"], capture_output=True, text=True, timeout=10, check=False)
+    command = (
+        ["bash", str(launcher), "--backend"]
+        if entrypoint == "bash"
+        else ["node", str(Path(__file__).resolve().parents[2] / "start-backend.mjs")]
+    )
+    subprocess.run(command, cwd=launcher.parent, capture_output=True, text=True, timeout=LAUNCH_TIMEOUT, check=False)
 
-    args = (launcher.parent / "backend" / "uvicorn-args.txt").read_text(encoding="utf-8").splitlines()
-    assert args[0] == "src.api.main:app"
+    if entrypoint == "bash":
+        args = (launcher.parent / "backend" / "uvicorn-args.txt").read_text(encoding="utf-8").splitlines()
+    else:
+        args = shlex.split((launcher.parent / "backend" / "uv-calls.txt").read_text(encoding="utf-8"))
+        assert args[:5] == ["run", "--no-sync", "--frozen", "--directory", "backend"]
+        assert _option_value(args, "--project") == str(launcher.parents[2])
+        assert _option_value(args, "--package") == "lerobot-annotation-api"
+        args = args[args.index("python") + 1 :]
+    assert args[:2] == ["-m", "src.api.server"]
     assert _option_value(args, "--log-config") == "logging.json"
     assert _option_value(args, "--log-level") == expected_level
     assert _option_value(args, "--host") == "127.0.0.1"

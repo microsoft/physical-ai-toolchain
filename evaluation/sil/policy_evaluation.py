@@ -16,6 +16,9 @@ Usage:
         --eval-episodes 100 \
         --headless
 
+An episode succeeds when the task reports ``success`` for it, or, for tasks that report none, when it reaches
+its time limit without a failure termination.
+
 Exit Codes:
     0 - Evaluation passed (success_rate >= threshold)
     1 - Evaluation failed or error
@@ -263,6 +266,17 @@ class Metrics:
         }
 
 
+def _episode_succeeded(reported: Any, terminated: torch.Tensor, truncated: torch.Tensor, idx: torch.Tensor) -> bool:
+    """Return whether the finished episode in environment ``idx`` succeeded.
+
+    The task's own ``success`` signal decides when it reports one. Otherwise the episode succeeds by surviving to
+    its time limit: Isaac Lab reports time-outs as ``truncated`` and failures as ``terminated``.
+    """
+    if reported is not None:
+        return bool(reported[idx].item())
+    return bool(truncated[idx].item()) and not bool(terminated[idx].item())
+
+
 def evaluate(env: Any, agent: Any, num_episodes: int, framework: str) -> Metrics:
     """Run evaluation episodes and collect metrics.
 
@@ -304,11 +318,10 @@ def evaluate(env: Any, agent: Any, num_episodes: int, framework: str) -> Metrics
             if metrics.count >= num_episodes:
                 break
 
-            success = info.get("success", terminated)[idx].item()
             metrics.add(
                 float(ep_rewards[idx]),
                 int(ep_lengths[idx]),
-                bool(success) and not truncated[idx].item(),
+                _episode_succeeded(info.get("success"), terminated, truncated, idx),
             )
             ep_rewards[idx] = 0
             ep_lengths[idx] = 0
@@ -412,6 +425,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=42,
         help="Random seed",
     )
+    parser.add_argument(
+        "--output-metrics",
+        default="",
+        help="Write the metrics, threshold, and verdict to this JSON file",
+    )
     return parser
 
 
@@ -485,12 +503,20 @@ def main() -> int:
         print("=" * 60, flush=True)
 
         success_rate = result.get("success_rate", 0)
-        if success_rate >= threshold:
+        passed = success_rate >= threshold
+        if passed:
             print(f"\n✅ PASSED: {success_rate:.2f} >= {threshold}", flush=True)
-            exit_code = 0
         else:
             print(f"\n❌ FAILED: {success_rate:.2f} < {threshold}", flush=True)
-            exit_code = 1
+
+        if args.output_metrics:
+            output = Path(args.output_metrics)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            verdict = {**result, "success_threshold": threshold, "passed": passed}
+            output.write_text(json.dumps(verdict, indent=2))
+
+        # A passing gate counts only once its verdict is recorded; later teardown errors keep that result.
+        exit_code = 0 if passed else 1
 
         # Explicit environment cleanup before exit
         prepare_for_shutdown()

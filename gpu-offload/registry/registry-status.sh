@@ -69,6 +69,7 @@ describe_endpoint() {
     printf 'absent'
   elif ! registry_is_running "$container"; then
     printf 'stopped'
+  # pinning-ignore: registry health probe; no downloaded artifact
   elif curl --silent --output /dev/null --max-time 2 "http://$endpoint/v2/"; then
     printf 'running, %s cached' "$(disk_usage_of "$data")"
   else
@@ -96,12 +97,14 @@ done
 #------------------------------------------------------------------------------
 section "Hosted Repositories"
 
+# pinning-ignore: registry metadata query; response is displayed, not installed
 if catalog="$(curl --silent --fail --max-time 5 "http://$REGISTRY_HOST/v2/_catalog" 2> /dev/null)"; then
   repositories="$(printf '%s' "$catalog" | sed 's/.*\[//; s/\].*//; s/"//g; s/,/ /g')"
   if [[ -z "${repositories// /}" ]]; then
     info "No images pushed yet"
   else
     for repository in $repositories; do
+      # pinning-ignore: registry metadata query; response is displayed, not installed
       tags="$(curl --silent --fail --max-time 5 "http://$REGISTRY_HOST/v2/$repository/tags/list" 2> /dev/null \
         | sed 's/.*\[//; s/\].*//; s/"//g; s/,/ /g')"
       print_kv "$repository" "${tags:-no tags}"

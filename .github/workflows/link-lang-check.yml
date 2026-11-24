@@ -8,6 +8,15 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.link-lang-check.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.link-lang-check.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.link-lang-check.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.link-lang-check.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.link-lang-check.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.link-lang-check.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.link-lang-check.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.link-lang-check.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -20,6 +29,16 @@ jobs:
   link-lang-check:
     name: Link Language Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -33,13 +52,25 @@ jobs:
           New-Item -ItemType Directory -Force -Path logs | Out-Null
 
       - name: Run Link Language Check
+        id: check
         run: scripts/linting/Invoke-LinkLanguageCheck.ps1
         continue-on-error: ${{ inputs.soft-fail }}
 
       - name: Upload link language check results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: link-lang-check-results
           path: logs/link-lang-check-results.json
           retention-days: 30
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: link-lang-check
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["check"]'
+          reports: '[{"path":"logs/link-lang-check-results.json","kind":"json"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

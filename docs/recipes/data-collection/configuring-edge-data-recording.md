@@ -1,4 +1,7 @@
-# Configuring Edge Data Recording
+---
+title: Configuring Edge Data Recording
+description: Configure ROS 2 recording on NVIDIA Jetson devices with topic selection, compression, episode triggers, and disk monitoring.
+---
 
 Create a recording configuration for ROS 2 edge data capture on NVIDIA Jetson devices. By the end of this recipe, you will have a validated YAML configuration controlling topic selection, compression, episode triggers, and disk monitoring.
 

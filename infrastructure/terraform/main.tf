@@ -200,6 +200,7 @@ module "sil" {
     should_enable_microsoft_defender            = var.should_enable_microsoft_defender
     sku_tier                                    = var.aks_sku_tier
     support_plan                                = var.aks_support_plan
+    auto_scaler_profile                         = var.aks_auto_scaler_profile
   }
 
   node_pools = var.node_pools

@@ -135,3 +135,7 @@ gitsign verify-tag \
 - [Threat Model](threat-model.md): STRIDE-based threat analysis and remediation roadmap
 - [SECURITY.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/SECURITY.md): Vulnerability disclosure and reporting process
 - [GitHub attestation verification](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds): GitHub documentation on artifact attestations
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

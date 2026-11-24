@@ -3,7 +3,7 @@ sidebar_position: 5
 title: Pull Request Process
 description: PR workflow, reviewer assignment, review cycles, approval criteria, and update process
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-21
+ms.date: 2026-10-28
 ms.topic: how-to
 keywords:
   - pull request
@@ -24,6 +24,90 @@ Automated linting, security checks, and component tests form the validation base
 3. Validate Locally: Run applicable static checks and tests, plus plan or deployment validation when needed
 4. Create Draft PR: Open draft PR with validation documentation
 5. Request Review: Mark PR ready when validation complete
+
+## Merge Queue
+
+<!-- cspell:ignore ALLGREEN -->
+
+Maintainers merge approved pull requests through GitHub Merge Queue. The queue
+creates a temporary merge group from the current `main` branch and the queued
+pull request, then runs the same aggregate PR Validation workflow against that
+exact commit.
+
+The required `pr-validation-summary` check must succeed on the merge-group SHA.
+The workflow verifies an immutable base and head before selecting path-dependent
+jobs. If the range cannot be proven, it runs every selector instead of skipping
+work.
+
+### Activation and rollback
+
+The documentation-only PR revising the
+[merge-queue OIDC policy](../security/workflow-permissions.md#-merge-queue-trust-boundary)
+must receive required approval and merge to `main` before activation under the
+revised requirements. That policy replaces blanket provider-administrator
+evidence only for the existing Codecov integration; it does not waive known
+provider restrictions or establish live compatibility. Other OIDC consumers
+retain the provider-evidence requirements in that policy.
+
+After the policy PR merges, complete these checks before changing hosted settings:
+
+1. Verify current `main` still has the expected reusable workflow graph,
+  `merge_group: checks_requested` trigger, tested-`github.sha` checkout,
+  immutable range verification, and fail-safe full selection. Run relevant CI
+  contracts if needed to resolve drift.
+2. Refresh the queue-reachable OIDC inventory and confirm the existing Codecov
+  actions, `use_oidc`, permissions, coverage gates, publication requirements,
+  and execution evidence remain unchanged.
+3. Read back the live ruleset and required checks. Keep `pr-validation-summary`
+  as the required context and preserve review, code-owner, thread-resolution,
+  deletion, force-push, and code-quality protections. Review-policy and CodeQL
+  baseline changes remain separate work.
+4. Capture the pre-change ruleset, inspect the export, and prepare supported
+  update and rollback payloads. Verify that rollback restores the original
+  settings, including strict required status check updates.
+
+Use this initial queue configuration:
+
+| Setting                              | Value      |
+|--------------------------------------|------------|
+| Grouping strategy                    | `ALLGREEN` |
+| Concurrent builds                    | `1`        |
+| Minimum entries to merge             | `1`        |
+| Maximum entries to merge             | `1`        |
+| Minimum merge wait                   | `0`        |
+| Check response timeout               | 60 minutes |
+| Merge method                         | Squash     |
+| Strict required status check updates | Disabled   |
+
+Apply the bounded queue update, then compare the ruleset read-back against the
+snapshot to confirm that unrelated protections have not changed. Activation is
+provisional until the live test succeeds.
+
+Use a later eligible real pull request or genuine low-risk documentation or
+maintenance correction for the controlled queue test, after the policy PR has
+merged and rollback is ready. Do not create temporary marker files or no-op
+commits. Record the following evidence in the
+[rollout issue](https://github.com/microsoft/physical-ai-toolchain/issues/1853):
+
+| Evidence                          | Required result                                                                                                                                                                       |
+|-----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Candidate identity                | Merge-group SHA and linked Actions run match the queued candidate                                                                                                                     |
+| Codecov authentication and upload | Non-secret action logs show OIDC token acquisition and upload acceptance associated with that SHA, not only a green job                                                               |
+| Validation                        | Selected tests, local coverage gates, strict publication checks, and current-attempt execution receipts succeed; `pr-validation-summary` succeeds on the candidate SHA before timeout |
+| Completion                        | Record the squash merge and distinguish upload acceptance from final Codecov report processing                                                                                        |
+
+Choose representative real changes that exercise relevant strict publication
+paths. Record unexercised path-gated upload jobs rather than claiming universal
+compatibility from one low-risk run. Never record raw OIDC tokens or credentials.
+The documentation PR alone does not complete the rollout issue.
+
+Restore the pre-change ruleset on authentication or upload incompatibility,
+incorrect candidate association, failed required validation, a missing required
+check, or timeout. Keep the rollout issue open with non-secret diagnostics and
+investigate the specific failure or provider restriction. Do not weaken gates,
+expand permissions, substitute a long-lived token, or increase concurrency or
+group size to work around failure. Tune queue settings only after the serial
+configuration succeeds.
 
 ## Review Process
 
@@ -181,3 +265,7 @@ Reopening rules:
 * [Contributing Guide](README.md) - Main contributing guide with all sections
 * [Contribution Workflow](contribution-workflow.md) - Legal, bug reports, enhancements, first contributions
 * [Deployment Validation](deployment-validation.md) - Validation levels and testing templates
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

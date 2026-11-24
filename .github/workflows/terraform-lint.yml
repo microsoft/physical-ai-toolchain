@@ -8,6 +8,15 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.tflint.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.tflint.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.tflint.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.tflint.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.tflint.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.tflint.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.tflint.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.tflint.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -20,6 +29,16 @@ jobs:
   tflint:
     name: TFLint
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -32,7 +51,7 @@ jobs:
         run: New-Item -ItemType Directory -Force -Path logs | Out-Null
 
       - name: Setup TFLint
-        uses: terraform-linters/setup-tflint@1cf010d3c7aef302051ccdb68c14c5dc2efa34ef # v6.3.1
+        uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
         with:
           tflint_version: v0.61.0
           cache: true
@@ -43,13 +62,25 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Run TFLint
+        id: lint
         continue-on-error: ${{ inputs.soft-fail }}
         run: scripts/linting/Invoke-TFLint.ps1
 
       - name: Upload TFLint results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tflint-results
           path: logs/tflint-results.json
           retention-days: 30
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: terraform-lint
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["lint"]'
+          reports: '[{"path":"logs/tflint-results.json","kind":"json"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

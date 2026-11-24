@@ -31,7 +31,10 @@ export function ExportProgress({ progress, result, error }: ExportProgressProps)
         <AlertTitle>Export Complete</AlertTitle>
         <AlertDescription>
           Successfully exported {result.stats?.totalEpisodes ?? 0} episode(s) to{' '}
-          {result.outputFiles?.length ?? 0} file(s).
+          {result.outputFiles?.length === 1
+            ? result.outputFiles[0]
+            : `${result.outputFiles?.length ?? 0} files`}
+          .
         </AlertDescription>
       </Alert>
     )

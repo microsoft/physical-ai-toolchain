@@ -34,6 +34,9 @@ DOMAIN:
     evaluation    Software-in-the-loop evaluation (evaluation), Python 3.12
     vlm-judge     VLM-as-judge optional runtime (evaluation/vlm_judge), Python 3.12
     osmo-replay   OSMO-to-AzureML replay mirror (workflows/osmo), Python 3.11
+    gpu-smoke     Azure ML GPU smoke job (training/smoke), Python 3.11, cpu mode only
+    azureml-register  Azure ML register-model component (workflows/azureml/scripts), Python 3.12, cpu mode only
+    osmo-proxy    Azure ML-to-OSMO proxy job (workflows/azureml/osmo-proxy), Python 3.12, cpu mode only
 
 OPTIONS:
     -m, --mode MODE    cpu (default) or image
@@ -71,9 +74,11 @@ done
 # project    Directory holding the domain's pyproject.toml + uv.lock.
 # py_version Interpreter the domain targets (matches its requires-python).
 # probe      Import probe run AFTER install; non-zero exit fails the smoke.
+# has_image  Whether the domain has a production runtime image for --mode image.
 
 declare project py_version
 declare -a export_args probe
+has_image=true
 
 case "$domain" in
     rl)
@@ -115,15 +120,41 @@ case "$domain" in
         probe=(-c "import azure.ai.ml, azure.identity, azureml.mlflow, mlflow, tbparse; import training.utils.aml_mirror")
         ;;
     vlm-judge)
-        project="evaluation/vlm_judge"
+        project="."
         py_version="3.12"
-        probe=(-c "import torch, torchvision, transformers; from transformers import AutoProcessor")
+        has_image=false
+        probe=(-c "import torch, torchvision, transformers; from transformers import AutoProcessor; import evaluation.vlm_judge.agent, physical_ai_dataset_io")
         ;;
-    *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, vlm-judge, or osmo-replay)" ;;
+    gpu-smoke)
+        project="training/smoke"
+        py_version="3.11"
+        has_image=false
+        # torch comes from the job's container image, so the probe imports the
+        # Azure/MLflow stack and the first-party module, whose imports are lazy.
+        probe=(-c "import azure.ai.ml, azure.identity, azure.storage.blob, azureml.mlflow, mlflow, jwt; import training.smoke.scripts.azureml_gpu_smoke")
+        ;;
+    azureml-register)
+        project="workflows/azureml/scripts"
+        py_version="3.12"
+        has_image=false
+        # register_model.py reads job environment variables at import, so probe
+        # only its dependency surface.
+        probe=(-c "import azure.ai.ml, azure.identity")
+        ;;
+    osmo-proxy)
+        project="workflows/azureml/osmo-proxy"
+        py_version="3.12"
+        has_image=false
+        # GitPython refuses to import without a git binary, which the CPU image lacks.
+        probe=(-c "import importlib.util, os; os.environ.setdefault('GIT_PYTHON_REFRESH', 'quiet'); import requests, yaml, git, mlflow, azureml.mlflow, azure.ai.ml, azure.identity; spec = importlib.util.spec_from_file_location('osmo_proxy', 'workflows/azureml/osmo-proxy/osmo_proxy.py'); spec.loader.exec_module(importlib.util.module_from_spec(spec))")
+        ;;
+    *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, vlm-judge, osmo-replay, gpu-smoke, azureml-register, or osmo-proxy)" ;;
 esac
 
+[[ "$mode" == "cpu" || "$has_image" == "true" ]] || fatal "${domain} has no runtime-image smoke; use --mode cpu"
+
 export_args=(--frozen --no-hashes --no-emit-project --project "$project")
-[[ "$domain" == "vlm-judge" ]] && export_args+=(--extra qwen3-vl)
+[[ "$domain" == "vlm-judge" ]] && export_args+=(--package physical-ai-vlm-judge --extra qwen3-vl --no-default-groups --no-emit-workspace)
 
 ensure_uv() {
     # Bootstrap a pinned uv inside a container that lacks it (image mode).
@@ -133,6 +164,7 @@ ensure_uv() {
     temp_dir="$(mktemp -d)"
     archive="${temp_dir}/uv.tar.gz"
     for attempt in 1 2 3; do
+        # pinning-ignore: UV_SHA256 is verified after retries and before extraction
         if http_code="$(curl -LsSf --proto '=https' --proto-redir '=https' \
             --connect-timeout 10 --max-time 35 -w '%{http_code}' \
             "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
@@ -196,7 +228,12 @@ smoke_cpu() {
     uv export "${export_args[@]}" > "$requirements"
     grep -vE '^(nvidia-|cuda-|torchcodec==)' "$requirements" \
         | sed -E '/^(torch|torchvision)==/ s/\+cu[0-9]+//' \
-        | uv pip install --torch-backend cpu --no-cache-dir --no-deps --requirement -
+        | uv --directory "$project" pip install --torch-backend cpu --no-cache-dir --no-deps --requirement -
+
+    if [[ "$domain" == "vlm-judge" ]]; then
+        uv pip install --python "${venv}/bin/python" --no-deps \
+            "$REPO_ROOT/data-management/dataset-io" "$REPO_ROOT/evaluation/vlm_judge"
+    fi
 
     run_probe "${venv}/bin/python"
 }
@@ -248,7 +285,7 @@ smoke_image() {
         # Preserve the container's matched Torch/CUDA stack, as in production.
         uv export --frozen --no-hashes --no-emit-project --project "$project" \
             | grep -Ev "$isaac_provided_re" \
-            | uv pip install "${install_args[@]}"
+            | uv pip install --no-config "${install_args[@]}"
     fi
 
     run_probe "$python_exec"
@@ -257,6 +294,10 @@ smoke_image() {
 run_probe() {
     local python_exec="$1"
     info "Probe: ${python_exec} ${probe[*]}"
+    if [[ "$domain" == "vlm-judge" ]]; then
+        "$python_exec" -I "${probe[@]}"
+        return
+    fi
     PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}" "$python_exec" "${probe[@]}"
 }
 

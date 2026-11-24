@@ -1,0 +1,129 @@
+# Valkey, a Redis-compatible server, behind the Service name OSMO expects ("redis"). Password auth, no TLS.
+# Rendered by 01-deploy-platform-services.sh, which substitutes only LOCAL_ placeholders.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: ${LOCAL_PLATFORM_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: valkey
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: valkey
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: valkey
+  namespace: ${LOCAL_PLATFORM_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: valkey
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: valkey
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: valkey
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Writes the password into an in-memory config file so it never appears in process arguments.
+        - name: config
+          image: ${LOCAL_VALKEY_IMAGE}
+          command:
+            - /bin/sh
+            - -c
+            - umask 077 && printf 'requirepass %s\n' "$REDIS_PASSWORD" > /config/valkey.conf
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${LOCAL_REDIS_SECRET}
+                  key: password
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /config
+      containers:
+        - name: valkey
+          image: ${LOCAL_VALKEY_IMAGE}
+          command: ["valkey-server", "/config/valkey.conf", "--appendonly", "yes", "--dir", "/data"]
+          env:
+            # valkey-cli reads this for the probes.
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: ${LOCAL_REDIS_SECRET}
+                  key: password
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "valkey-cli ping | grep -qx PONG"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "valkey-cli ping | grep -qx PONG"]
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: config
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: valkey
+          app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: ${LOCAL_STORAGE_CLASS}
+        resources:
+          requests:
+            storage: ${LOCAL_REDIS_STORAGE}

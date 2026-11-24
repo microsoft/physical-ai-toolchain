@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -53,7 +54,9 @@ def fake_checkpoints(monkeypatch):
 def fake_bootstrap(monkeypatch):
     mod = ModuleType("training.il.scripts.lerobot.bootstrap")
     mod.authenticate_huggingface = MagicMock(return_value="hf-user")
-    mod.bootstrap_mlflow = MagicMock()
+    mod.bootstrap_mlflow = MagicMock(
+        return_value=SimpleNamespace(tracking_uri="azureml://tracking", experiment_name="exp", backend="azureml")
+    )
     monkeypatch.setitem(sys.modules, "training.il.scripts.lerobot.bootstrap", mod)
     return mod
 
@@ -424,6 +427,94 @@ class TestRunTraining:
         tags = fake_mlflow.set_tags.call_args.args[0]
         assert tags["dataset.source"] == "azure-blob"
 
+    def test_pretrained_policy_sets_lineage_tags(
+        self, monkeypatch: pytest.MonkeyPatch, fake_mlflow: ModuleType, fake_checkpoints: ModuleType, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+        monkeypatch.setenv("SYSTEM_METRICS", "false")
+        monkeypatch.setenv("POLICY_PATH", "lerobot/smolvla_base")
+        monkeypatch.setenv("POLICY_PATH_REVISION", "c" * 40)
+
+        _FakePopen.lines = []
+        monkeypatch.setattr(_MOD.subprocess, "Popen", _FakePopen)
+        monkeypatch.setattr(_MOD.signal, "signal", lambda *a, **k: None)
+
+        assert _MOD.run_training(["lerobot-train"]) == 0
+        tags = fake_mlflow.set_tags.call_args.args[0]
+        assert tags["policy.pretrained_path"] == "lerobot/smolvla_base"
+        assert tags["policy.pretrained_revision"] == "c" * 40
+
+    def test_local_dataset_sets_lineage_tags(
+        self, monkeypatch: pytest.MonkeyPatch, fake_mlflow: ModuleType, fake_checkpoints: ModuleType, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+        monkeypatch.setenv("SYSTEM_METRICS", "false")
+        monkeypatch.setenv("DATASET_REPO_ID", "local/so101-pick")
+        monkeypatch.setenv("DATASET_DIR", "/mnt/datasets/so101/pick")
+        monkeypatch.delenv("BLOB_URLS", raising=False)
+
+        _FakePopen.lines = []
+        monkeypatch.setattr(_MOD.subprocess, "Popen", _FakePopen)
+        monkeypatch.setattr(_MOD.signal, "signal", lambda *a, **k: None)
+
+        assert _MOD.run_training(["lerobot-train"], source="osmo-lerobot-local") == 0
+        tags = fake_mlflow.set_tags.call_args.args[0]
+        assert tags["dataset.source"] == "local"
+        assert tags["dataset.dir"] == "/mnt/datasets/so101/pick"
+
+
+class TestRunTrainingUntracked:
+    def test_none_backend_skips_mlflow_and_uploads(
+        self, monkeypatch: pytest.MonkeyPatch, fake_checkpoints: ModuleType, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+        monkeypatch.setenv("SYSTEM_METRICS", "false")
+        # A missing mlflow package proves the untracked run never imports it.
+        monkeypatch.setitem(sys.modules, "mlflow", None)
+        _FakePopen.lines = [
+            "step:200 smpl:2K ep:4 epch:0.31 loss:6.938 grdn:155.563 lr:1.0e-05 updt_s:0.324 data_s:0.011\n",
+        ]
+        monkeypatch.setattr(_MOD.subprocess, "Popen", _FakePopen)
+        monkeypatch.setattr(_MOD.signal, "signal", lambda *a, **k: None)
+
+        assert _MOD.run_training(["lerobot-train"], tracking_backend="none") == 0
+        fake_checkpoints.upload_new_checkpoints.assert_not_called()
+
+    def test_environment_selects_none(
+        self, monkeypatch: pytest.MonkeyPatch, fake_checkpoints: ModuleType, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+        monkeypatch.setenv("SYSTEM_METRICS", "false")
+        monkeypatch.setenv("TRACKING_BACKEND", "none")
+        monkeypatch.setitem(sys.modules, "mlflow", None)
+        _FakePopen.lines = []
+        monkeypatch.setattr(_MOD.subprocess, "Popen", _FakePopen)
+        monkeypatch.setattr(_MOD.signal, "signal", lambda *a, **k: None)
+
+        assert _MOD.run_training(["lerobot-train"]) == 0
+        fake_checkpoints.upload_new_checkpoints.assert_not_called()
+
+
+class TestResolvePolicyPath:
+    def test_empty_when_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("POLICY_PATH", raising=False)
+        assert _MOD._resolve_policy_path() == ""
+
+    def test_local_directory_used_as_is(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setenv("POLICY_PATH", str(tmp_path))
+        monkeypatch.setitem(sys.modules, "huggingface_hub", None)
+        assert _MOD._resolve_policy_path() == str(tmp_path)
+
+    def test_hub_policy_downloads_pinned_revision(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        hub = ModuleType("huggingface_hub")
+        hub.snapshot_download = MagicMock(return_value=str(tmp_path / "snapshot"))
+        monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
+        monkeypatch.setenv("POLICY_PATH", "lerobot/smolvla_base")
+        monkeypatch.setenv("POLICY_PATH_REVISION", "a" * 40)
+
+        assert _MOD._resolve_policy_path() == str(tmp_path / "snapshot")
+        hub.snapshot_download.assert_called_once_with(repo_id="lerobot/smolvla_base", revision="a" * 40)
+
 
 @pytest.fixture
 def fake_lerobot_train(monkeypatch):
@@ -511,6 +602,79 @@ class TestMain:
         assert rc == 0
         fake_checkpoints.register_final_checkpoint.assert_called_once()
 
+    def test_fine_tunes_from_policy_path_with_rename_map(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        fake_mlflow: ModuleType,
+        fake_checkpoints: ModuleType,
+        fake_bootstrap: ModuleType,
+    ) -> None:
+        self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
+        monkeypatch.setattr(_MOD.sys, "argv", ["train.py"])
+        monkeypatch.setenv("POLICY_TYPE", "smolvla")
+        monkeypatch.setenv("POLICY_PATH", "lerobot/smolvla_base")
+        monkeypatch.setenv("POLICY_PATH_REVISION", "b" * 40)
+        rename_map = '{"observation.images.external": "observation.images.camera1"}'
+        monkeypatch.setenv("RENAME_MAP", rename_map)
+        monkeypatch.setattr(_MOD, "_resolve_policy_path", lambda: "/cache/smolvla_base")
+        captured: dict[str, list[str]] = {}
+
+        def fake_run(cmd: list[str], source: str = "x", num_gpus: int = 1, tracking_backend: str | None = None) -> int:
+            captured["cmd"] = cmd
+            return 0
+
+        monkeypatch.setattr(_MOD, "run_training", fake_run)
+        assert _MOD.main() == 0
+        cmd = captured["cmd"]
+        assert "--policy.path=/cache/smolvla_base" in cmd
+        assert f"--rename_map={rename_map}" in cmd
+        assert not any(arg.startswith("--policy.type") for arg in cmd)
+
+    def test_registration_without_tracking_fails_fast(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        fake_mlflow: ModuleType,
+        fake_checkpoints: ModuleType,
+        fake_bootstrap: ModuleType,
+    ) -> None:
+        self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
+        monkeypatch.setattr(_MOD.sys, "argv", ["train.py"])
+        monkeypatch.setenv("REGISTER_CHECKPOINT", "model-x")
+        fake_bootstrap.bootstrap_mlflow.return_value = SimpleNamespace(
+            tracking_uri="", experiment_name="", backend="none"
+        )
+        run = MagicMock()
+        monkeypatch.setattr(_MOD, "run_training", run)
+
+        assert _MOD.main() == _MOD.EXIT_FAILURE
+        run.assert_not_called()
+        fake_checkpoints.register_final_checkpoint.assert_not_called()
+
+    def test_passes_backend_to_training(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        fake_mlflow: ModuleType,
+        fake_checkpoints: ModuleType,
+        fake_bootstrap: ModuleType,
+    ) -> None:
+        self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
+        monkeypatch.setattr(_MOD.sys, "argv", ["train.py"])
+        fake_bootstrap.bootstrap_mlflow.return_value = SimpleNamespace(
+            tracking_uri="http://mlflow:5000", experiment_name="exp", backend="mlflow"
+        )
+        captured: dict[str, str | None] = {}
+
+        def fake_run(cmd: list[str], source: str = "x", num_gpus: int = 1, tracking_backend: str | None = None) -> int:
+            captured["backend"] = tracking_backend
+            return 0
+
+        monkeypatch.setattr(_MOD, "run_training", fake_run)
+        assert _MOD.main() == 0
+        assert captured["backend"] == "mlflow"
+
     def test_loads_mlflow_config_from_tmp(self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap):
         self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
         monkeypatch.delenv("AZUREML_RUN_ID", raising=False)
@@ -529,7 +693,7 @@ class TestMain:
         monkeypatch.setattr(_MOD, "Path", fake_path)
         captured: dict[str, str] = {}
 
-        def fake_run(cmd, source="x", num_gpus=1):
+        def fake_run(cmd, source="x", num_gpus=1, tracking_backend=None):
             captured["source"] = source
             return 0
 
@@ -539,6 +703,30 @@ class TestMain:
         assert _MOD.os.environ.get("FOO_KEY") == "bar"
         assert captured["source"] == "osmo-lerobot-hf"
 
+    def test_local_dataset_uses_local_source_tag(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        fake_mlflow: ModuleType,
+        fake_checkpoints: ModuleType,
+        fake_bootstrap: ModuleType,
+    ) -> None:
+        self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
+        monkeypatch.delenv("AZUREML_RUN_ID", raising=False)
+        monkeypatch.delenv("BLOB_URLS", raising=False)
+        monkeypatch.setattr(_MOD.sys, "argv", ["train.py", "--dataset.root=/mnt/datasets/so101/pick"])
+        monkeypatch.setenv("DATASET_DIR", "/mnt/datasets/so101/pick")
+
+        captured: dict[str, str] = {}
+
+        def fake_run(cmd: list[str], source: str = "x", num_gpus: int = 1, tracking_backend: str | None = None) -> int:
+            captured["source"] = source
+            return 0
+
+        monkeypatch.setattr(_MOD, "run_training", fake_run)
+        assert _MOD.main() == 0
+        assert captured["source"] == "osmo-lerobot-local"
+
     def test_blob_urls_use_blob_source_tag(self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap):
         self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
         monkeypatch.delenv("AZUREML_RUN_ID", raising=False)
@@ -547,7 +735,7 @@ class TestMain:
 
         captured: dict[str, str] = {}
 
-        def fake_run(cmd, source="x", num_gpus=1):
+        def fake_run(cmd, source="x", num_gpus=1, tracking_backend=None):
             captured["source"] = source
             return 0
 
@@ -565,7 +753,7 @@ class TestMain:
 
         captured: dict[str, str] = {}
 
-        def fake_run(cmd, source="x", num_gpus=1):
+        def fake_run(cmd, source="x", num_gpus=1, tracking_backend=None):
             captured["source"] = source
             return 0
 
@@ -584,7 +772,7 @@ class TestMain:
 
         captured: dict[str, str] = {}
 
-        def fake_run(cmd, source="x", num_gpus=1):
+        def fake_run(cmd, source="x", num_gpus=1, tracking_backend=None):
             captured["source"] = source
             return 0
 
@@ -618,7 +806,7 @@ class TestMain:
         monkeypatch.setenv("EVAL_FREQ", "99")
         captured = {}
 
-        def fake_run(cmd, source="x", num_gpus=1):
+        def fake_run(cmd, source="x", num_gpus=1, tracking_backend=None):
             captured["cmd"] = cmd
             return 0
 
@@ -637,7 +825,7 @@ class TestMain:
         monkeypatch.setenv("JOB_NAME", "myjob")
         captured = {}
 
-        def fake_run(cmd, source="x", num_gpus=1):
+        def fake_run(cmd, source="x", num_gpus=1, tracking_backend=None):
             captured["cmd"] = cmd
             return 0
 

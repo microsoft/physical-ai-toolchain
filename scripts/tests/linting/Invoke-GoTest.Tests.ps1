@@ -70,10 +70,10 @@ Describe 'Invoke-GoTestCore' -Tag 'Unit' {
             Remove-Item -Path (Join-Path $script:TestGoDir 'go.mod') -Force
         }
 
-        It 'Returns 0 when go.mod does not exist' {
+        It 'Fails when go.mod does not exist' {
             $result = Invoke-GoTestCore -OutputPath $script:TestOutputPath `
                 -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
-            $result | Should -Be 0
+            $result | Should -Be 1
         }
 
         It 'Writes empty results JSON when go.mod missing' {
@@ -82,7 +82,7 @@ Describe 'Invoke-GoTestCore' -Tag 'Unit' {
             $script:TestOutputPath | Should -Exist
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
             $json.summary.packages_tested | Should -Be 0
-            $json.summary.overall_passed | Should -BeTrue
+            $json.summary.overall_passed | Should -BeFalse
         }
 
         It 'Writes step summary when go.mod missing' {
@@ -93,10 +93,10 @@ Describe 'Invoke-GoTestCore' -Tag 'Unit' {
     }
 
     Context 'no Go test files' {
-        It 'Returns 0 when go test produces no output' {
+        It 'Fails when go test produces no output' {
             $result = Invoke-GoTestCore -OutputPath $script:TestOutputPath `
                 -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
-            $result | Should -Be 0
+            $result | Should -Be 1
         }
 
         It 'Creates output JSON with zero packages' {
@@ -104,14 +104,14 @@ Describe 'Invoke-GoTestCore' -Tag 'Unit' {
                 -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
             $json.summary.packages_tested | Should -Be 0
-            $json.summary.overall_passed | Should -BeTrue
+            $json.summary.overall_passed | Should -BeFalse
         }
 
-        It 'Reports overall_passed true with no tests' {
+        It 'Reports overall_passed false with no tests' {
             Invoke-GoTestCore -OutputPath $script:TestOutputPath `
                 -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
-            $json.summary.overall_passed | Should -BeTrue
+            $json.summary.overall_passed | Should -BeFalse
         }
     }
 
@@ -197,11 +197,11 @@ Describe 'Invoke-GoTestCore' -Tag 'Unit' {
     }
 
     Context 'ChangedFilesOnly' {
-        It 'Returns 0 early when no Go files changed' {
+        It 'Fails when selection contains no Go files' {
             Mock Get-ChangedFilesFromGit { return @() }
             $result = Invoke-GoTestCore -OutputPath $script:TestOutputPath `
                 -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir -ChangedFilesOnly
-            $result | Should -Be 0
+            $result | Should -Be 1
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
             $json.summary.packages_tested | Should -Be 0
         }
@@ -219,10 +219,51 @@ Describe 'Invoke-GoTestCore' -Tag 'Unit' {
             Mock Get-ChangedFilesFromGit {
                 return @('infrastructure/terraform/e2e/main_test.go')
             }
+            Mock go {
+                $global:LASTEXITCODE = 0
+                '{"Action":"pass","Package":"example/tests","Test":"TestOne","Elapsed":0.1}'
+            } -ParameterFilter { $args[0] -eq 'test' }
             $result = Invoke-GoTestCore -OutputPath $script:TestOutputPath `
                 -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir -ChangedFilesOnly
             $result | Should -Be 0
             Should -Invoke go -ParameterFilter { $args[0] -eq 'test' }
+        }
+    }
+
+    Context 'execution evidence' {
+        It 'Fails on a package failure without a failed test event' {
+            Mock go {
+                $global:LASTEXITCODE = 1
+                '{"Action":"fail","Package":"example/build"}'
+            } -ParameterFilter { $args[0] -eq 'test' }
+            Invoke-GoTestCore -OutputPath $script:TestOutputPath `
+                -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir | Should -Be 1
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.summary.total_errors | Should -BeGreaterThan 0
+            $json.summary.overall_passed | Should -BeFalse
+        }
+
+        It 'Preserves native failure after a passing test event' {
+            Mock go {
+                $global:LASTEXITCODE = 2
+                '{"Action":"pass","Package":"example/tests","Test":"TestOne","Elapsed":0.1}'
+            } -ParameterFilter { $args[0] -eq 'test' }
+            Invoke-GoTestCore -OutputPath $script:TestOutputPath `
+                -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir | Should -Be 1
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.exit_code | Should -Be 2
+            $json.summary.total_passed | Should -Be 1
+        }
+
+        It 'Fails when all cases are skipped' {
+            Mock go {
+                $global:LASTEXITCODE = 0
+                '{"Action":"skip","Package":"example/tests","Test":"TestOne"}'
+            } -ParameterFilter { $args[0] -eq 'test' }
+            Invoke-GoTestCore -OutputPath $script:TestOutputPath `
+                -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir | Should -Be 1
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.summary.total_skipped | Should -Be 1
         }
     }
 

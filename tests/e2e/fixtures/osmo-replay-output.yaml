@@ -5,7 +5,7 @@ workflow:
   timeout: { exec_timeout: 10m, queue_timeout: 10m }
   tasks:
     - name: manage-output
-      image: python:3.11-slim@sha256:b27df5841f3355e9473f9a516d38a6783b6c8dfeacaf2d14a240f443b368ddb6
+      image: python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce
       outputs:
         - url: "{{output_uri}}"
       command: ["bash", "-euc"]

@@ -28,6 +28,10 @@ infer_args=(
   --video-length "${VIDEO_LENGTH:-200}"
   --inference-format "${INFERENCE_FORMAT:-both}"
   --checkpoint-uri "${CHECKPOINT_URI:-}"
+  --framework "${FRAMEWORK:-skrl}"
+  --eval-episodes "${EVAL_EPISODES:-100}"
+  --success-threshold "${SUCCESS_THRESHOLD:--1}"
+  --output-dir "${OUTPUT_DIR:-}"
   --headless
 )
 

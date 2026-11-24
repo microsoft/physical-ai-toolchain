@@ -2,7 +2,7 @@
 title: "AML to OSMO Proxy"
 description: Run OSMO workflows from Azure Machine Learning with submission, monitoring, and metric logging
 author: Edge AI Team
-ms.date: 2026-09-22
+ms.date: 2026-10-06
 ms.topic: reference
 ---
 
@@ -42,6 +42,8 @@ workflows/azureml/submit-osmo-proxy-job.sh \
 ```
 
 Set `OSMO_WORKFLOW_BUCKET` when the deployment uses a container other than `osmo`. The wrapper validates `--output-url` against the Terraform storage account and this independently configured container.
+
+Pass `--subscription-id`, `--resource-group`, `--workspace-name`, and `--compute` to target a workspace and compute explicitly. Flags take precedence over environment variables, including values the wrapper loads from the repository-root `.env.local`; without them, the wrapper resolves each value from the environment or Terraform outputs.
 
 ```bash
 # Or directly with az ml job create
@@ -138,3 +140,7 @@ Set `OSMO_METRICS_SPEC` to the path of a spec file at submission time. See `work
 > `azureml-mlflow` is required alongside `mlflow-skinny` to register the `azureml://` tracking store plugin. The proxy fails the Azure ML job when plugin initialization, metric logging, or declared-output data asset registration fails. `workflows/azureml/osmo-proxy-job.yaml` installs the frozen runtime from `workflows/azureml/osmo-proxy/uv.lock`.
 
 The proxy must run as an AML job inside the cluster. The `OSMO_GATEWAY_URL` is only reachable from pods inside the AKS cluster.
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

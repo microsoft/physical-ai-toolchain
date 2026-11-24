@@ -9,6 +9,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../..
 source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=../../../scripts/lib/terraform-outputs.sh
 source "$REPO_ROOT/scripts/lib/terraform-outputs.sh"
+# shellcheck source=../../../scripts/lib/platform-profile.sh
+source "$REPO_ROOT/scripts/lib/platform-profile.sh"
 read_terraform_outputs "$REPO_ROOT/infrastructure/terraform" 2>/dev/null || true
 
 #------------------------------------------------------------------------------
@@ -21,6 +23,9 @@ Usage: submit-osmo-training.sh [OPTIONS] [-- osmo-submit-flags]
 
 Package training/rl/, upload it to OSMO object storage, and submit an OSMO workflow.
 
+PLATFORM:
+        --profile NAME            Platform profile: azure (default) or local (PLATFORM_PROFILE)
+
 WORKFLOW OPTIONS:
     -w, --workflow PATH           Workflow template (default: training/rl/workflows/osmo/train.yaml)
     -t, --task NAME               Isaac Lab task (default: Isaac-Velocity-Rough-Anymal-C-v0)
@@ -30,7 +35,7 @@ WORKFLOW OPTIONS:
     -p, --payload-root DIR        Runtime extraction root (default: /tmp/isaac_payload)
     -b, --backend BACKEND         Training backend: skrl (default), rsl_rl
 
-RESOURCE OPTIONS:
+RESOURCE OPTIONS (defaults come from the platform profile, then these values):
         --gpu COUNT               Number of GPUs (default: 1)
         --cpu COUNT               CPU cores (default: 30)
         --memory SIZE             Memory with unit (default: 400Gi)
@@ -55,7 +60,8 @@ OTHER:
         --config-preview          Print configuration and exit
     -h, --help                    Show this help message
 
-Values resolved: CLI > Environment variables > Terraform outputs
+Values resolved: CLI > Environment variables > Platform profile > Terraform outputs
+TRACKING_BACKEND (azureml, mlflow, or none) overrides the profile's tracking backend.
 Additional arguments after -- are forwarded to osmo workflow submit.
 EOF
 }
@@ -91,10 +97,11 @@ image="${IMAGE:-$DEFAULT_ISAAC_LAB_IMAGE}"
 payload_root="${PAYLOAD_ROOT:-/tmp/isaac_payload}"
 backend="${TRAINING_BACKEND:-skrl}"
 
-gpu="${OSMO_GPU:-1}"
-cpu="${OSMO_CPU:-30}"
-memory="${OSMO_MEMORY:-400Gi}"
-storage="${OSMO_STORAGE:-200Gi}"
+gpu="${OSMO_GPU:-}"
+cpu="${OSMO_CPU:-}"
+memory="${OSMO_MEMORY:-}"
+storage="${OSMO_STORAGE:-}"
+profile=""
 
 checkpoint_uri="${CHECKPOINT_URI:-}"
 checkpoint_mode="${CHECKPOINT_MODE:-from-scratch}"
@@ -105,7 +112,6 @@ subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
 resource_group="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
 workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
 storage_account="${AZURE_STORAGE_ACCOUNT_NAME:-$(get_storage_account)}"
-osmo_container="${OSMO_WORKFLOW_BUCKET:-osmo}"
 correlation_id="${MLFLOW_CORRELATION_ID:-}"
 workflow_name="${OSMO_WORKFLOW_NAME:-}"
 
@@ -122,6 +128,7 @@ forward_args=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)                    show_help; exit 0 ;;
+    --profile)                    profile="$2"; shift 2 ;;
     -w|--workflow)                workflow="$2"; shift 2 ;;
     -t|--task)                    task="$2"; shift 2 ;;
     -n|--num-envs)                num_envs="$2"; shift 2 ;;
@@ -158,15 +165,28 @@ done
 
 require_tools osmo zip
 
+load_platform_profile "$profile"
+gpu="${gpu:-${PROFILE_TASK_GPU:-1}}"
+cpu="${cpu:-${PROFILE_TASK_CPU:-30}}"
+memory="${memory:-${PROFILE_TASK_MEMORY:-400Gi}}"
+storage="${storage:-${PROFILE_TASK_STORAGE:-200Gi}}"
+
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
 [[ -d "$REPO_ROOT/training/rl" ]] || fatal "Directory training/rl not found"
-[[ -z "$storage_account" ]] && fatal "Azure storage account required for code upload (set AZURE_STORAGE_ACCOUNT_NAME or deploy infra)"
+require_platform_code_storage
 
 entry_script="$SCRIPT_DIR/osmo-train-entry.sh"
 [[ -f "$entry_script" ]] || fatal "Entry script not found: $entry_script"
 entry_script_b64="$(base64 < "$entry_script" | tr -d '\n')"
 
 checkpoint_mode="$(normalize_checkpoint_mode "$checkpoint_mode")"
+
+if [[ "$PROFILE_TRACKING_BACKEND" == "none" ]]; then
+  [[ -n "$checkpoint_uri" ]] && fatal "--checkpoint-uri needs a tracking backend; TRACKING_BACKEND is none"
+  [[ -n "$register_checkpoint" && "$skip_register" == "false" ]] \
+    && fatal "--register-checkpoint needs a tracking backend; TRACKING_BACKEND is none"
+  skip_register=true
+fi
 
 if [[ "$skip_register" == "false" && -z "$register_checkpoint" ]]; then
   register_checkpoint="$(derive_model_name "$task")"
@@ -178,6 +198,8 @@ workflow_name="${workflow_name:-${correlation_id:-isaaclab-inline-training}}"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
+  print_platform_profile_preview
+  print_kv "OSMO Platform" "$PROFILE_OSMO_GPU_PLATFORM"
   print_kv "Task" "$task"
   print_kv "Backend" "$backend"
   print_kv "Image" "$image"
@@ -191,14 +213,18 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Checkpoint URI" "${checkpoint_uri:-<not set>}"
   print_kv "Register Model" "${register_checkpoint:-<none>}"
   print_kv "Workflow" "$workflow"
-  print_kv "Subscription" "${subscription_id:-<not set>}"
-  print_kv "Resource Group" "${resource_group:-<not set>}"
-  print_kv "Workspace" "${workspace_name:-<not set>}"
-  print_kv "Storage Account" "${storage_account:-<not set>}"
+  if [[ "$PROFILE_TRACKING_BACKEND" == "azureml" ]]; then
+    print_kv "Subscription" "${subscription_id:-<not set>}"
+    print_kv "Resource Group" "${resource_group:-<not set>}"
+    print_kv "Workspace" "${workspace_name:-<not set>}"
+  fi
+  [[ "$PROFILE_NAME" == "azure" ]] && print_kv "Storage Account" "${storage_account:-<not set>}"
   print_kv "Workflow Name" "$workflow_name"
   print_kv "Correlation ID" "${correlation_id:-<not set>}"
   exit 0
 fi
+
+use_platform_osmo_login
 
 #------------------------------------------------------------------------------
 # Package and Upload Training Payload
@@ -206,7 +232,7 @@ fi
 
 info "Packaging and uploading training payload..."
 code_url=$(stage_and_upload_code "$REPO_ROOT" \
-  "azure://${storage_account}/${osmo_container}/osmo-code" \
+  "$PROFILE_OSMO_CODE_STORAGE_URL" \
   training/rl training/__init__.py training/stream.py training/utils) \
   || fatal "Failed to stage and upload training payload"
 info "Training payload uploaded: $code_url"
@@ -235,11 +261,17 @@ submit_args=(
   "cpu=$cpu"
   "memory=$memory"
   "storage=$storage"
+  "platform=$PROFILE_OSMO_GPU_PLATFORM"
 )
+mapfile -t tracking_values < <(platform_tracking_workflow_values)
+submit_args+=("${tracking_values[@]}")
 
-[[ -n "$subscription_id" ]] && submit_args+=("azure_subscription_id=$subscription_id")
-[[ -n "$resource_group" ]] && submit_args+=("azure_resource_group=$resource_group")
-[[ -n "$workspace_name" ]] && submit_args+=("azure_workspace_name=$workspace_name")
+# Only AzureML tracking reads the Azure context, so other backends never receive it.
+if [[ "$PROFILE_TRACKING_BACKEND" == "azureml" ]]; then
+  [[ -n "$subscription_id" ]] && submit_args+=("azure_subscription_id=$subscription_id")
+  [[ -n "$resource_group" ]] && submit_args+=("azure_resource_group=$resource_group")
+  [[ -n "$workspace_name" ]] && submit_args+=("azure_workspace_name=$workspace_name")
+fi
 
 if [[ -n "$max_iterations" ]]; then
   submit_args+=("max_iterations=$max_iterations")
@@ -264,6 +296,8 @@ osmo "${submit_args[@]}" || fatal "Failed to submit workflow"
 # Summary
 #------------------------------------------------------------------------------
 section "Deployment Summary"
+print_kv "Platform Profile" "$PROFILE_NAME"
+print_kv "Tracking Backend" "$PROFILE_TRACKING_BACKEND"
 print_kv "Task" "$task"
 print_kv "Backend" "$backend"
 print_kv "Image" "$image"

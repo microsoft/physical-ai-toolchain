@@ -1,4 +1,7 @@
-# T5 — Operate: Fleet Intelligence (Roadmap)
+---
+title: "T5 — Operate: Fleet Intelligence (Roadmap)"
+description: Roadmap for fleet intelligence, aggregate telemetry, drift detection, and human-supervised retraining beyond multi-site policy delivery.
+---
 
 > [!WARNING]
 > **Roadmap direction, not shipped.** The fleet-intelligence domain is currently specified, with
@@ -40,3 +43,7 @@ domain doc rather than a duplicate here:
 - [Tier model (canonical reference)](../../design/tier-model.md)
 - [Architecture: T5 — Operate](../../contributing/architecture.md#t5--operate)
 - [T4 — Scale](../tier-4-scale/README.md) · [Fleet Intelligence](../../fleet-intelligence/README.md)
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

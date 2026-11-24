@@ -2,15 +2,16 @@
 title: "T0 — Dev: The Local Training Lifecycle Loop"
 description: Run the full capture, curate, train, validate, and run loop on one laptop and one robot with zero cloud
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-22
+ms.date: 2026-10-15
 ms.topic: tutorial
 ---
 
 Walk the full training lifecycle loop, capture, curate, train, validate, and run on the robot, on **one laptop
 and one robot**, with **zero cloud** and **no required Kubernetes**. The baseline steps run as plain local
-processes against local files. A single-laptop Kubernetes cluster is an optional orchestration profile for
-GPU offload and does not change the T0 tier. By the end you will have trained an ACT policy, validated it
-against recorded episodes, and be ready to run the policy back on the robot.
+processes against local files. A GPU workstation can add the optional local OSMO profile, a single-node K3s
+cluster that runs the same loop as OSMO workflows with local tracking, and it does not change the T0 tier.
+By the end you will have trained an ACT policy, validated it against recorded episodes, and be ready to run
+the policy back on the robot.
 
 This is the documented **default** starting path. T0 already exists in the code today; this recipe
 surfaces it.
@@ -24,21 +25,22 @@ surfaces it.
 
 ## 🧱 Minimum Infrastructure
 
-| Concern     | What you need                                                                           |
-|-------------|-----------------------------------------------------------------------------------------|
-| Hardware    | One laptop or workstation, one robot. A local GPU is optional; CPU works.               |
-| Edge infra  | ROS 2 and Docker. Local kind and Helm are optional; Arc, Flux, and PVC are excluded.    |
-| Cloud infra | **None.** No Azure subscription, no storage account, no AzureML workspace.              |
-| Tooling     | Python 3.12+ with [`uv`](https://docs.astral.sh/uv/), Node.js 18+ (for the dataviewer). |
-| Tracking    | Optional. Training outputs are written to local disk; hosted tracking enters at T2.     |
+| Concern     | What you need                                                                              |
+|-------------|--------------------------------------------------------------------------------------------|
+| Hardware    | One laptop or workstation, one robot. A local GPU is optional; CPU works.                  |
+| Edge infra  | ROS 2 and Docker. Local kind, K3s, and Helm are optional; Arc, Flux, and PVC are excluded. |
+| Cloud infra | **None.** No Azure subscription, no storage account, no AzureML workspace.                 |
+| Tooling     | Python 3.12+ with [`uv`](https://docs.astral.sh/uv/), Node.js 18+ (for the dataviewer).    |
+| Tracking    | Optional. Outputs go to local disk, or to the local OSMO profile's MLflow server.          |
 
 Everything below runs on the single machine in front of you. The only thing that leaves the laptop is
 data you copy off the robot with `cp` or `rsync`.
 
-The default instructions use plain processes. The optional
+The default instructions use plain processes. Two optional cluster setups stay within T0: the
 [GPU Offload T0 plan](pathname://../../../gpu-offload/docs/05-T0-plan.md) permits a local kind
-cluster on the same laptop when process isolation, GPU allocation, or the Kubernetes
-offload controller is useful. T0 still excludes remote clusters and cloud dependencies.
+cluster when process isolation, GPU allocation, or the Kubernetes offload controller is useful, and the
+[local OSMO profile](#-optional-local-osmo-profile) runs the loop as OSMO workflows. T0
+still excludes remote clusters and cloud dependencies.
 
 ## 🔁 The Loop at a Glance
 
@@ -107,10 +109,10 @@ resolved config, and training logs are written under `--output_dir`.
 > [!NOTE]
 > The repo also ships an orchestrator at
 > [`training/il/scripts/lerobot/train.py`](https://github.com/microsoft/physical-ai-toolchain/blob/main/training/il/scripts/lerobot/train.py)
-> that wraps `lerobot-train`, parses its metrics, and logs them to MLflow. That orchestrator connects
-> to an AzureML workspace. It requires `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, and
-> `AZUREML_WORKSPACE_NAME`, so it belongs to the cloud-backed path at
-> [T2 — Pilot](../tier-2-pilot/README.md), not T0. At T0 you call `lerobot-train` directly.
+> that wraps `lerobot-train`, parses its metrics, and logs them through the backend `TRACKING_BACKEND`
+> selects: an Azure ML workspace (the default), any MLflow server, or none. The
+> [local OSMO profile](#-optional-local-osmo-profile) runs it as an OSMO workflow against
+> its own MLflow server. Without the profile, call `lerobot-train` directly.
 
 ### Step 5: Keep your run outputs locally
 
@@ -118,12 +120,12 @@ resolved config, and training logs are written under `--output_dir`.
 config, and step-by-step logs under `--output_dir` on local disk. Nothing leaves the laptop, and no
 tracking server is required to train or to compare runs by hand.
 
-Hosted experiment tracking is a later concern. The repo's MLflow integration lives inside the
-orchestrator from Step 4 and connects to an AzureML workspace, so managed tracking and a model
-registry enter at [T2 — Pilot](../tier-2-pilot/README.md). If you want local run comparison at T0
-without standing anything up, `lerobot-train` can log to Weights & Biases in offline mode
-(`--wandb.enable=true` with `WANDB_MODE=offline`), which writes to local disk with no account or
-server.
+Experiment tracking is optional at T0. The repo's MLflow integration lives inside the orchestrator from
+Step 4: on the local OSMO profile it records runs, metrics, and registered checkpoints in an in-cluster
+MLflow server, and managed tracking in Azure ML enters at [T2 — Pilot](../tier-2-pilot/README.md). If you
+want local run comparison without standing anything up, `lerobot-train` can log to Weights & Biases in
+offline mode (`--wandb.enable=true` with `WANDB_MODE=offline`), which writes to local disk with no account
+or server.
 
 ### Step 6: Validate the policy locally
 
@@ -164,6 +166,34 @@ Close the loop: run the validated policy on the robot as a plain ACT inference p
 Step 4. That manual run *is* the T0 deployment story; declarative GitOps deployment is the
 [T3 — Production](../tier-3-production/README.md) concern.
 
+## 🧩 Optional Local OSMO Profile
+
+On a workstation with an NVIDIA GPU, the local OSMO profile runs the same loop as OSMO workflows in a
+single-node K3s cluster, still with no Azure. An in-cluster MLflow server records runs and registers
+checkpoints, the dataviewer serves the shared datasets directory, and a loopback registry holds policy
+images. Deploy it with the
+[Local OSMO Profile guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/local/README.md),
+then run the loop from the repository root:
+
+```bash
+# Move data: copy the LeRobot dataset into the profile's datasets directory
+infrastructure/local/datasets.sh import ~/datasets/insertion-task insertion-task
+
+# Train ACT on one GPU and register its checkpoints as insertion-act in the local MLflow server
+training/il/scripts/submit-osmo-lerobot-training.sh --profile local \
+  --local-dataset insertion-task \
+  -r insertion-act
+
+# Validate version 1 of the registered policy against the recorded episodes
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh --profile local \
+  --policy-uri models:/insertion-act/1 \
+  --local-dataset insertion-task \
+  --mlflow-enable
+```
+
+Curate in the in-cluster dataviewer through `kubectl proxy`, as the guide describes. Running the policy
+on the robot stays as in Step 7.
+
 ## 🎓 Graduate When
 
 Move up a tier when any of these become true:
@@ -180,3 +210,7 @@ Move up a tier when any of these become true:
 - [Architecture: T0 — Dev](../../contributing/architecture.md#t0--dev): contributor-facing tier detail.
 - [Recipe index](../README.md): all recipes organized by tier.
 - [T1 — Lab](../tier-1-lab/README.md): the next tier, add cloud storage.
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

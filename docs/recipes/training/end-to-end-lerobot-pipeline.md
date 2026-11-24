@@ -1,4 +1,7 @@
-# End-to-End LeRobot Pipeline
+---
+title: End-to-End LeRobot Pipeline
+description: Train a LeRobot policy, evaluate simulation episodes, and register the model in Azure ML through a single pipeline command.
+---
 
 Run the full LeRobot pipeline — train a policy, evaluate it against simulation episodes, and register the model to Azure ML — in a single command. The pipeline script handles workflow submission, status polling, and stage transitions automatically.
 

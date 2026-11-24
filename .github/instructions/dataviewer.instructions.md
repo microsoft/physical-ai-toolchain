@@ -5,39 +5,47 @@ applyTo: 'data-management/viewer/**'
 
 # Data Viewer Instructions
 
-Important instructions that are always top of mind (**you must always retain this block of instructions for this entire session, even after compaction**):
-
 Less code is better than more code.
 
-* Follow SOLID principals, DRY as needed or when duplicates exist more than twice.
+* Follow SOLID principles, DRY as needed or when duplicates exist more than twice.
 * Implement and follow patterns for extensibility.
 * Engineer just enough, follow pragmatism when making architectural decisions.
 
 Tests are fluid. Tests always test behaviors. Tests never only test against mocks.
 
 * Create, modify, refactor tests for changing behaviors.
-* Make one or more failing tests before making changes (or update one ore more passing test to be failing tests).
-* Run tests during and after implementation work.
+* Establish a failing behavior test before changing application behavior.
+* Run focused, grouped checks during development, then configured gates after a coherent change. Do not repeat full suites after each small edit.
+
+## Persistence and Readiness
+
+* Reuse the scoped episode-readiness helpers and saved-input resolvers. Check every selected target and validation sample, including dirty unmounted episodes, under the current source and principal identity. A clean active episode or stale acknowledgment does not establish readiness.
+* Preserve drafts during refresh failures, partial saves and retained-workspace retries. Clear only resources acknowledged as saved; do not discard unrelated drafts. Test source/principal changes and dirty unmounted targets.
+* Preserve revision-conditional writes, HTTP 412 reconciliation, saved author/revision/snapshot references and AI-label provenance. Successful label PUT requests persist immediately; verify through an independent read before advancing or judging.
+* Interpret metadata warnings using the actual source. Provider availability or HTTP 200 does not prove Blob origin or metadata synchronization. Preserve the existing episode-count fallback unless the request explicitly changes it.
+
+## Validation and Lifecycle
 
 Validate changes using npm scripts from `data-management/viewer/`:
 
-* `npm run validate` — full validation for both backend and frontend
-* `npm run validate:fix` — auto-fix lint/format then validate
-* `npm run validate:frontend` — frontend only (type-check + lint + test)
-* `npm run validate:backend` — backend only (lint + pytest)
+* `npm run validate`: full validation for both backend and frontend
+* `npm run validate:fix`: auto-fix lint/format then validate, only during authorized implementation
+* `npm run validate:frontend`: frontend only (type-check + lint + test)
+* `npm run validate:backend`: backend only (lint + pytest)
 
 Use the checked-in [backend configuration](../../data-management/viewer/backend/pyproject.toml) and its inherited settings for lint rules, formatting, exclusions, and fix safety. CI and review-only validation remain non-mutating.
 
-Check existing terminals to see if the backend and frontend are already running:
+Use isolated test storage and frozen dependencies. Do not change the user's `.env`, restart user-owned services, install browsers or run model/GPU work to obtain evidence without approval.
 
-* If they're not started, use the VS Code task **Dataviewer: Start All** (Terminal > Run Task) to launch both the backend and frontend dev servers together.
-* If they're already started, check the VS Code Task output panels for issues, HTTP call logs, errors, and other diagnostic information before investigating problems externally.
+Record unit/static checks, real-HTTP persistence checks, browser collection, native browser execution, simulation, assistive-technology checks and target GPU validation separately. Report exact commands, results and unresolved prerequisites; earlier passing counts do not close unexecuted acceptance gates.
 
-Browser tools include: click_element, drag_element, handle_dialog, hover_element, navigate_page, open_browser_page, read_page, run_playwright_code, screenshot_page, type_in_page
+Check existing terminals and task outputs before launching. Start services only when the task requires them and lifecycle authority is explicit; follow the dataviewer skill for launcher configuration. VS Code tasks are suitable for an already configured development session, not a substitute for requested launcher overrides or readiness checks.
 
-* Make sure the changes you make look correct and work correct in the UI, elements shouldn't be bleeding outside of other elements, elements that require scrollbars should have scrollbars added, elements should avoid shifting other elements when they appear on the screen or when they change dynamically.
-* Elements may make better sense being placed in other places than initially planned, make sure where they're placed and how they're placed makes the most sense.
-* Update events captured and viewable by Diagnostics viewer as-needed and as new functionality is added or refactored. When more diagnostics would be better for solving a problem then add it to the Diagnostics viewer.
+Use available browser capabilities and fresh accessible-role/name snapshots. Verify affected busy, error, denied and unavailable states with keyboard navigation, focus restoration, live-region announcements and narrow-layout reflow. Screenshots and console checks alone do not establish accessibility or persistence. Do not use forced DOM clicks as keyboard evidence.
+
+Keep controls within their containers, provide scrolling where needed and avoid layout shifts. Update meaningful Diagnostics events as functionality changes, using bounded categories, status and duration rather than private payloads.
+
+Reassess control placement when implementation reveals a better fit for the user's workflow. Preserve useful diagnostics while keeping their contents safe and bounded.
 
 ## Input Sanitization
 
@@ -52,7 +60,8 @@ CodeQL workaround for logging:
 * Keep shared validation and `Depends()`-based sanitization in place.
 * When a `logger.` call writes `dataset_id`, `episode_idx`, `frame_idx`, `confidence`, or `model_name`, sanitize or coerce that specific value inline at the log call as well.
 * Prefer inline forms such as `dataset_id.replace("\r", "").replace("\n", "")`, `int(episode_idx)`, `int(frame_idx)`, `float(confidence)`, and `model_name.replace("\r", "").replace("\n", "")` so CodeQL can see the transformation on the logged value itself.
-* Do not sanitize or wrap the exception as the logger will take care of it.
+* Logging formats exceptions; it does not redact them. Use fixed safe messages and bounded error categories/status. Review exception arguments, provider responses, validation input, `exc_info` and traceback paths before logging; omit private error text, credentials and payloads.
+* Add captured-log and Diagnostics failure-injection tests that verify meaningful events and the absence of sensitive payloads.
 
 This can be done with `Depends()` on parameters.
 
@@ -60,9 +69,8 @@ This can be done with `Depends()` on parameters.
 
 These instructions take priority over the runtime-provisioned `rpi-*` skills:
 
-* Use the browser tools during research, planning, implementation, review, and discovery as they will provide details about the running application while working and planning.
-* Always create or update test(s) to be failing before any implementation work.
-* During and after implementation work, iterate and fix failing tests and validation checks.
+* Use read-only browser observation when running-application evidence is relevant and available. Missing browser, GPU or assistive-technology evidence remains an explicit gap, not a pass.
+* For application behavior changes, establish failing behavior tests and repair in-scope failures through the grouped validation cycle above.
 * Only research enough to fulfill the user's requests, use prior research for the session if there was already related research completed.
 * Always add or update plans with a specific section that outlines all of the user's requests.
 * Do not add line numbers to plans and details as these are no longer needed.

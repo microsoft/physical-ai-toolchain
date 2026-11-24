@@ -10,7 +10,7 @@ import pytest
 from src.api.models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, TrajectoryPoint
 from src.api.services.dataset_service import service as dataset_service_module
 from src.api.services.dataset_service.base import DatasetFormatHandler
-from src.api.services.dataset_service.service import DatasetService
+from src.api.services.dataset_service.service import DatasetService, EpisodeLoadError
 
 
 def _handler() -> MagicMock:
@@ -180,6 +180,16 @@ class TestGetEpisodeHandlerChain:
             trajectory_data=[],
         )
 
+    async def test_get_episode_raises_when_the_owning_handler_cannot_load_it(self, service: DatasetService) -> None:
+        primary = _handler()
+        primary.has_loader.return_value = True
+        _install_handlers(service, primary, _handler())
+        service._datasets["ds1"] = DatasetInfo(id="ds1", name="ds1", total_episodes=2, fps=30.0)
+
+        with pytest.raises(EpisodeLoadError, match="Episode 1 of dataset 'ds1' could not be loaded"):
+            await service.get_episode("ds1", 1)
+        assert await service.get_episode("ds1", 2) is None
+
     async def test_get_episode_delegates_blob_loader_creation(
         self,
         service: DatasetService,
@@ -205,6 +215,6 @@ class TestGetEpisodeHandlerChain:
         result = await service.get_episode("blob-dataset", 0)
 
         assert result is episode
-        ensure_blob_synced.assert_awaited_once_with("blob-dataset")
+        ensure_blob_synced.assert_awaited_once_with("blob-dataset", 0)
         primary.get_loader.assert_called_once_with("blob-dataset", synced_path)
         primary.load_episode.assert_called_once_with("blob-dataset", 0, dataset_info=None)

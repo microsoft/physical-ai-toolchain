@@ -11,17 +11,21 @@ import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 
 import { loadPersistedEditDraft } from '@/lib/edit-draft-storage'
+import { recordDiagnosticEvent } from '@/lib/playback-diagnostics'
 import {
   buildDraftPersistencePayload,
   buildEditOperations,
+  buildEditStateFromOperations,
   buildEditStateUpdate,
   buildOriginalEditState,
   persistEditStateDraft,
 } from '@/stores/edit-store-helpers'
 import type {
+  EpisodeEditDraft,
   EpisodeEditOperations,
   FrameInsertion,
   ImageTransform,
+  SavedEditBaseline,
   SubtaskSegment,
   TrajectoryAdjustment,
 } from '@/types/episode-edit'
@@ -44,6 +48,9 @@ interface EditState {
   datasetId: string | null
   episodeIndex: number | null
   principalScopeId: string
+  serverBaseline: SavedEditBaseline | null
+  draftHydrated: boolean
+  draftError: string | null
 
   /** Global transform applied to all cameras */
   globalTransform: ImageTransform | null
@@ -55,6 +62,8 @@ interface EditState {
   insertedFrames: Map<number, FrameInsertion>
   /** Sub-task segments */
   subtasks: SubtaskSegment[]
+  /** Subtasks recorded with the episode, which the editor starts from */
+  recordedSubtasks: SubtaskSegment[]
   /** Trajectory adjustments per frame */
   trajectoryAdjustments: Map<number, TrajectoryAdjustment>
 
@@ -73,12 +82,17 @@ interface EditState {
   /** Validation errors */
   validationErrors: string[]
   /** Saved draft operations keyed by dataset and episode */
-  savedEpisodeDrafts: Record<string, EpisodeEditOperations>
+  savedEpisodeDrafts: Record<string, EpisodeEditDraft>
 }
 
 interface EditActions {
-  /** Initialize edit state for an episode */
-  initializeEdit: (datasetId: string, episodeIndex: number, principalScopeId?: string) => void
+  /** Initialize edit state for an episode, starting from the subtasks recorded with it */
+  initializeEdit: (
+    datasetId: string,
+    episodeIndex: number,
+    principalScopeId?: string,
+    recordedSubtasks?: SubtaskSegment[],
+  ) => void
   /** Load existing edit operations */
   loadEditOperations: (ops: EpisodeEditOperations) => void
 
@@ -138,10 +152,11 @@ interface EditActions {
   // State management
   /** Get the current edit operations for export */
   getEditOperations: () => EpisodeEditOperations | null
-  /** Commit the current episode edits as the saved draft baseline */
   saveEpisodeDraft: () => void
-  /** Mark current state as saved */
-  markSaved: () => void
+  hydrateSavedEdits: (baseline: SavedEditBaseline) => boolean
+  /** Keep a recovered draft on the latest saved revision, or discard it for the saved edits */
+  resolveRecoveredEdits: (baseline: SavedEditBaseline, choice: 'keep' | 'discard') => void
+  acknowledgeSave: (submitted: SavedEditBaseline, saved: SavedEditBaseline) => void
   /** Reset to original state */
   resetEdits: () => void
   /** Clear all edit state */
@@ -154,11 +169,15 @@ const initialState: EditState = {
   datasetId: null,
   episodeIndex: null,
   principalScopeId: 'local',
+  serverBaseline: null,
+  draftHydrated: false,
+  draftError: null,
   globalTransform: null,
   cameraTransforms: {},
   removedFrames: new Set(),
   insertedFrames: new Map(),
   subtasks: [],
+  recordedSubtasks: [],
   trajectoryAdjustments: new Map(),
   originalState: null,
   isDirty: false,
@@ -166,8 +185,30 @@ const initialState: EditState = {
   savedEpisodeDrafts: {},
 }
 
-function getEpisodeDraftKey(datasetId: string, episodeIndex: number) {
-  return `${datasetId}:${episodeIndex}`
+function getEpisodeDraftKey(datasetId: string, episodeIndex: number, principalScopeId: string) {
+  return JSON.stringify([principalScopeId, datasetId, episodeIndex])
+}
+
+function sameEditScope(
+  state: Pick<EditState, 'datasetId' | 'episodeIndex' | 'principalScopeId'>,
+  baseline: SavedEditBaseline,
+): boolean {
+  return (
+    state.datasetId === baseline.operations.datasetId &&
+    state.episodeIndex === baseline.operations.episodeIndex &&
+    state.principalScopeId === baseline.principalScopeId
+  )
+}
+
+function sameEditRevision(first: SavedEditBaseline, second: SavedEditBaseline): boolean {
+  return (
+    first.sourceId === second.sourceId &&
+    first.sourceRevision === second.sourceRevision &&
+    first.principalScopeId === second.principalScopeId &&
+    first.etag === second.etag &&
+    first.operations.datasetId === second.operations.datasetId &&
+    first.operations.episodeIndex === second.operations.episodeIndex
+  )
 }
 
 /**
@@ -197,8 +238,30 @@ function getEpisodeDraftKey(datasetId: string, episodeIndex: number) {
 export const useEditStore = create<EditStore>()(
   devtools(
     (set, get) => {
+      let sessionGeneration = 0
       const persistCurrentDraft = () => {
-        void persistEditStateDraft(get())
+        const current = get()
+        const { datasetId, episodeIndex, persistedDraft } = buildDraftPersistencePayload(current)
+        if (!datasetId || episodeIndex === null) return
+        const key = getEpisodeDraftKey(datasetId, episodeIndex, current.principalScopeId)
+        const drafts = { ...current.savedEpisodeDrafts }
+        if (persistedDraft) {
+          drafts[key] = {
+            operations: structuredClone(persistedDraft),
+            baseline: structuredClone(current.serverBaseline),
+          }
+        } else {
+          delete drafts[key]
+        }
+        set({ savedEpisodeDrafts: drafts }, false, 'retainCurrentEditDraft')
+        const generation = sessionGeneration
+        void persistEditStateDraft(current).catch(() => {
+          recordDiagnosticEvent('persistence', 'edit-draft-write-failed', {
+            reason: 'storage-unavailable',
+          })
+          if (generation === sessionGeneration)
+            set({ draftError: 'Browser draft could not be stored.' }, false, 'editDraftWriteFailed')
+        })
       }
 
       const updateState = (
@@ -226,34 +289,66 @@ export const useEditStore = create<EditStore>()(
       const frameActions = createEditStoreFrameActions<EditStore>(updateState)
       const subtaskActions = createEditStoreSubtaskActions<EditStore>(updateState, get)
 
+      const adoptServerEdits = (baseline: SavedEditBaseline) => {
+        const snapshot = structuredClone(baseline)
+        const operations = buildEditStateFromOperations(snapshot.operations, get().recordedSubtasks)
+        set(
+          {
+            ...operations,
+            serverBaseline: snapshot,
+            originalState: buildOriginalEditState(operations),
+            isDirty: false,
+            validationErrors: validateSegments(operations.subtasks),
+          },
+          false,
+          'hydrateSavedEdits',
+        )
+        persistCurrentDraft()
+      }
+
+      const rebaseRecoveredEdits = (baseline: SavedEditBaseline) => {
+        const snapshot = structuredClone(baseline)
+        updateState('rebaseRecoveredEdits', () => ({
+          serverBaseline: snapshot,
+          originalState: buildEditStateFromOperations(snapshot.operations, get().recordedSubtasks),
+        }))
+      }
+
       return {
         ...initialState,
 
-        initializeEdit: (datasetId, episodeIndex, principalScopeId = 'local') => {
-          const draftKey = getEpisodeDraftKey(datasetId, episodeIndex)
+        initializeEdit: (
+          datasetId,
+          episodeIndex,
+          principalScopeId = 'local',
+          recordedSubtasks = [],
+        ) => {
+          const generation = ++sessionGeneration
+          const draftKey = getEpisodeDraftKey(datasetId, episodeIndex, principalScopeId)
           const savedDraft = get().savedEpisodeDrafts[draftKey]
-
-          if (savedDraft) {
-            get().loadEditOperations(savedDraft)
-            return
-          }
+          set({ recordedSubtasks }, false, 'setRecordedSubtasks')
 
           const newState = {
             datasetId,
             episodeIndex,
             principalScopeId,
+            serverBaseline: savedDraft?.baseline ?? null,
+            draftHydrated: !!savedDraft,
+            draftError: null,
             globalTransform: null,
             cameraTransforms: {},
             removedFrames: new Set<number>(),
             insertedFrames: new Map<number, FrameInsertion>(),
-            subtasks: [],
+            subtasks: structuredClone(recordedSubtasks),
             trajectoryAdjustments: new Map<number, TrajectoryAdjustment>(),
           }
 
           set(
             {
               ...newState,
-              originalState: buildOriginalEditState(newState),
+              originalState: savedDraft?.baseline
+                ? buildEditStateFromOperations(savedDraft.baseline.operations, recordedSubtasks)
+                : buildOriginalEditState(newState),
               isDirty: false,
               validationErrors: [],
             },
@@ -261,27 +356,51 @@ export const useEditStore = create<EditStore>()(
             'initializeEdit',
           )
 
-          void loadPersistedEditDraft(datasetId, episodeIndex, principalScopeId).then(
-            (persistedDraft) => {
-              if (!persistedDraft) {
-                return
-              }
+          if (savedDraft) {
+            get().loadEditOperations(savedDraft.operations)
+            return
+          }
 
+          const initializedState = get()
+          void loadPersistedEditDraft(datasetId, episodeIndex, principalScopeId)
+            .then((persistedDraft) => {
+              if (generation !== sessionGeneration) return
               const currentState = get()
 
               if (
+                currentState !== initializedState ||
                 currentState.datasetId !== datasetId ||
                 currentState.episodeIndex !== episodeIndex ||
                 currentState.principalScopeId !== principalScopeId
               ) {
+                recordDiagnosticEvent('persistence', 'edit-draft-hydration-skipped', {
+                  reason: 'state-changed',
+                })
+                set({ draftHydrated: true }, false, 'finishEditDraftRecovery')
+                return
+              }
+
+              if (!persistedDraft) {
+                set({ draftHydrated: true }, false, 'finishEditDraftRecovery')
                 return
               }
 
               set(
                 (state) => ({
+                  draftHydrated: true,
+                  serverBaseline: persistedDraft.baseline,
+                  originalState: persistedDraft.baseline
+                    ? buildEditStateFromOperations(
+                        persistedDraft.baseline.operations,
+                        recordedSubtasks,
+                      )
+                    : state.originalState,
                   savedEpisodeDrafts: {
                     ...state.savedEpisodeDrafts,
-                    [draftKey]: persistedDraft.draft,
+                    [draftKey]: {
+                      operations: persistedDraft.draft,
+                      baseline: persistedDraft.baseline,
+                    },
                   },
                 }),
                 false,
@@ -289,58 +408,30 @@ export const useEditStore = create<EditStore>()(
               )
 
               get().loadEditOperations(persistedDraft.draft)
-            },
-          )
+            })
+            .catch(() => {
+              recordDiagnosticEvent('persistence', 'edit-draft-read-failed', {
+                reason: 'storage-unavailable',
+              })
+              if (generation === sessionGeneration)
+                set(
+                  { draftHydrated: true, draftError: 'Browser draft could not be recovered.' },
+                  false,
+                  'editDraftReadFailed',
+                )
+            })
         },
 
         loadEditOperations: (ops) => {
-          const removedSet = new Set(ops.removedFrames ?? [])
-          const insertedMap = new Map<number, FrameInsertion>()
-          for (const ins of ops.insertedFrames ?? []) {
-            insertedMap.set(ins.afterFrameIndex, ins)
-          }
-          const subtasks = ops.subtasks ?? []
-          const trajectoryAdjustments = new Map<number, TrajectoryAdjustment>()
-          for (const adj of ops.trajectoryAdjustments ?? []) {
-            trajectoryAdjustments.set(adj.frameIndex, adj)
-          }
-
-          set(
-            {
+          updateState(
+            'loadEditOperations',
+            (state) => ({
               datasetId: ops.datasetId,
               episodeIndex: ops.episodeIndex,
-              globalTransform: ops.globalTransform ?? null,
-              cameraTransforms: ops.cameraTransforms ?? {},
-              removedFrames: removedSet,
-              insertedFrames: insertedMap,
-              subtasks,
-              trajectoryAdjustments,
-              originalState: buildOriginalEditState({
-                globalTransform: ops.globalTransform ?? null,
-                cameraTransforms: ops.cameraTransforms ?? {},
-                removedFrames: removedSet,
-                insertedFrames: insertedMap,
-                subtasks,
-                trajectoryAdjustments,
-              }),
-              isDirty: false,
-              validationErrors: validateSegments(subtasks),
-            },
-            false,
-            'loadEditOperations',
+              ...buildEditStateFromOperations(ops, state.recordedSubtasks),
+            }),
+            { validationErrors: (state) => validateSegments(state.subtasks) },
           )
-
-          void persistEditStateDraft({
-            datasetId: ops.datasetId,
-            episodeIndex: ops.episodeIndex,
-            principalScopeId: get().principalScopeId,
-            globalTransform: ops.globalTransform ?? null,
-            cameraTransforms: ops.cameraTransforms ?? {},
-            removedFrames: removedSet,
-            insertedFrames: insertedMap,
-            subtasks,
-            trajectoryAdjustments,
-          })
         },
 
         ...transformActions,
@@ -358,49 +449,78 @@ export const useEditStore = create<EditStore>()(
         },
 
         saveEpisodeDraft: () => {
-          const currentState = get()
-          const { datasetId, episodeIndex, operations, persistedDraft } =
-            buildDraftPersistencePayload(currentState)
-
-          if (!operations || !datasetId || episodeIndex === null) {
-            return
-          }
-
-          set(
-            (state) => {
-              const draftKey = getEpisodeDraftKey(datasetId, episodeIndex)
-              const nextSavedEpisodeDrafts = { ...state.savedEpisodeDrafts }
-
-              if (persistedDraft) {
-                nextSavedEpisodeDrafts[draftKey] = operations
-              } else {
-                delete nextSavedEpisodeDrafts[draftKey]
-              }
-
-              return {
-                savedEpisodeDrafts: nextSavedEpisodeDrafts,
-                originalState: buildOriginalEditState(state),
-                isDirty: false,
-              }
-            },
-            false,
-            'saveEpisodeDraft',
-          )
-
-          void persistEditStateDraft(currentState)
+          persistCurrentDraft()
         },
 
-        markSaved: () => {
-          set(
-            (state) => ({
-              originalState: buildOriginalEditState(state),
-              isDirty: false,
-            }),
-            false,
-            'markSaved',
-          )
+        hydrateSavedEdits: (baseline) => {
+          const current = get()
+          // A recovered draft based on an older revision is safe to replace when it already equals the server.
+          const matchesServer =
+            JSON.stringify(buildEditOperations(current)) ===
+            JSON.stringify(
+              buildEditOperations({
+                ...current,
+                ...buildEditStateFromOperations(baseline.operations, current.recordedSubtasks),
+              }),
+            )
+          if (!sameEditScope(current, baseline) || !current.draftHydrated || current.draftError) {
+            recordDiagnosticEvent('persistence', 'edit-server-hydration-skipped', {
+              reason: 'scope-changed',
+            })
+            return false
+          }
+          if (
+            matchesServer ||
+            (!current.isDirty &&
+              (!current.serverBaseline || sameEditRevision(current.serverBaseline, baseline)))
+          ) {
+            adoptServerEdits(baseline)
+            return true
+          }
+          // Edits made before any saved descriptor existed cannot overwrite server work.
+          if (!current.serverBaseline && baseline.etag === null) {
+            rebaseRecoveredEdits(baseline)
+            return true
+          }
+          recordDiagnosticEvent('persistence', 'edit-server-hydration-skipped', {
+            reason: current.serverBaseline
+              ? 'recovered-draft-revision-changed'
+              : 'recovered-draft-unversioned',
+          })
+          return false
+        },
 
-          persistCurrentDraft()
+        resolveRecoveredEdits: (baseline, choice) => {
+          if (!sameEditScope(get(), baseline)) return
+          recordDiagnosticEvent('persistence', 'edit-recovered-draft-resolved', { choice })
+          if (choice === 'keep') rebaseRecoveredEdits(baseline)
+          else adoptServerEdits(baseline)
+        },
+
+        acknowledgeSave: (submitted, saved) => {
+          const current = get()
+          if (
+            !current.serverBaseline ||
+            !sameEditRevision(current.serverBaseline, submitted) ||
+            !sameEditRevision(submitted, { ...saved, etag: submitted.etag }) ||
+            !saved.etag ||
+            current.datasetId !== submitted.operations.datasetId ||
+            current.episodeIndex !== submitted.operations.episodeIndex ||
+            current.principalScopeId !== submitted.principalScopeId
+          ) {
+            recordDiagnosticEvent('persistence', 'edit-save-acknowledgment-skipped', {
+              reason: 'scope-or-revision-changed',
+            })
+            return
+          }
+          updateState('acknowledgeSave', () => ({
+            ...(JSON.stringify(buildEditOperations(current)) ===
+            JSON.stringify(submitted.operations)
+              ? buildEditStateFromOperations(saved.operations, current.recordedSubtasks)
+              : {}),
+            serverBaseline: structuredClone(saved),
+            originalState: buildEditStateFromOperations(saved.operations, current.recordedSubtasks),
+          }))
         },
 
         resetEdits: () => {
@@ -430,6 +550,7 @@ export const useEditStore = create<EditStore>()(
         },
 
         clear: () => {
+          sessionGeneration += 1
           set(initialState, false, 'clear')
         },
       }

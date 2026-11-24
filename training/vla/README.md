@@ -1,6 +1,8 @@
 # VLA Training
 
-Vision-Language-Action (VLA) training for `pi0`, `pi0_fast`, and `pi05` policies via `lerobot[dataset,pi]`. Azure ML uses a standalone calibration sweep followed by a training pipeline that consumes the selected calibration outputs. NVIDIA GR00T fine-tuning runs through OSMO using the same lifecycle domain.
+Vision-Language-Action (VLA) training for `pi0`, `pi0_fast`, `pi05`, and `smolvla` policies via `lerobot[dataset,pi,smolvla]`. Azure ML uses a standalone calibration sweep followed by a training pipeline that consumes the selected calibration outputs.
+SmolVLA fine-tuning also runs through OSMO with the IL LeRobot submission script and this VLA lockfile, and fits one workstation GPU on the [local OSMO profile](../../infrastructure/local/README.md).
+NVIDIA GR00T fine-tuning runs through OSMO using the same lifecycle domain.
 
 ## 📁 Directory Structure
 
@@ -13,7 +15,7 @@ vla/
 │           ├── modality_config.py              # GR00T N1.7+ example modality config
 │           └── README.md                       # How to adapt for a custom embodiment
 ├── lerobot/
-│   ├── pyproject.toml                           # lerobot[dataset,pi] dependencies and overrides
+│   ├── pyproject.toml                           # lerobot[dataset,pi,smolvla] dependencies and overrides
 │   └── uv.lock                                  # Reproducible Linux x86_64 and ARM64 dependency lock
 ├── scripts/
 │   ├── groot/
@@ -38,8 +40,9 @@ vla/
 | `pi0`      | Physical Intelligence pi0 base (3B param flow-matching VLA)     |
 | `pi0_fast` | pi0 variant with FAST action tokenization for higher throughput |
 | `pi05`     | pi05 successor checkpoint (same API surface as `pi0`)           |
+| `smolvla`  | Hugging Face SmolVLA (compact VLA of about 450M parameters)     |
 
-The LeRobot PI adapter rejects values outside `pi0|pi0_fast|pi05` before training starts.
+The `lerobot-pi` adapter rejects values outside `pi0|pi0_fast|pi05`, and the `lerobot-smolvla` adapter accepts only `smolvla`, before training starts.
 
 ## 🚀 Quick Start
 
@@ -168,6 +171,25 @@ records the current `HEAD` as the declared code revision:
 ```bash
 uv run pytest -o addopts='' -vv -s -m e2e tests/e2e/test_e2e_aml_vla_training.py
 ```
+
+Dependabot verification runs this test as the `aml-vla-training` check in the `vla` category. See
+[Verifying Dependabot Updates](../../docs/contributing/dependabot-verification.md).
+
+## 🚀 SmolVLA Fine-Tuning
+
+[SmolVLA](https://huggingface.co/lerobot/smolvla_base) is a compact VLA of about 450 million parameters that fine-tunes on one workstation GPU. Submit it through the IL LeRobot OSMO script with `-p smolvla`; the job installs LeRobot from [lerobot/uv.lock](lerobot/uv.lock) and fine-tunes `lerobot/smolvla_base` at the commit pinned in `scripts/lib/common.sh`:
+
+```bash
+training/il/scripts/submit-osmo-lerobot-training.sh \
+  --profile local \
+  --local-dataset my-learner-dataset \
+  -p smolvla \
+  --rename-map '{"observation.images.front": "observation.images.camera1"}' \
+  --batch-size 8 \
+  -r my-smolvla-policy
+```
+
+The base model names its cameras `observation.images.camera1` through `camera3`; `--rename-map` maps the dataset's camera keys onto them. Pass `--policy-path` and `--policy-path-revision` to fine-tune another SmolVLA checkpoint. See [SmolVLA Fine-Tuning](../../docs/training/lerobot-training.md#smolvla-fine-tuning-osmo) for the options.
 
 ## 🚀 GR00T-N1.5 Fine-Tuning
 

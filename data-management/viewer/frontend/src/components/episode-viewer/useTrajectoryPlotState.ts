@@ -14,10 +14,15 @@ import {
   type TrajectoryPlotArea,
 } from '@/lib/trajectory-graph-geometry'
 import { useEpisodeStore, useTrajectoryAdjustmentState } from '@/stores'
-import { useJointConfigStore } from '@/stores/joint-config-store'
+import { type JointConfig, useJointConfigStore } from '@/stores/joint-config-store'
 import type { TrajectoryVariable } from '@/types'
 
-import { getJointLabel, type JointGroup } from './joint-constants'
+import {
+  getJointLabel,
+  type JointGroup,
+  removeVariableLabelPrefix,
+  resolveStateChannelLabel,
+} from './joint-constants'
 import { buildTrajectoryChartData } from './trajectory-plot-utils'
 import { useTrajectoryPlotSelection } from './useTrajectoryPlotSelection'
 
@@ -45,10 +50,6 @@ function humanizeSource(source: string) {
     .replace(/^observation\./, '')
     .replace(/[._-]+/g, ' ')
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
-}
-
-function removeVariableLabelPrefix(label: string) {
-  return label.replace(/^(State|Action):\s+/i, '')
 }
 
 function buildVariableGroups(variables: readonly TrajectoryVariable[]): JointGroup[] {
@@ -116,14 +117,27 @@ export function useTrajectoryPlotState({
   const createGroup = useJointConfigStore((state) => state.createGroup)
   const deleteGroup = useJointConfigStore((state) => state.deleteGroup)
   const moveJoint = useJointConfigStore((state) => state.moveJoint)
-  const { save: saveJointConfig } = useSaveJointConfig()
-  const { data: defaults } = useJointConfigDefaults()
+  const { save: saveJointConfig, error: jointConfigSaveError } = useSaveJointConfig()
+  const defaultsQuery = useJointConfigDefaults()
   const saveDefaults = useSaveJointConfigDefaults()
 
   const [selectedJoints, setSelectedJoints] = useState<number[]>([])
   const [showVelocity, setShowVelocity] = useState(false)
   const [showNormalized, setShowNormalized] = useState(true)
-  const [defaultsOpen, setDefaultsOpen] = useState(false)
+  const [defaultsOpen, setDefaultsOpenState] = useState(false)
+  const [defaultsSnapshot, setDefaultsSnapshot] = useState<{
+    data: JointConfig | undefined
+    etag: string | null | undefined
+  } | null>(null)
+  const defaults = defaultsOpen ? defaultsSnapshot?.data : defaultsQuery.data
+  const defaultsEtag = defaultsSnapshot?.etag
+  const setDefaultsOpen = (open: boolean) => {
+    if (open) {
+      setDefaultsSnapshot({ data: defaultsQuery.data, etag: defaultsQuery.etag })
+      saveDefaults.reset()
+    }
+    setDefaultsOpenState(open)
+  }
   const [plotArea, setPlotArea] = useState<TrajectoryPlotArea | null>(null)
   const selectionSurfaceRef = useRef<HTMLDivElement>(null)
   const namedTrajectoryVariables = currentEpisode?.trajectoryVariables ?? EMPTY_TRAJECTORY_VARIABLES
@@ -143,22 +157,11 @@ export function useTrajectoryPlotState({
   )
 
   const resolveLabel = useCallback(
-    (idx: number) => {
-      if (shouldUseNamedVariables) {
-        return removeVariableLabelPrefix(namedTrajectoryVariables[idx]?.label ?? getJointLabel(idx))
-      }
-      if (showVelocity && stateVariables[idx]) {
-        return removeVariableLabelPrefix(stateVariables[idx].label)
-      }
-      return jointConfig.labels[String(idx)] ?? getJointLabel(idx)
-    },
-    [
-      jointConfig.labels,
-      namedTrajectoryVariables,
-      shouldUseNamedVariables,
-      showVelocity,
-      stateVariables,
-    ],
+    (idx: number) =>
+      shouldUseNamedVariables
+        ? removeVariableLabelPrefix(namedTrajectoryVariables[idx]?.label ?? getJointLabel(idx))
+        : resolveStateChannelLabel(idx, stateVariables, jointConfig.labels),
+    [jointConfig.labels, namedTrajectoryVariables, shouldUseNamedVariables, stateVariables],
   )
 
   const resolveDataKey = useCallback(
@@ -395,6 +398,8 @@ export function useTrajectoryPlotState({
     resolveLabel,
     resolveDataKey,
     saveDefaults,
+    defaultsEtag,
+    jointConfigSaveError,
     selectedJoints,
     selection,
     selectionHighlight,

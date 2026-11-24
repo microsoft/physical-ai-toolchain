@@ -109,20 +109,20 @@ server resources.
 
 The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:
 
-| Field                | Type                  | Implemented | Notes                                                 |
-|----------------------|-----------------------|-------------|-------------------------------------------------------|
-| `serverimage`        | string                | Implemented | Server container image; defaults to application image |
-| `serverreplicas`     | integer               | Implemented | Server Deployment replica count                       |
-| `nodeSelector`       | map[string]string     | Implemented | Server pod node selection                             |
-| `securityContext`    | object                | Implemented | Validated server container security context           |
-| `env`                | list of name/value    | Implemented | Environment merged into server container              |
-| `remoteableenv`      | list of strings       | Implemented | Client env var names allowed onto the server          |
+| Field                | Type                  | Implemented | Notes                                                     |
+|----------------------|-----------------------|-------------|-----------------------------------------------------------|
+| `serverimage`        | string                | Implemented | Server container image; defaults to application image     |
+| `serverreplicas`     | integer               | Implemented | Server Deployment replica count                           |
+| `nodeSelector`       | map[string]string     | Implemented | Server pod node selection                                 |
+| `securityContext`    | object                | Implemented | Validated server container security context               |
+| `env`                | list of name/value    | Implemented | Environment merged into server container                  |
+| `remoteableenv`      | list of strings       | Implemented | Client env var names allowed onto the server              |
 | `encryption`         | boolean               | Implemented | AES-GCM with a controller-managed key; defaults to `true` |
-| `networkPolicy`      | boolean               | Implemented | Same-namespace RPC ingress; defaults to `true`        |
-| `noserverdeployment` | boolean               | Implemented | Skips server Deployment creation                      |
-| `serverstages`       | list of stage objects | Implemented | Shared and per-client server stages                   |
-| `remoteablecm`       | string                | Implemented | ConfigMap name (required by controller)               |
-| `remoteableconts`    | list of strings       | Implemented | Container names to mutate (optional filter)           |
+| `networkPolicy`      | boolean               | Implemented | Same-namespace RPC ingress; defaults to `true`            |
+| `noserverdeployment` | boolean               | Implemented | Skips server Deployment creation                          |
+| `serverstages`       | list of stage objects | Implemented | Shared and per-client server stages                       |
+| `remoteablecm`       | string                | Implemented | ConfigMap name (required by controller)                   |
+| `remoteableconts`    | list of strings       | Implemented | Container names to mutate (optional filter)               |
 
 ## Behavior Guarantees
 

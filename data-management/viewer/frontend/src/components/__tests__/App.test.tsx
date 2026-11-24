@@ -1,8 +1,11 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useEffect, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AppContent } from '@/App'
+import { DatasetCatalog } from '@/components/app-shell/DatasetCatalog'
+import { DataviewerShellHeader } from '@/components/app-shell/DataviewerShellHeader'
 import { useDatasetStore, useEpisodeStore } from '@/stores'
 import { useLabelStore } from '@/stores/label-store'
 import type { DatasetInfo } from '@/types'
@@ -16,10 +19,45 @@ const { mockIsDiagnosticsEnabled, mockEnableDiagnostics, mockDisableDiagnostics 
 )
 
 let mockDatasets: DatasetInfo[] = []
+const mockEpisodeEffect = vi.fn()
+const mockJudgeDatasetEnabled = vi.fn()
+let mockJudgeEnabled = false
+let mockCatalogError: Error | null = null
+const mockCatalogDiagnostic = vi.fn()
+const mockRefreshCatalog = vi.fn()
+const mockCatalogOptions = vi.fn()
+let mockCatalogGroups: string[] = []
+let mockCatalogCount: number | undefined
+let mockCatalogFlags = { loading: false, stale: false, failed: false }
 
 vi.mock('@/hooks/use-datasets', () => ({
   useDatasets: () => ({ data: mockDatasets }),
-  useCapabilities: () => ({ data: undefined }),
+  useDataset: (id?: string) => ({ data: mockDatasets.find((dataset) => dataset.id === id) }),
+  useDatasetCatalog: (options: { query?: string; offset?: number; limit?: number }) => {
+    mockCatalogOptions(options)
+    return {
+      data: {
+        items: mockDatasets
+          .filter((dataset) =>
+            `${dataset.id} ${dataset.name}`.toLowerCase().includes(options.query ?? ''),
+          )
+          .slice(options.offset ?? 0, (options.offset ?? 0) + (options.limit ?? 25)),
+        total: mockDatasets.length,
+        catalogTotal: mockCatalogCount ?? mockDatasets.length,
+        groups: mockCatalogGroups,
+        snapshotId: 'catalog-revision',
+        offset: 0,
+        limit: 25,
+        stale: mockCatalogFlags.stale,
+        refreshFailed: mockCatalogFlags.failed,
+      },
+      isLoading: mockCatalogFlags.loading,
+      isFetching: false,
+      error: mockCatalogError,
+      refreshCatalog: mockRefreshCatalog,
+    }
+  },
+  useCapabilities: () => ({ data: { vlmJudgeEnabled: mockJudgeEnabled } }),
   useEpisodes: () => ({
     data: [
       { index: 0, length: 12, taskIndex: 0, hasAnnotations: false },
@@ -31,11 +69,14 @@ vi.mock('@/hooks/use-datasets', () => ({
   }),
   useEpisode: (_datasetId: string, episodeIndex: number) => ({
     data: {
+      sourceId: 'synthetic-source',
+      sourceRevision: 'synthetic-revision',
       meta: { index: episodeIndex, length: 12 },
       videoUrls: undefined,
       cameras: [],
       trajectoryData: undefined,
     },
+    principalScopeId: 'principal-one',
     isLoading: false,
     error: null,
   }),
@@ -45,17 +86,50 @@ vi.mock('@/hooks/use-joint-config', () => ({
   useJointConfig: () => undefined,
 }))
 
+vi.mock('@/components/release/ReleaseWorkspace', () => ({
+  ReleaseWorkspace: ({ datasetId }: { datasetId: string }) => <div>Releases for {datasetId}</div>,
+}))
+
+vi.mock('@/hooks/use-vlm-judge-batch', () => ({
+  useJudgeDataset: (_datasetId: string, enabled: boolean) => {
+    mockJudgeDatasetEnabled(enabled)
+    return {
+      inventory: {},
+      jobs: {},
+      approvals: {},
+      annotated: {},
+      usable: {},
+      reset: {},
+      review: {},
+      act: vi.fn(),
+      refresh: vi.fn(),
+    }
+  },
+  useVlmJudgeBatch: () => ({ submit: vi.fn(), isPending: false }),
+  useJudgeSamples: () => ({ data: [] }),
+}))
+
+vi.mock('@/hooks/use-episode-readiness', () => ({
+  useEpisodeReadiness: () => ({ ready: true }),
+}))
+
+vi.mock('@/hooks/use-principal-context', () => ({
+  usePrincipalContext: () => ({ data: { scopeId: 'principal-one' } }),
+}))
+
 vi.mock('@/hooks/use-labels', () => ({
   useDatasetLabels: () => undefined,
 }))
 
 vi.mock('@/lib/playback-diagnostics', () => ({
+  recordDiagnosticEvent: (...args: unknown[]) => mockCatalogDiagnostic(...args),
   disableDiagnostics: mockDisableDiagnostics,
   enableDiagnostics: mockEnableDiagnostics,
   isDiagnosticsEnabled: mockIsDiagnosticsEnabled,
 }))
 
-vi.mock('@/lib/api-client', () => ({
+vi.mock('@/lib/api-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api-client')>()),
   warmCache: vi.fn().mockResolvedValue(undefined),
 }))
 
@@ -64,36 +138,355 @@ vi.mock('@/components/annotation-panel', () => ({
 }))
 
 vi.mock('@/components/annotation-workspace/AnnotationWorkspace', () => ({
-  AnnotationWorkspace: ({
+  AnnotationWorkspace: function MockAnnotationWorkspace({
+    visible = true,
     canGoPreviousEpisode,
     onPreviousEpisode,
     canGoNextEpisode,
     onNextEpisode,
     onSaveAndNextEpisode,
   }: {
+    visible?: boolean
     canGoPreviousEpisode?: boolean
     onPreviousEpisode?: () => void
     canGoNextEpisode?: boolean
     onNextEpisode?: () => void
     onSaveAndNextEpisode?: () => void
-  }) => (
-    <div>
-      <div>Annotation Workspace</div>
-      <button type="button" disabled={!canGoPreviousEpisode} onClick={onPreviousEpisode}>
-        Previous Episode
-      </button>
-      <button type="button" disabled={!canGoNextEpisode} onClick={onNextEpisode}>
-        Next Episode
-      </button>
-      <button type="button" disabled={!canGoNextEpisode} onClick={onSaveAndNextEpisode}>
-        Save and Next Episode
-      </button>
-    </div>
-  ),
+  }) {
+    const [draft, setDraft] = useState('')
+    useEffect(() => {
+      mockEpisodeEffect('active')
+      return () => mockEpisodeEffect('inactive')
+    }, [])
+    return (
+      <div data-testid="annotation-workspace-probe" data-visible={String(visible)}>
+        <div>Annotation Workspace</div>
+        <input
+          aria-label="Annotation draft probe"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <button type="button" disabled={!canGoPreviousEpisode} onClick={onPreviousEpisode}>
+          Previous Episode
+        </button>
+        <button type="button" disabled={!canGoNextEpisode} onClick={onNextEpisode}>
+          Next Episode
+        </button>
+        <button type="button" disabled={!canGoNextEpisode} onClick={onSaveAndNextEpisode}>
+          Save and Next Episode
+        </button>
+      </div>
+    )
+  },
 }))
 
 describe('AppContent', () => {
+  it('pauses judge queries while closed or on Releases and resumes on return', async () => {
+    mockJudgeEnabled = true
+    const user = userEvent.setup()
+    render(<AppContent />)
+    try {
+      expect(mockJudgeDatasetEnabled).toHaveBeenLastCalledWith(false)
+      await user.click(screen.getByRole('button', { name: 'Dataset workspace' }))
+      expect(mockJudgeDatasetEnabled).toHaveBeenLastCalledWith(true)
+      await user.click(screen.getByRole('tab', { name: 'Releases' }))
+      expect(mockJudgeDatasetEnabled).toHaveBeenLastCalledWith(false)
+      await user.click(screen.getByRole('tab', { name: 'Episodes' }))
+      expect(mockJudgeDatasetEnabled).toHaveBeenLastCalledWith(true)
+      await user.click(screen.getByRole('button', { name: 'Dataset workspace' }))
+      expect(mockJudgeDatasetEnabled).toHaveBeenLastCalledWith(false)
+      await user.click(screen.getByRole('tab', { name: 'Releases' }))
+      await user.click(screen.getByRole('button', { name: 'Dataset workspace' }))
+      expect(screen.getByRole('tab', { name: 'Episodes' })).toHaveAttribute('aria-selected', 'true')
+      expect(mockJudgeDatasetEnabled).toHaveBeenLastCalledWith(true)
+    } finally {
+      mockJudgeEnabled = false
+    }
+  })
+
+  it('keeps hidden episode loaders active without discarding panel state', async () => {
+    const user = userEvent.setup()
+    render(<AppContent />)
+    await user.type(await screen.findByLabelText('Annotation draft probe'), 'unsaved draft')
+    mockEpisodeEffect.mockClear()
+
+    await user.click(screen.getByRole('tab', { name: 'Releases' }))
+
+    expect(mockEpisodeEffect).not.toHaveBeenCalledWith('inactive')
+    expect(screen.getByTestId('annotation-workspace-probe')).toHaveAttribute(
+      'data-visible',
+      'false',
+    )
+    await user.click(screen.getByRole('tab', { name: 'Episodes' }))
+    expect(screen.getByLabelText('Annotation draft probe')).toHaveValue('unsaved draft')
+    expect(mockEpisodeEffect).not.toHaveBeenCalled()
+  })
+
+  it('stops playback on release navigation and resets to episodes for a new source', async () => {
+    const user = userEvent.setup()
+    render(<AppContent />)
+    const video = document.createElement('video')
+    const pause = vi.fn()
+    video.pause = pause
+    document.body.append(video)
+    try {
+      act(() => useEpisodeStore.setState({ isPlaying: true }))
+      await user.click(screen.getByRole('tab', { name: 'Releases' }))
+      expect(useEpisodeStore.getState().isPlaying).toBe(false)
+      expect(pause).toHaveBeenCalled()
+      expect(screen.getByText('Releases for houston_lerobot_fixed')).toBeVisible()
+      expect(screen.getByRole('tab', { name: 'Releases' })).toHaveAttribute('aria-selected', 'true')
+      await user.click(screen.getByRole('tab', { name: 'Episodes' }))
+      expect(screen.queryByText('Releases for houston_lerobot_fixed')).toBeNull()
+      await user.click(screen.getByRole('tab', { name: 'Releases' }))
+      await user.click(screen.getByRole('button', { name: /^Dataset: / }))
+      await user.click(screen.getByRole('option', { name: /customer_lerobot/ }))
+      expect(screen.getByRole('tab', { name: 'Episodes' })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.queryByText(/Releases for/)).toBeNull()
+    } finally {
+      video.remove()
+    }
+  })
+
+  it('filters the header picker by name and group, resets the filter and selects a dataset', async () => {
+    const user = userEvent.setup()
+    const onSelectDataset = vi.fn()
+    const datasets = [
+      { ...mockDatasets[0], id: 'cell-b--first', name: 'First', group: 'cell-b' },
+      { ...mockDatasets[1], id: 'cell-a--second', name: 'Second', group: 'cell-a' },
+      { ...mockDatasets[0], id: 'standalone', name: 'standalone' },
+    ]
+    render(
+      <DataviewerShellHeader
+        datasetId="cell-b--first"
+        datasets={datasets}
+        diagnosticsVisible={false}
+        onSelectDataset={onSelectDataset}
+        onToggleDiagnostics={vi.fn()}
+      />,
+    )
+    const trigger = screen.getByRole('button', { name: 'Dataset: cell-b--first' })
+    await user.click(trigger)
+    const filter = screen.getByRole('combobox', { name: 'Filter datasets' })
+    expect(filter).toHaveFocus()
+    await user.type(filter, 'missing')
+    expect(screen.getByText('No datasets match the current filter.')).toBeVisible()
+    await user.keyboard('{Escape}')
+    await user.click(trigger)
+    expect(screen.getByRole('combobox', { name: 'Filter datasets' })).toHaveValue('')
+    await user.type(screen.getByRole('combobox', { name: 'Filter datasets' }), 'cell-a')
+    await user.click(screen.getByRole('option', { name: /second/i }))
+    expect(onSelectDataset).toHaveBeenCalledWith('cell-a--second')
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('exposes header catalog and diagnostics actions, format badges and warming state', async () => {
+    const user = userEvent.setup()
+    const onOpenCatalog = vi.fn()
+    const onToggleDiagnostics = vi.fn()
+    const props = {
+      datasetId: '',
+      datasets: [],
+      diagnosticsVisible: true,
+      onSelectDataset: vi.fn(),
+      onToggleDiagnostics,
+      onOpenCatalog,
+      catalogOpen: true,
+    }
+    const { rerender } = render(
+      <DataviewerShellHeader {...props} capabilities={{ hasHdf5Files: true }} isWarmingCache />,
+    )
+    expect(screen.getByText('HDF5')).toBeVisible()
+    expect(screen.getByText('Warming')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Dataset: Select a dataset' })).toHaveTextContent(
+      'Select a dataset',
+    )
+    await user.click(screen.getByRole('button', { name: /^Dataset: / }))
+    await user.click(screen.getByRole('button', { name: 'Toggle Diagnostics' }))
+    expect(onOpenCatalog).toHaveBeenCalledOnce()
+    expect(onToggleDiagnostics).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: 'Toggle Diagnostics' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    rerender(
+      <DataviewerShellHeader
+        {...props}
+        diagnosticsVisible={false}
+        capabilities={{ isLerobotDataset: true, hasHdf5Files: true }}
+      />,
+    )
+    expect(screen.getByText('LeRobot')).toBeVisible()
+    expect(screen.queryByText('HDF5')).not.toBeInTheDocument()
+    expect(screen.queryByText('Warming')).not.toBeInTheDocument()
+  })
+
+  it('names catalog results and supports forward and reverse keyboard focus', async () => {
+    const user = userEvent.setup()
+    render(<DatasetCatalog visible selectedId="" onSelect={vi.fn()} onReturn={vi.fn()} />)
+    const filter = screen.getByRole('combobox', { name: 'Filter datasets' })
+    expect(filter).toHaveFocus()
+    const listbox = screen.getByRole('listbox', { name: 'Available datasets' })
+    expect(filter).toHaveAttribute('aria-controls', listbox.id)
+    await user.tab()
+    expect(within(listbox).getAllByRole('option')[0]).toHaveFocus()
+    await user.tab({ shift: true })
+    expect(filter).toHaveFocus()
+  })
+
+  it('updates catalog grouping and sort, returns to the previous page and refreshes discovery', async () => {
+    const user = userEvent.setup()
+    mockDatasets = Array.from({ length: 30 }, (_, index) => ({
+      ...mockDatasets[0],
+      id: `dataset-${index}`,
+    }))
+    mockCatalogGroups = ['cell--one']
+    mockRefreshCatalog.mockResolvedValue({
+      snapshotId: 'refreshed',
+      total: 30,
+      refreshFailed: false,
+    })
+    render(<DatasetCatalog visible selectedId="" onSelect={vi.fn()} onReturn={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: 'Next catalog page' }))
+    expect(screen.getByRole('button', { name: 'Previous catalog page' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Previous catalog page' }))
+    expect(mockCatalogOptions).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0 }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Group' }), 'cell--one')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Sort' }), 'episodes-desc')
+    expect(mockCatalogOptions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ group: 'cell--one', sort: 'episodes-desc' }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Refresh catalog' }))
+    await waitFor(() =>
+      expect(mockCatalogOptions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ snapshotId: 'refreshed' }),
+      ),
+    )
+    expect(mockCatalogDiagnostic).toHaveBeenCalledWith('navigation', 'catalog-refresh-result', {
+      failed: false,
+      count: 30,
+    })
+  })
+
+  it('retains catalog entries after refresh rejection and offers button and keyboard return', async () => {
+    const user = userEvent.setup()
+    const onReturn = vi.fn()
+    mockRefreshCatalog.mockRejectedValue(new Error('private query'))
+    render(
+      <DatasetCatalog
+        visible
+        selectedId="houston_lerobot_fixed"
+        onSelect={vi.fn()}
+        onReturn={onReturn}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Refresh catalog' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Previous discovery is retained')
+    expect(screen.getByRole('option', { name: /houston_lerobot_fixed/ })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Return to episode' }))
+    await user.keyboard('{Escape}')
+    expect(onReturn).toHaveBeenCalledTimes(2)
+    expect(JSON.stringify(mockCatalogDiagnostic.mock.calls)).not.toContain('private query')
+  })
+
+  it('distinguishes loading, empty discovery, no matches and stale catalog status', () => {
+    mockDatasets = []
+    mockCatalogFlags.loading = true
+    const props = { visible: true, selectedId: '', onSelect: vi.fn(), onReturn: vi.fn() }
+    const { rerender } = render(<DatasetCatalog {...props} />)
+    expect(screen.getByText('Loading datasets...')).toBeVisible()
+    mockCatalogFlags.loading = false
+    rerender(<DatasetCatalog {...props} />)
+    expect(screen.getByText('No datasets available.')).toBeVisible()
+    mockCatalogCount = 10
+    mockCatalogFlags.stale = true
+    rerender(<DatasetCatalog {...props} />)
+    expect(screen.getByText('No datasets match the current filters.')).toBeVisible()
+    expect(screen.getByText('Catalog snapshot is stale.')).toBeVisible()
+    mockCatalogFlags.failed = true
+    rerender(<DatasetCatalog {...props} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('Catalog refresh failed')
+  })
+
+  it('replaces both episode panes while retaining drafts and frame state without autoplay', async () => {
+    const user = userEvent.setup()
+    render(<AppContent />)
+    const editor = await screen.findByText('Annotation Workspace')
+    act(() => {
+      useEpisodeStore.setState({ currentFrame: 7, isPlaying: true })
+      useLabelStore.getState().setEpisodeLabels(0, ['human draft'])
+    })
+    await user.click(screen.getByRole('button', { name: 'Dataset workspace' }))
+    expect(editor).not.toBeVisible()
+    expect(screen.getByText('Label Filter')).not.toBeVisible()
+    expect(screen.getByRole('button', { name: 'Dataset workspace' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    expect(useEpisodeStore.getState().isPlaying).toBe(false)
+    await user.click(screen.getByRole('button', { name: 'Return to episode' }))
+    expect(editor).toBeVisible()
+    expect(useEpisodeStore.getState().currentFrame).toBe(7)
+    expect(useEpisodeStore.getState().isPlaying).toBe(false)
+    expect(useLabelStore.getState().episodeLabels[0]).toEqual(['human draft'])
+    expect(screen.getByRole('button', { name: 'Dataset workspace' })).toHaveFocus()
+  })
+  it('retains catalog summaries on refresh failure without logging private error content', async () => {
+    window.history.replaceState(null, '', '/')
+    mockCatalogError = new Error('private storage query')
+    render(<AppContent />)
+    expect(screen.getByRole('alert')).toHaveTextContent('Catalog unavailable')
+    expect(screen.getByRole('option', { name: /houston_lerobot_fixed/ })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(mockCatalogDiagnostic).toHaveBeenCalledWith('navigation', 'catalog-fetch-error', {
+        retained: true,
+      }),
+    )
+    expect(JSON.stringify(mockCatalogDiagnostic.mock.calls)).not.toContain('private')
+  })
+  it('pages a large catalog and restores the search and row focus after selection', async () => {
+    window.history.replaceState(null, '', '/')
+    mockDatasets = Array.from({ length: 1000 }, (_, index) => ({
+      id: `group--${String(index).padStart(4, '0')}`,
+      name: 'Repeated name',
+      totalEpisodes: index,
+      fps: 30,
+      features: {},
+      tasks: [],
+    }))
+    const user = userEvent.setup()
+    render(<AppContent />)
+    expect(screen.getAllByRole('option')).toHaveLength(29)
+    await user.click(screen.getByRole('button', { name: 'Next catalog page' }))
+    expect(screen.getByRole('option', { name: /group--0025/ })).toBeInTheDocument()
+    await user.type(screen.getByRole('combobox', { name: 'Filter datasets' }), '0999')
+    await user.keyboard('{ArrowDown}{Enter}')
+    expect(await screen.findByText('Annotation Workspace')).toBeVisible()
+    act(() => useEpisodeStore.setState({ isPlaying: true }))
+    await user.click(screen.getByRole('button', { name: /^Dataset: / }))
+    expect(useEpisodeStore.getState().isPlaying).toBe(false)
+    expect(screen.getByRole('combobox', { name: 'Filter datasets' })).toHaveValue('0999')
+    expect(screen.getByRole('option', { name: /group--0999/ })).toHaveFocus()
+    await user.keyboard('{Escape}')
+    expect(useEpisodeStore.getState().isPlaying).toBe(false)
+    expect(screen.getByRole('button', { name: /^Dataset: / })).toHaveFocus()
+  })
+  it('starts in the catalog without selecting or mounting an episode workspace', async () => {
+    window.history.replaceState(null, '', '/')
+    render(<AppContent />)
+    expect(await screen.findByRole('heading', { name: 'Datasets' })).toBeInTheDocument()
+    expect(screen.queryByText('Annotation Workspace')).not.toBeInTheDocument()
+    expect(useDatasetStore.getState().currentDataset).toBeNull()
+  })
   beforeEach(() => {
+    mockCatalogError = null
+    mockCatalogGroups = []
+    mockCatalogCount = undefined
+    mockCatalogFlags = { loading: false, stale: false, failed: false }
+    mockCatalogOptions.mockClear()
+    mockRefreshCatalog.mockReset()
+    mockCatalogDiagnostic.mockClear()
+    window.history.replaceState(null, '', '/?dataset=houston_lerobot_fixed')
     mockDatasets = [
       {
         id: 'houston_lerobot_fixed',
@@ -117,7 +510,10 @@ describe('AppContent', () => {
     useLabelStore.getState().reset()
   })
 
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    window.history.replaceState(null, '', '/')
+  })
 
   beforeEach(() => {
     mockIsDiagnosticsEnabled.mockReturnValue(false)
@@ -125,11 +521,11 @@ describe('AppContent', () => {
     mockDisableDiagnostics.mockClear()
   })
 
-  it('switches away from a removed selected dataset when the dataset list refreshes', async () => {
+  it('does not silently replace a directly selected dataset when catalog contents change', async () => {
     const { rerender } = render(<AppContent />)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Dataset' })).toHaveTextContent(
+      expect(screen.getByRole('button', { name: /^Dataset: / })).toHaveTextContent(
         'houston_lerobot_fixed',
       )
     })
@@ -148,11 +544,14 @@ describe('AppContent', () => {
     rerender(<AppContent />)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Dataset' })).toHaveTextContent('customer_lerobot')
+      expect(screen.getByRole('button', { name: /^Dataset: / })).toHaveTextContent(
+        'houston_lerobot_fixed',
+      )
     })
   })
 
   it('renders a filterable dataset dropdown even when only one dataset is available', async () => {
+    window.history.replaceState(null, '', '/?dataset=customer_lerobot')
     mockDatasets = [
       {
         id: 'customer_lerobot',
@@ -168,14 +567,14 @@ describe('AppContent', () => {
 
     render(<AppContent />)
 
-    const trigger = await screen.findByRole('button', { name: 'Dataset' })
+    const trigger = await screen.findByRole('button', { name: /^Dataset: / })
     expect(trigger).toHaveTextContent('customer_lerobot')
     expect(screen.queryByPlaceholderText('Dataset ID')).not.toBeInTheDocument()
 
     await user.click(trigger)
 
     expect(screen.getByPlaceholderText('Filter datasets')).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'customer_lerobot' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /customer_lerobot/ })).toBeInTheDocument()
   })
 
   it('supports keyboard selection from the dataset dropdown results', async () => {
@@ -183,7 +582,7 @@ describe('AppContent', () => {
 
     render(<AppContent />)
 
-    const trigger = await screen.findByRole('button', { name: 'Dataset' })
+    const trigger = await screen.findByRole('button', { name: /^Dataset: / })
     expect(trigger).toHaveTextContent('houston_lerobot_fixed')
 
     await user.click(trigger)
@@ -191,7 +590,9 @@ describe('AppContent', () => {
     await user.keyboard('{ArrowDown}{Enter}')
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Dataset' })).toHaveTextContent('customer_lerobot')
+      expect(screen.getByRole('button', { name: /^Dataset: / })).toHaveTextContent(
+        'customer_lerobot',
+      )
     })
   })
 
@@ -211,7 +612,7 @@ describe('AppContent', () => {
 
     const banner = await screen.findByRole('banner')
     const diagnosticsButton = screen.getByRole('button', { name: /toggle diagnostics/i })
-    const datasetPicker = screen.getByRole('button', { name: 'Dataset' })
+    const datasetPicker = screen.getByRole('button', { name: /^Dataset: / })
 
     expect(banner).toContainElement(diagnosticsButton)
     expect(diagnosticsButton.className).toContain('h-8')
@@ -277,7 +678,7 @@ describe('AppContent', () => {
     const user = userEvent.setup()
     render(<AppContent />)
 
-    const trigger = await screen.findByRole('button', { name: 'Dataset' })
+    const trigger = await screen.findByRole('button', { name: /^Dataset: / })
     await user.click(trigger)
 
     const filter = screen.getByRole('combobox', { name: 'Filter datasets' })

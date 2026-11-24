@@ -328,9 +328,9 @@ Describe 'Exit Code Handling' -Tag 'Unit' {
             Mock Out-File {}
         }
 
-        It 'Returns 0 when no issues' {
+        It 'Fails when full analysis has no files' {
             $result = Invoke-PSScriptAnalyzerCore
-            $result | Should -Be 0
+            $result | Should -Be 1
         }
     }
 

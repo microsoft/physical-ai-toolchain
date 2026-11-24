@@ -535,12 +535,9 @@ Describe 'Invoke-Validation' -Tag 'Unit' {
     }
 
     Context 'No files to validate' {
-        It 'exits early when no markdown files found' {
+        It 'rejects an empty full validation instead of reporting success' {
             $script:Paths = @($TestDrive)
-
-            # TestDrive has no .md files by default
-            Invoke-Validation
-            # Should not throw, just print "No markdown files to validate."
+            { Invoke-Validation } | Should -Throw '*no markdown files*'
         }
     }
 
@@ -703,11 +700,13 @@ Describe 'Invoke-Validation' -Tag 'Unit' {
     }
 
     Context 'No-files early exit writes zero CI outputs' {
-        It 'writes zero counts when no markdown files found in directory' {
+        It 'writes zero counts for a verified empty changed-file selection' {
             $emptyDir = Join-Path $TestDrive 'early-exit-empty'
             New-Item -Path $emptyDir -ItemType Directory -Force
 
             $script:Paths = @($emptyDir)
+            $script:ChangedFilesOnly = $true
+            Mock Get-ChangedFilesFromGit { @() }
 
             Invoke-Validation
 

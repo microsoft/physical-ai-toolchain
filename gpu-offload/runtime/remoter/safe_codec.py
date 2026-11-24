@@ -138,6 +138,7 @@ def loads(
     *,
     limits: CodecLimits,
     context: AdapterContext,
+    validate: Callable[[Any], None] | None = None,
 ) -> Any:
     if len(data) > limits.max_encoded_bytes:
         raise CodecLimitsError(f"encoded bytes {len(data)} exceed max_encoded_bytes={limits.max_encoded_bytes}")
@@ -159,6 +160,9 @@ def loads(
         raise CodecError("invalid codec packet envelope")
     if blobs is not None and packet.get("b") != [len(blob) for blob in blobs]:
         raise CodecError("invalid codec blob lengths")
+    if validate is not None:
+        envelope = _decode_value(packet["p"], 0, registry, limits, context, blobs or [], opaque_depth=_ENVELOPE_DEPTH)
+        validate(envelope)
     return _decode_value(packet["p"], 0, registry, limits, context, blobs or [])
 
 
@@ -289,6 +293,21 @@ def _encode_value(
     )
 
 
+class _Opaque:
+    """Stand in for a value the envelope check does not decode."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<opaque>"
+
+
+OPAQUE = _Opaque()
+# Decode envelope fields and their immediate members, including keyword names
+# and result metadata. Nested containers and extensions remain opaque.
+_ENVELOPE_DEPTH = 2
+
+
 def _decode_value(
     value: Any,
     depth: int,
@@ -296,7 +315,11 @@ def _decode_value(
     limits: CodecLimits,
     context: AdapterContext,
     blobs: list[bytes],
+    *,
+    opaque_depth: int | None = None,
 ) -> Any:
+    if opaque_depth is not None and depth >= opaque_depth and isinstance(value, (list, dict, _ExtEnvelope)):
+        return OPAQUE
     if depth > limits.max_nesting:
         raise CodecLimitsError(f"nesting depth {depth} exceeds max_nesting={limits.max_nesting}")
 
@@ -312,7 +335,10 @@ def _decode_value(
             raise CodecLimitsError(
                 f"list length {len(value)} exceeds max_collection_length={limits.max_collection_length}"
             )
-        return [_decode_value(item, depth + 1, registry, limits, context, blobs) for item in value]
+        return [
+            _decode_value(item, depth + 1, registry, limits, context, blobs, opaque_depth=opaque_depth)
+            for item in value
+        ]
 
     if isinstance(value, dict):
         if len(value) > limits.max_collection_length:
@@ -321,10 +347,12 @@ def _decode_value(
             )
         decoded_dict: dict[Any, Any] = {}
         for key, item in value.items():
-            decoded_key = _decode_value(key, depth + 1, registry, limits, context, blobs)
+            decoded_key = _decode_value(key, depth + 1, registry, limits, context, blobs, opaque_depth=opaque_depth)
             if not _is_hashable(decoded_key):
                 raise CodecTypeError(f"decoded dict key type {type(decoded_key)} is not hashable")
-            decoded_dict[decoded_key] = _decode_value(item, depth + 1, registry, limits, context, blobs)
+            decoded_dict[decoded_key] = _decode_value(
+                item, depth + 1, registry, limits, context, blobs, opaque_depth=opaque_depth
+            )
         return decoded_dict
 
     if isinstance(value, _ExtEnvelope):
@@ -350,7 +378,10 @@ def _decode_value(
             )
             if not isinstance(as_list, list):
                 raise CodecError("tuple extension payload must be a list")
-            return tuple(_decode_value(item, depth + 1, registry, limits, context, blobs) for item in as_list)
+            return tuple(
+                _decode_value(item, depth + 1, registry, limits, context, blobs, opaque_depth=opaque_depth)
+                for item in as_list
+            )
 
         if value.code == _RESERVED_EXT_UUID:
             if len(value.data) != 16:
@@ -362,6 +393,9 @@ def _decode_value(
                 raise CodecError("invalid bigint extension payload")
             magnitude = int.from_bytes(value.data[1:], "big")
             return -magnitude if value.data[0] else magnitude
+
+        if opaque_depth is not None:
+            return OPAQUE
 
         adapter = registry.find_by_code(value.code)
         if adapter is None:

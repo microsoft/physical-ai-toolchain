@@ -2,9 +2,18 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { ApiClientError } from '@/lib/api-client'
+import {
+  clearDiagnosticEvents,
+  disableDiagnostics,
+  enableDiagnostics,
+  readDiagnosticEvents,
+} from '@/lib/playback-diagnostics'
+
 import { DataviewerEpisodeViewer } from '../DataviewerEpisodeViewer'
 
 const mockSetCurrentEpisode = vi.fn()
+const mockStoreState = { currentDatasetId: 'ds-1' as string | null }
 
 vi.mock('@/hooks/use-datasets', () => ({
   useEpisode: vi.fn(),
@@ -12,13 +21,21 @@ vi.mock('@/hooks/use-datasets', () => ({
 
 vi.mock('@/stores', () => ({
   useEpisodeStore: (
-    selector: (state: { setCurrentEpisode: typeof mockSetCurrentEpisode }) => unknown,
-  ) => selector({ setCurrentEpisode: mockSetCurrentEpisode }),
+    selector: (state: {
+      setCurrentEpisode: typeof mockSetCurrentEpisode
+      currentDatasetId: string | null
+    }) => unknown,
+  ) =>
+    selector({
+      setCurrentEpisode: mockSetCurrentEpisode,
+      currentDatasetId: mockStoreState.currentDatasetId,
+    }),
 }))
 
 vi.mock('@/components/annotation-workspace/AnnotationWorkspace', () => ({
   AnnotationWorkspace: (props: Record<string, unknown>) => (
     <div data-testid="annotation-workspace" data-diagnostics={String(props.diagnosticsVisible)}>
+      <input aria-label="Unsaved annotation" defaultValue="" />
       <button type="button" onClick={() => (props.onSaveAndNextEpisode as () => void)()}>
         Save and continue
       </button>
@@ -43,6 +60,9 @@ describe('DataviewerEpisodeViewer', () => {
   afterEach(() => {
     vi.mocked(useEpisode).mockReset()
     mockSetCurrentEpisode.mockReset()
+    disableDiagnostics()
+    clearDiagnosticEvents()
+    mockStoreState.currentDatasetId = 'ds-1'
   })
 
   it('renders the AnnotationWorkspace once the episode loads', () => {
@@ -53,6 +73,31 @@ describe('DataviewerEpisodeViewer', () => {
     } as unknown as ReturnType<typeof useEpisode>)
 
     render(<DataviewerEpisodeViewer {...baseProps} />)
+
+    expect(screen.getByTestId('annotation-workspace')).toBeInTheDocument()
+  })
+
+  it('waits for the store to hold an episode of its dataset before rendering the workspace', () => {
+    const episode = { meta: { index: 0 }, episode_index: 0, length: 10 }
+    vi.mocked(useEpisode).mockReturnValue({
+      data: episode,
+      principalScopeId: 'principal-test',
+      isLoading: false,
+      error: null,
+    } as unknown as ReturnType<typeof useEpisode>)
+    mockStoreState.currentDatasetId = 'previous-dataset'
+
+    const { rerender } = render(<DataviewerEpisodeViewer {...baseProps} />)
+
+    expect(screen.queryByTestId('annotation-workspace')).not.toBeInTheDocument()
+    expect(screen.getByText('Loading episode 0...')).toBeInTheDocument()
+    expect(mockSetCurrentEpisode).toHaveBeenCalledWith(episode, {
+      datasetId: 'ds-1',
+      principalScopeId: 'principal-test',
+    })
+
+    mockStoreState.currentDatasetId = 'ds-1'
+    rerender(<DataviewerEpisodeViewer {...baseProps} />)
 
     expect(screen.getByTestId('annotation-workspace')).toBeInTheDocument()
   })
@@ -74,7 +119,7 @@ describe('DataviewerEpisodeViewer', () => {
 
     await user.click(screen.getByRole('button', { name: 'Save and continue' }))
 
-    expect(status).toHaveTextContent('Episode changes saved.')
+    expect(status).toHaveTextContent('Opening next episode.')
   })
 
   it('shows the loading message while the episode is fetching', () => {
@@ -103,6 +148,97 @@ describe('DataviewerEpisodeViewer', () => {
     expect(screen.queryByTestId('annotation-workspace')).not.toBeInTheDocument()
   })
 
+  it('keeps the workspace mounted and saving available after a refresh fails', async () => {
+    const user = userEvent.setup()
+    enableDiagnostics('workspace')
+    const episode = { meta: { index: 0 }, length: 10 }
+    const refetch = vi.fn()
+    const onSaveAndNextEpisode = vi.fn()
+    const query = { data: episode, isLoading: false, error: null, refetch }
+    vi.mocked(useEpisode).mockReturnValue(query as unknown as ReturnType<typeof useEpisode>)
+    const props = { ...baseProps, onSaveAndNextEpisode }
+    const { rerender } = render(<DataviewerEpisodeViewer {...props} />)
+    const workspace = screen.getByTestId('annotation-workspace')
+    await user.type(screen.getByRole('textbox', { name: 'Unsaved annotation' }), 'Keep this draft')
+
+    vi.mocked(useEpisode).mockReturnValue({
+      ...query,
+      error: new Error('Failed to fetch'),
+    } as unknown as ReturnType<typeof useEpisode>)
+    rerender(<DataviewerEpisodeViewer {...props} />)
+
+    expect(screen.getByTestId('annotation-workspace')).toBe(workspace)
+    expect(screen.getByRole('textbox', { name: 'Unsaved annotation' })).toHaveValue(
+      'Keep this draft',
+    )
+    expect(screen.getByText(/Could not refresh episode/)).toHaveAttribute('role', 'status')
+    await user.click(screen.getByRole('button', { name: 'Save and continue' }))
+    expect(onSaveAndNextEpisode).toHaveBeenCalledOnce()
+    expect(screen.getByTestId('episode-navigation-status')).toHaveTextContent(
+      'Opening next episode.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Retry episode load' }))
+    expect(refetch).toHaveBeenCalledOnce()
+    expect(mockSetCurrentEpisode).toHaveBeenCalledTimes(1)
+    expect(readDiagnosticEvents('workspace').map((event) => event.type)).toEqual([
+      'episode-fetch-error',
+      'episode-fetch-retry',
+    ])
+
+    vi.mocked(useEpisode).mockReturnValue({
+      ...query,
+      isFetching: true,
+      error: new Error('Failed to fetch'),
+    } as unknown as ReturnType<typeof useEpisode>)
+    rerender(<DataviewerEpisodeViewer {...props} />)
+    const retry = screen.getByRole('button', { name: 'Retry episode load' })
+    expect(retry).toHaveAttribute('aria-disabled', 'true')
+    expect(retry).toHaveAttribute('aria-busy', 'true')
+    expect(retry).toHaveFocus()
+    expect(screen.getByText('Refreshing episode. Showing previously loaded data.')).toHaveAttribute(
+      'role',
+      'status',
+    )
+    expect(screen.queryByText(/Could not refresh episode/)).not.toBeInTheDocument()
+    await user.click(retry)
+    expect(refetch).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: 'Save and continue' })).toBeEnabled()
+
+    vi.mocked(useEpisode).mockReturnValue({
+      ...query,
+      isFetching: false,
+      error: new Error('private-response-body'),
+    } as unknown as ReturnType<typeof useEpisode>)
+    rerender(<DataviewerEpisodeViewer {...props} />)
+    expect(screen.getByText(/Could not refresh episode/)).toBeVisible()
+    expect(retry).toHaveAttribute('aria-disabled', 'false')
+    expect(retry).toHaveAttribute('aria-busy', 'false')
+    expect(JSON.stringify(readDiagnosticEvents('workspace'))).not.toContain('private-response-body')
+
+    vi.mocked(useEpisode).mockReturnValue({
+      ...query,
+      data: { ...episode, length: 11 },
+    } as unknown as ReturnType<typeof useEpisode>)
+    rerender(<DataviewerEpisodeViewer {...props} />)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry episode load' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('annotation-workspace')).toBe(workspace)
+    expect(screen.getByRole('textbox', { name: 'Unsaved annotation' })).toHaveValue(
+      'Keep this draft',
+    )
+  })
+
+  it.each([401, 403, 404])('does not expose cached editing after access loss: %s', (status) => {
+    vi.mocked(useEpisode).mockReturnValue({
+      data: { meta: { index: 0 }, length: 10 },
+      isLoading: false,
+      error: new ApiClientError('Access unavailable', 'UNAVAILABLE', status),
+    } as unknown as ReturnType<typeof useEpisode>)
+    render(<DataviewerEpisodeViewer {...baseProps} />)
+    expect(screen.queryByTestId('annotation-workspace')).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Access unavailable')
+  })
+
   it('renders the no-data placeholder when the episode is missing', () => {
     vi.mocked(useEpisode).mockReturnValue({
       data: undefined,
@@ -126,6 +262,6 @@ describe('DataviewerEpisodeViewer', () => {
 
     render(<DataviewerEpisodeViewer {...baseProps} episodeIndex={2} />)
 
-    expect(mockSetCurrentEpisode).toHaveBeenCalledWith(episode)
+    expect(mockSetCurrentEpisode).toHaveBeenCalledWith(episode, undefined)
   })
 })
