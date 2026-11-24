@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 import contextlib
+import enum
+import pathlib
+import secrets
+import socket
+import subprocess
+import sys
 import threading
 import uuid
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from typing import Any
 
 import pytest
 
-from remoter import autoremote, class2dict, remoter, rmtclass
+from remoter import autoremote, class2dict, msgsock, remoter, rmtclass, safe_codec
+from remoter.msgtcp import MessengerTCP
 from remoter.safe_codec import (
     AdapterContext,
     AdapterRegistry,
@@ -14,9 +24,34 @@ from remoter.safe_codec import (
     CodecLimits,
     CodecLimitsError,
     CodecTypeError,
+    TypeAdapter,
     dumps,
     loads,
 )
+
+
+class _WireClassDictionary:
+    def __init__(self, state: dict[str, Any]) -> None:
+        self.state = state
+
+
+def _encode_wire_payload(envelope: Any) -> bytes:
+    registry = AdapterRegistry()
+    registry.register(
+        TypeAdapter(
+            ext_code=18,
+            py_type=_WireClassDictionary,
+            encode=lambda obj, _ctx: obj.state,
+            decode=lambda state, _ctx: state,
+        )
+    )
+    return dumps(envelope, registry, limits=CodecLimits(), context=AdapterContext(role="test"))
+
+
+@pytest.fixture
+def class_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("_NAME_TO_TYPE", "_TYPE_TO_NAME", "_TYPE_TO_DECODER"):
+        monkeypatch.setattr(class2dict, name, getattr(class2dict, name).copy())
 
 
 class _FakeDtype:
@@ -147,6 +182,318 @@ def test_class2dict_reconstruction_does_not_call_constructor() -> None:
 
     assert isinstance(decoded, ConstructorHasSideEffects)
     assert decoded.value == 7
+
+
+@pytest.mark.parametrize("authorized", [False, True])
+@pytest.mark.parametrize("framed", [False, True])
+def test_rpc_class_dictionary_never_constructs_loaded_unregistered_type(
+    monkeypatch: pytest.MonkeyPatch, authorized: bool, framed: bool
+) -> None:
+    constructor_calls = []
+
+    class ProcessSentinel:
+        def __init__(self, value: Any) -> None:
+            constructor_calls.append(value)
+
+    monkeypatch.setattr(subprocess, "Popen", ProcessSentinel)
+    monkeypatch.setattr(
+        remoter, "allowed_functions", frozenset({"declared.module//run"}) if authorized else frozenset()
+    )
+    state = _WireClassDictionary({"__type__": "subprocess:Popen", "__value__": ["harmless-sentinel"]})
+    args = (state, b"x" * 65_536) if framed else (state,)
+    payload = _encode_wire_payload(("direct", "declared.module//run", "declared.module", "run", "", args, {}))
+
+    func, _, _, _, error = remoter.decode_function_call(payload, None, {}, None)
+
+    assert func is None
+    assert isinstance(error, CodecError if authorized else remoter.CallableNotAllowedError)
+    if authorized:
+        assert "unregistered class2dict type" in str(error)
+    assert constructor_calls == []
+
+
+def test_encrypted_rpc_rejects_class_dictionary_before_adapter_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    decoder_calls = []
+    results = []
+    completed = threading.Event()
+    key = secrets.token_bytes(32)
+    monkeypatch.setattr(msgsock, "msgkey", key)
+    monkeypatch.setattr(msgsock, "initheartbeat", True)
+    monkeypatch.setattr(remoter, "allowed_functions", frozenset())
+    monkeypatch.setattr(class2dict, "from_dict", lambda *args, **_kwargs: decoder_calls.append(args))
+    runtime = remoter.Remoter.createemptyinstance()
+    runtime.remotedClasses = {}
+
+    def callback(fnid: uuid.UUID, result: Any, error: Exception | None, funcargs: dict) -> None:
+        results.append((fnid, runtime.encode_result(funcargs, result, error, None)))
+        completed.set()
+
+    def handle(data: bytes, _messenger: msgsock.Messenger, _endpoint: str) -> None:
+        runtime.execfunction(data, callback, None)
+
+    state = _WireClassDictionary({"__type__": "subprocess:Popen", "__value__": ["harmless-sentinel"]})
+    payload = _encode_wire_payload(
+        ("direct", "unapproved.module//execute", "unapproved.module", "execute", "", (state,), {})
+    )
+    fnid = uuid.uuid4()
+    request = bytes((remoter.MessageType.FunctionCall, 0)) + fnid.bytes + payload
+    client_sock, server_sock = socket.socketpair()
+    with client_sock, server_sock:
+        messenger = MessengerTCP(server_sock, "tcp://authenticated-peer:1", handlefn=handle)
+        thread = threading.Thread(target=messenger.recvthread)
+        thread.start()
+        try:
+            frame = messenger.data + msgsock.encryptMessage(request, key)
+            client_sock.sendall(len(frame).to_bytes(4, "big") + frame)
+            assert completed.wait(timeout=2)
+        finally:
+            client_sock.shutdown(socket.SHUT_RDWR)
+            thread.join(timeout=2)
+            messenger.close()
+        assert not thread.is_alive()
+
+    assert decoder_calls == []
+    assert len(results) == 1
+    returned_fnid, response = results[0]
+    assert returned_fnid == fnid
+    _, result, error = runtime.decode_result(response, "direct", None)
+    assert result is None
+    assert isinstance(error, remoter.RemoteExecutionError)
+    assert "CallableNotAllowedError" in str(error)
+
+
+@pytest.mark.parametrize("framed", [False, True])
+@pytest.mark.parametrize(
+    "invalid",
+    ["undeclared", "mismatched", "identity", "metadata", "envelope", "argument-shape", "keyword-key"],
+)
+def test_rejected_rpc_never_runs_nested_argument_or_metadata_adapters(
+    monkeypatch: pytest.MonkeyPatch, invalid: str, framed: bool
+) -> None:
+    decoder_calls = []
+    monkeypatch.setattr(class2dict, "from_dict", lambda *args, **_kwargs: decoder_calls.append(args))
+    monkeypatch.setattr(remoter, "allowed_functions", frozenset({"declared.module//run"}))
+    state = _WireClassDictionary({"__type__": "subprocess:Popen", "__value__": ["harmless-sentinel"]})
+    blob = b"x" * 65_536 if framed else b""
+    envelope = ["direct", "declared.module//run", "declared.module", "run", "", ([{state: state}, blob],), {}]
+    if invalid == "undeclared":
+        envelope[1:4] = ["unapproved.module//execute", "unapproved.module", "execute"]
+    elif invalid == "mismatched":
+        envelope[2] = "unapproved.module"
+    elif invalid == "identity":
+        envelope[2] = "invalid/module"
+    elif invalid == "metadata":
+        envelope[0] = state
+    elif invalid == "envelope":
+        envelope.append(state)
+    elif invalid == "argument-shape":
+        envelope[5] = state
+    elif invalid == "keyword-key":
+        envelope[6] = {state: state}
+
+    func, _, args, kwargs, error = remoter.decode_function_call(_encode_wire_payload(tuple(envelope)), None, {}, None)
+
+    assert func is None
+    assert args == ()
+    assert kwargs == {}
+    assert isinstance(error, CodecError)
+    assert decoder_calls == []
+
+
+def test_authorized_rpc_decodes_registered_state_before_rehydration(
+    monkeypatch: pytest.MonkeyPatch, class_registry: None
+) -> None:
+    class State:
+        def __init__(self) -> None:
+            raise AssertionError("state constructor must never run")
+
+    events = []
+    expected_function = object()
+
+    def decode_state(payload: dict[str, Any]) -> State:
+        events.append("decode")
+        state = object.__new__(State)
+        state.value = payload["value"]
+        return state
+
+    def rehydrate_args(args: tuple, kwargs: dict, *_rest: Any) -> tuple[tuple, dict]:
+        events.append("rehydrate")
+        return args, kwargs
+
+    remoter.register_class2dict_type(State, wire_name="test:State", decode_state=decode_state)
+    monkeypatch.setattr(remoter, "allowed_functions", frozenset({"declared.module//run"}))
+    monkeypatch.setattr(remoter, "rehydrate_args", rehydrate_args)
+    monkeypatch.setattr(remoter, "getfuncobjfromname", lambda *_args: expected_function)
+    state = _WireClassDictionary({"__type__": "test:State", "value": 7})
+    envelope = ("direct", "declared.module//run", "declared.module", "run", "", ([state],), {"state": state})
+
+    func, _, args, kwargs, error = remoter.decode_function_call(_encode_wire_payload(envelope), None, {}, None)
+
+    assert func is expected_function
+    assert error is None
+    assert isinstance(args[0][0], State)
+    assert args[0][0].value == 7
+    assert isinstance(kwargs["state"], State)
+    assert events == ["decode", "decode", "rehydrate"]
+
+
+def test_registered_class_value_requires_explicit_decoder(class_registry: None) -> None:
+    class ConstructorSentinel:
+        def __init__(self, _value: Any) -> None:
+            raise AssertionError("constructor must never run")
+
+    remoter.register_class2dict_type(ConstructorSentinel, wire_name="test:ConstructorSentinel")
+    with pytest.raises(TypeError, match="requires an explicit state decoder"):
+        class2dict.from_dict({"__type__": "test:ConstructorSentinel", "__value__": "value"})
+
+
+def test_registered_state_rejects_descriptor_and_unknown_fields(class_registry: None) -> None:
+    @dataclass
+    class State:
+        value: int
+
+        @property
+        def side_effect(self) -> int:
+            return 0
+
+        @side_effect.setter
+        def side_effect(self, _value: int) -> None:
+            raise AssertionError("descriptor must never run")
+
+    remoter.register_class2dict_type(State, wire_name="test:State")
+    decoded = class2dict.from_dict({"__type__": "test:State", "value": 7})
+    assert decoded == State(7)
+    with pytest.raises(TypeError, match="exactly the declared dataclass fields"):
+        class2dict.from_dict({"__type__": "test:State", "side_effect": 7})
+    with pytest.raises(TypeError, match="double-underscore"):
+        class2dict.from_dict({"__type__": "test:State", "__class__": "changed"})
+
+    class DescriptorState:
+        side_effect = State.side_effect
+
+    remoter.register_class2dict_type(DescriptorState, wire_name="test:DescriptorState")
+    with pytest.raises(TypeError, match="custom descriptor"):
+        class2dict.from_dict({"__type__": "test:DescriptorState", "side_effect": 7})
+
+
+@pytest.mark.parametrize("payload", [{}, {"value": 7}, {"value": 7, "items": []}])
+def test_registered_dataclass_rejects_incomplete_state(payload: dict[str, Any], class_registry: None) -> None:
+    @dataclass
+    class State:
+        value: int
+        items: list[int] = field(default_factory=list)
+        version: int = 1
+
+    remoter.register_class2dict_type(State, wire_name="test:State")
+    with pytest.raises(TypeError, match="exactly the declared dataclass fields"):
+        class2dict.from_dict({"__type__": "test:State", **payload})
+
+    original = State(7)
+    assert remoter.deserialize_payload(remoter.serialize_payload(original)) == original
+
+
+def test_configured_stub_wire_alias_preserves_local_type_and_encoding_name(
+    monkeypatch: pytest.MonkeyPatch, class_registry: None
+) -> None:
+    class Stub:
+        def __init__(self) -> None:
+            raise AssertionError("stub constructor must never run during state restoration")
+
+    monkeypatch.setattr(remoter, "remotedclasses", set())
+    monkeypatch.setattr(remoter, "allowed_modules", set())
+    monkeypatch.setattr(remoter, "stub_to_class", {})
+    monkeypatch.setattr(remoter, "class_to_stub", {})
+    remoter.addremotedclass(Stub)
+    remoter.setstubclasses(
+        {
+            remoter.classkey(Stub): "server.policy/Policy",
+            "client.policy//create": "server.policy//create",
+        }
+    )
+    state = _WireClassDictionary({"__type__": "server.policy:Policy", "value": 7})
+
+    decoded = remoter.deserialize_payload(_encode_wire_payload(state))
+
+    assert type(decoded) is Stub
+    assert decoded.value == 7
+    assert class2dict.to_dict(decoded)["__type__"] == f"{Stub.__module__}:{Stub.__qualname__}"
+    with pytest.raises(TypeError, match="unregistered class2dict type"):
+        class2dict.from_dict({"__type__": "server.policy:OtherPolicy", "value": 7})
+
+
+def test_configured_stub_wire_alias_rejects_conflicting_registration(
+    monkeypatch: pytest.MonkeyPatch, class_registry: None
+) -> None:
+    class Stub:
+        pass
+
+    class Other:
+        pass
+
+    monkeypatch.setattr(remoter, "remotedclasses", set())
+    monkeypatch.setattr(remoter, "allowed_modules", set())
+    monkeypatch.setattr(remoter, "stub_to_class", {})
+    monkeypatch.setattr(remoter, "class_to_stub", {})
+    remoter.addremotedclass(Stub)
+    remoter.register_class2dict_type(Other, wire_name="server.policy:Policy")
+
+    with pytest.raises(ValueError, match="already registered"):
+        remoter.setstubclasses({remoter.classkey(Stub): "server.policy/Policy"})
+
+    assert type(class2dict.from_dict({"__type__": "server.policy:Policy"})) is Other
+    assert remoter.stub_to_class == {}
+
+
+def test_registered_slotted_state_round_trip(class_registry: None) -> None:
+    @dataclass(slots=True)
+    class State:
+        value: int
+
+    remoter.register_class2dict_type(State)
+    original = State(7)
+    assert remoter.deserialize_payload(remoter.serialize_payload(original)) == original
+
+
+def test_builtin_values_and_registered_enum_round_trip(class_registry: None) -> None:
+    class Choice(enum.Enum):
+        A = "a"
+
+        @classmethod
+        def _missing_(cls, _value: Any) -> None:
+            raise AssertionError("enum missing hook must never run")
+
+    remoter.register_class2dict_type(Choice, wire_name="test:Choice")
+    values = [date(2026, 1, 1), datetime(2026, 1, 1), pathlib.PurePosixPath("model"), {1, 2}, Choice.A]
+    assert remoter.deserialize_payload(remoter.serialize_payload(values)) == values
+    with pytest.raises(TypeError, match="Unknown value"):
+        class2dict.from_dict({"__type__": "test:Choice", "__value__": "unknown"})
+
+
+@pytest.mark.parametrize("metadata", [None, {"key": "unit/test"}, {"key": "unit/test", "loc": 7}])
+def test_invalid_result_metadata_precedes_adapter_decoding(monkeypatch: pytest.MonkeyPatch, metadata: Any) -> None:
+    decoder_calls = []
+    monkeypatch.setattr(class2dict, "from_dict", lambda *args, **_kwargs: decoder_calls.append(args))
+    state = _WireClassDictionary({"__type__": "subprocess:Popen", "__value__": ["harmless-sentinel"]})
+    runtime = remoter.Remoter.createemptyinstance()
+
+    with pytest.raises(CodecError):
+        runtime.decode_result(_encode_wire_payload((metadata, state, None)), "direct", None)
+
+    assert decoder_calls == []
+
+
+def test_result_rejects_loaded_unregistered_class(monkeypatch: pytest.MonkeyPatch) -> None:
+    class ProcessSentinel:
+        def __init__(self, _value: Any) -> None:
+            raise AssertionError("constructor must never run")
+
+    monkeypatch.setattr(subprocess, "Popen", ProcessSentinel)
+    state = _WireClassDictionary({"__type__": "subprocess:Popen", "__value__": ["harmless-sentinel"]})
+    runtime = remoter.Remoter.createemptyinstance()
+    with pytest.raises(TypeError, match="unregistered class2dict type"):
+        runtime.decode_result(
+            _encode_wire_payload(({"key": "unit/test", "loc": "direct"}, state, None)), "direct", None
+        )
 
 
 def test_class2dict_reconstructs_scalar_tensor_shape(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -670,3 +1017,65 @@ def test_imagep_style_adapter() -> None:
     assert isinstance(decoded, ImageP)
     assert decoded.b == b"abcd"
     assert decoded.rmtloc_rmt0bf == "tcp://10.0.0.1:9000"
+
+
+@pytest.mark.parametrize("path_type", ["Path", "PosixPath", "PurePath", "PurePosixPath", "PureWindowsPath"])
+def test_builtin_path_wire_names_do_not_depend_on_the_python_version(path_type: str) -> None:
+    cls = getattr(pathlib, path_type)
+    path = cls("model")
+    assert class2dict.to_dict(path)["__type__"] == f"pathlib:{type(path).__qualname__}"
+    assert class2dict.from_dict({"__type__": f"pathlib:{path_type}", "__value__": "model"}) == path
+
+
+def test_builtin_path_registration_ignores_internal_module_names() -> None:
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import pathlib
+
+for name in ("Path", "PosixPath", "WindowsPath", "PurePath", "PurePosixPath", "PureWindowsPath"):
+    getattr(pathlib, name).__module__ = "pathlib._local"
+
+from remoter import class2dict
+
+path = pathlib.Path("model")
+wire_name = f"pathlib:{type(path).__qualname__}"
+assert class2dict.to_dict(path)["__type__"] == wire_name
+assert class2dict.from_dict({"__type__": wire_name, "__value__": "model"}) == path
+""",
+        ],
+        cwd=pathlib.Path(__file__).resolve().parents[1],
+        check=True,
+    )
+
+
+def test_envelope_check_leaves_nested_values_opaque() -> None:
+    seen = []
+    big = list(range(1000))
+    state = _WireClassDictionary({"__type__": "builtins:tuple", "__value__": [1]})
+    payload = _encode_wire_payload(("direct", "m//f", "m", "f", "", (big, "task", {"a": [1]}, state), {"k": big}))
+
+    def validate(envelope: Any) -> None:
+        seen.append(envelope)
+
+    decoded = remoter.deserialize_payload(payload, validate=validate)
+
+    assert decoded[5] == (big, "task", {"a": [1]}, (1,))
+    assert decoded[6] == {"k": big}
+    _, _, _, _, _, args, kwargs = seen[0]
+    assert args == (safe_codec.OPAQUE, "task", safe_codec.OPAQUE, safe_codec.OPAQUE)
+    assert kwargs == {"k": safe_codec.OPAQUE}
+
+
+def test_envelope_check_preserves_full_decode_nesting_limits() -> None:
+    registry = AdapterRegistry()
+    context = AdapterContext(role="test")
+    payload = dumps(("direct", "m//f", "m", "f", "", ([[[1]]],), {}), registry, limits=CodecLimits(), context=context)
+    seen = []
+
+    with pytest.raises(CodecLimitsError, match="nesting depth"):
+        loads(payload, registry, limits=CodecLimits(max_nesting=3), context=context, validate=seen.append)
+
+    assert seen[0][5] == (safe_codec.OPAQUE,)
