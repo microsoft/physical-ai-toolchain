@@ -228,11 +228,6 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`
 }
 
-/** Reserved bytes of 0 mean the backend did not estimate them, so they are shown as unknown. */
-function formatReservedBytes(bytes: number): string {
-  return bytes > 0 ? formatBytes(bytes) : 'Unknown'
-}
-
 function describeError(error: unknown): string {
   if (error instanceof ReleaseRequestError)
     return error.inputReason ?? `Release request failed: ${error.code}.`
@@ -1198,8 +1193,14 @@ export function ReleaseDialog({
               <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
                 <dt className="text-muted-foreground">Episodes</dt>
                 <dd>{currentReview.request.episodeIndices.length}</dd>
-                <dt className="text-muted-foreground">Reserved bytes</dt>
-                <dd>{formatReservedBytes(currentReview.preview.reservedBytes)}</dd>
+                <dt className="text-muted-foreground">
+                  {currentReview.preview.reservedBytes === 0 ? 'Storage budget' : 'Reserved bytes'}
+                </dt>
+                <dd>
+                  {currentReview.preview.reservedBytes === 0
+                    ? 'Calculated during release execution'
+                    : formatBytes(currentReview.preview.reservedBytes)}
+                </dd>
                 {destinationKind === 'local' && (
                   <>
                     <dt className="text-muted-foreground">Backend available space</dt>

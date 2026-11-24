@@ -104,6 +104,8 @@ def main() -> int:
         "-m",
         "uvicorn",
         "src.api.main:app",
+        "--loop",
+        "asyncio",
         "--log-config",
         args.log_config,
         "--log-level",

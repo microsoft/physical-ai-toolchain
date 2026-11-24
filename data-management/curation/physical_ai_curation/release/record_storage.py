@@ -76,10 +76,13 @@ class RecordLimits:
 class RecordStorage(Protocol):
     """Transactional collection of per-job JSON records keyed by job ID."""
 
-    def transaction(self) -> AbstractContextManager[dict[str, dict[str, Any]]]:
+    def transaction(self, *, job_id: str | None = None) -> AbstractContextManager[dict[str, dict[str, Any]]]:
         raise NotImplementedError
 
     def snapshot(self) -> dict[str, dict[str, Any]]:
+        raise NotImplementedError
+
+    def job_snapshot(self, key: str) -> dict[str, dict[str, Any]]:
         raise NotImplementedError
 
     def configuration(self) -> dict[str, Any]:
@@ -215,6 +218,10 @@ class LocalRecordStorage:
     def configuration(self) -> dict[str, Any]:
         return {"backend": "local", "root": str(self._root), **asdict(self._limits)}
 
+    def job_snapshot(self, key: str) -> dict[str, dict[str, Any]]:
+        records = self.snapshot()
+        return {key: records[key]} if key in records else {}
+
     def snapshot(self) -> dict[str, dict[str, Any]]:
         directory = self._existing_jobs()
         if directory is None:
@@ -227,13 +234,17 @@ class LocalRecordStorage:
             os.close(directory)
 
     @contextmanager
-    def transaction(self) -> Iterator[dict[str, dict[str, Any]]]:
+    def transaction(self, *, job_id: str | None = None) -> Iterator[dict[str, dict[str, Any]]]:
         directory = self._create_jobs()
         try:
             _flock(directory, exclusive=True, timeout=self._limits.timeout_seconds)
             records, sizes = self._load(directory)
+            if job_id is not None:
+                records = {job_id: records[job_id]} if job_id in records else {}
             working = copy.deepcopy(records)
             yield working
+            if job_id is not None and records.keys() != working.keys():
+                raise ReleaseVerificationError("job-local transaction may only update an existing job")
             planned = _plan_commit(self._limits, records, sizes, working)
             if planned is not None:
                 key, body = planned
@@ -449,6 +460,24 @@ class BlobRecordStorage:
             **asdict(self._limits),
         }
 
+    def job_snapshot(self, key: str) -> dict[str, dict[str, Any]]:
+        """Fetch one current record without listing history or trusting a cached revision."""
+        from azure.core.exceptions import ResourceNotFoundError
+
+        if not isinstance(key, str) or not _JOB_ID.fullmatch(key):
+            return {}
+        blob = self._container.get_blob_client(f"{self._jobs_prefix}{key}.json")
+        try:
+            stream = blob.download_blob(
+                offset=0, length=self._limits.max_record_bytes + 1, timeout=self._limits.timeout_seconds
+            )
+            if stream.size > self._limits.max_record_bytes:
+                raise ReleaseVerificationError("job record exceeds max_record_bytes")
+            raw = stream.readall()
+        except ResourceNotFoundError:
+            return {}
+        return {key: _decode_record(raw, key)}
+
     def snapshot(self) -> dict[str, dict[str, Any]]:
         deadline = time.monotonic() + self._limits.timeout_seconds
         while True:
@@ -462,13 +491,15 @@ class BlobRecordStorage:
                 time.sleep(min(_BLOB_POLL_SECONDS, remaining))
 
     @contextmanager
-    def transaction(self) -> Iterator[dict[str, dict[str, Any]]]:
+    def transaction(self, *, job_id: str | None = None) -> Iterator[dict[str, dict[str, Any]]]:
         with self._coordinator_lease() as lease:
             self._recover_pending(lease)
-            records, sizes, revisions = self._load()
+            records, sizes, revisions = self._load(job_id)
             working = copy.deepcopy(records)
             yield working
             lease.check()
+            if job_id is not None and records.keys() != working.keys():
+                raise ReleaseVerificationError("job-local transaction may only update an existing job")
             planned = _plan_commit(self._limits, records, sizes, working)
             if planned is not None:
                 key, body = planned
@@ -568,7 +599,7 @@ class BlobRecordStorage:
             else:
                 return _LeaseMonitor(lease, started=started, timeout=timeout)
 
-    def _load(self) -> tuple[dict[str, dict[str, Any]], dict[str, int], dict[str, str]]:
+    def _load(self, job_id: str | None = None) -> tuple[dict[str, dict[str, Any]], dict[str, int], dict[str, str]]:
         records = {}
         sizes = {}
         revisions = {}
@@ -580,14 +611,20 @@ class BlobRecordStorage:
             if match is None:
                 continue
             key = match.group(1)
-            total = _admit(self._limits, len(records), total, item.size)
+            total = _admit(self._limits, len(sizes), total, item.size)
+            sizes[key] = item.size
             cached = self._record_cache.get(key)
+            if job_id is not None and key != job_id:
+                if cached is not None and cached[0] == item.etag:
+                    fresh_cache[key] = cached
+                continue
             if cached is not None and cached[0] == item.etag:
                 _, raw, revision = cached
             else:
                 raw, revision = self._read(item.name, item.etag)
             records[key] = _decode_record(raw, key)
-            sizes[key] = len(raw)
+            if len(raw) != item.size:
+                raise ReleaseVerificationError("job record length differs from listed revision")
             revisions[key] = revision
             fresh_cache[key] = (item.etag, raw, revision)
         self._record_cache = fresh_cache

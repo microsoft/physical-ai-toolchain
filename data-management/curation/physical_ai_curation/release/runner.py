@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import threading
 import time
@@ -36,6 +37,8 @@ from physical_ai_curation.release.jobs import (
     ReleaseJobStore,
     ReleaseRefusal,
     ReleaseRuntimeSettings,
+    ScratchCreationUnresolvedError,
+    ScratchCreatorActiveError,
     has_recovery_obligation,
 )
 from physical_ai_curation.release.publication import PublicationAttempt
@@ -44,6 +47,35 @@ from physical_ai_curation.saved_input import SavedInputReader
 
 if TYPE_CHECKING:
     from physical_ai_curation.release.models import ReleaseResult
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _log_failure(job_id: str, stage: str, error: Exception) -> str:
+    category = "unexpected"
+    for kind, name in (
+        (TimeoutError, "timeout"),
+        (ScratchCreatorActiveError, "scratch_creator_active"),
+        (ScratchCreationUnresolvedError, "scratch_creation_unresolved"),
+        (AuthorityError, "authority"),
+        (CapacityError, "capacity"),
+        (ReleaseInputError, "input"),
+        (ReleaseJobError, "job_state"),
+        (OSError, "io"),
+        (ValueError, "validation"),
+    ):
+        if isinstance(error, kind):
+            category = name
+            break
+    location = "unknown"
+    trace = error.__traceback__
+    while trace is not None:
+        module = trace.tb_frame.f_globals.get("__name__", "")
+        if module.startswith(("physical_ai_curation.release.", "src.api.services.")):
+            location = f"{module}.{trace.tb_frame.f_code.co_name}:{trace.tb_lineno}"
+        trace = trace.tb_next
+    _LOGGER.error("Release worker failure job=%s stage=%s category=%s location=%s", job_id, stage, category, location)
+    return category
 
 
 @dataclass(frozen=True)
@@ -122,7 +154,7 @@ async def execute_job(
     internal worker interface is not a resource access check or a remote submission API.
     """
     from physical_ai_curation.release.blob_worker import SupervisedBlobPublisher
-    from physical_ai_curation.release.composition import prepare_saved_generation
+    from physical_ai_curation.release.composition import BlockedEditCompositionError, prepare_saved_generation
     from physical_ai_curation.release.coordinator import (
         GenerationInputs,
         _publication_runtime,
@@ -166,6 +198,7 @@ async def execute_job(
     monitor.start()
     started = time.monotonic()
     operation = uuid4().hex
+    stage = "reconcile"
     try:
         store.recover_runtimes(job_id, fence)
         store.confirm_stopped(job_id, fence)
@@ -192,13 +225,19 @@ async def execute_job(
             digest = record["commit_digest"] or record["effects"][MANIFEST_PATH]["digest"]
             with _publication_runtime(destination, attempt, store, job_id, fence, None) as publisher:
                 return publisher.publish(digest)
+        stage = "restore_request"
         raw = store.frozen_request(job_id)
         payload = parse_strict_json(raw)
         if payload.get("schema_version") == "curated-release-intent/v1":
             if configured.capture is None:
                 raise ReleaseInputError("release intent requires configured execution capture")
-            captured, binding, reservation, execution = await configured.capture(monitor.check)
+            stage = "capture"
+            try:
+                captured, binding, reservation, execution = await configured.capture(monitor.check)
+            except BlockedEditCompositionError as error:
+                raise ReleaseRefusal("saved_edits_not_composable") from error
             monitor.check()
+            stage = "reserve"
             try:
                 store.capture_execution(
                     job_id,
@@ -213,6 +252,7 @@ async def execute_job(
             configured = execution
             raw = store.frozen_request(job_id)
             payload = parse_strict_json(raw)
+        stage = "prepare_generation"
         if payload.get("schema_version") != "curated-release-generation/v1":
             raise ReleaseInputError("unsupported durable generation request")
         if configured.source is None or configured.context is None:
@@ -262,6 +302,7 @@ async def execute_job(
                 publisher.recover_outputs(copies)
         store.validate_execution_binding(job_id, fence, destination, attempt, route=record["route"])
         monitor.check()
+        stage = "generate"
         result = await run_release_generation(
             store=store,
             job_id=job_id,
@@ -289,13 +330,15 @@ async def execute_job(
     except (ReleaseRefusal, SourceMetadataError, StaleReleaseInputError) as error:
         monitor.stop()
         store.require_input(job_id, fence, error.code)
+        _LOGGER.warning("Release input refused job=%s stage=%s code=%s", job_id, stage, error.code)
         return None
     except CancellationError:
         monitor.stop()
         with suppress(AuthorityError):
             store.yield_cancellation(job_id, fence)
         raise
-    except Exception:
+    except Exception as error:
+        category = _log_failure(job_id, stage, error)
         with suppress(AuthorityError):
             store.record_diagnostic(
                 job_id,
@@ -303,6 +346,7 @@ async def execute_job(
                 operation,
                 "validation",
                 "failed",
+                worker_failure=(stage, category),
                 duration_ms=min(86_400_000, int((time.monotonic() - started) * 1000)),
             )
         raise
@@ -319,7 +363,8 @@ async def _dispatch(
     """Run one job and return a fixed failure category, or None when the worker settled it."""
     try:
         configured = resolve(job_id, store.frozen_request(job_id))
-    except Exception:
+    except Exception as error:
+        _log_failure(job_id, "resolve", error)
         return "resolver_failed"
     try:
         await execute_job(store, job_id, configured, worker_id=worker_id)

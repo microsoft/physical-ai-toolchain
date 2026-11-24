@@ -9,13 +9,20 @@ from __future__ import annotations
 import copy
 import math
 import re
+from bisect import bisect_left, bisect_right
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING
 
-from physical_ai_dataset_io.lerobot import remap_persistent_language_rows
+from physical_ai_dataset_io.lerobot import (
+    RELEASE_SUBTASKS_KEY,
+    episode_subtasks_metadata,
+    persistent_language_type,
+    remap_persistent_language_rows,
+)
 
-from physical_ai_curation.release.canonical import normalize_release_path, parse_strict_json
+from physical_ai_curation.release.canonical import canonical_json_bytes, normalize_release_path, parse_strict_json
+from physical_ai_curation.release.composition import SavedSubtask
 from physical_ai_curation.release.media import (
     ReleaseMediaLimits,
     ReleasePlanError,
@@ -42,6 +49,47 @@ _NUMERIC_DTYPES = frozenset(
 )
 
 
+def _subtask_timeline(
+    subtasks: tuple[SavedSubtask, ...], positions: list[int], timestamps: list[float], source_length: int
+) -> tuple[list[SavedSubtask], list[dict]]:
+    segments = []
+    starts = {}
+    ends = {}
+    for index, segment in enumerate(subtasks):
+        start, end = segment.frame_range
+        if not 0 <= start <= end < source_length:
+            raise ReleasePlanError("subtask range exceeds the source episode")
+        first, stop = bisect_left(positions, start), bisect_right(positions, end)
+        if first < stop:
+            segments.append(replace(segment, frame_range=(first, stop - 1)))
+            starts.setdefault(first, []).append((start, index))
+            ends.setdefault(stop, []).append(index)
+    rows = []
+    active = {}
+    previous = None
+    for frame in sorted(starts.keys() | ends.keys()):
+        if frame == len(positions):
+            break
+        for index in ends.get(frame, ()):
+            del active[index]
+        for _, index in sorted(starts.get(frame, ())):
+            active[index] = subtasks[index].label
+        current = next(reversed(active), None)
+        if current != previous:
+            rows.append(
+                {
+                    "role": "assistant",
+                    "style": "subtask",
+                    "content": active.get(current, ""),
+                    "timestamp": timestamps[frame],
+                    "camera": None,
+                    "tool_calls": None,
+                }
+            )
+        previous = current
+    return segments, rows
+
+
 def generate_episode_table(
     source: pa.Table,
     episode: SubsetEpisodeInput,
@@ -49,6 +97,8 @@ def generate_episode_table(
     output_episode_index: int,
     output_from_index: int,
     limits: ReleaseMediaLimits | None = None,
+    subtasks: tuple[SavedSubtask, ...] | None = None,
+    include_language: bool = False,
 ) -> pa.Table:
     """Retain selected rows and recorded columns with contiguous output coordinates.
 
@@ -101,23 +151,56 @@ def generate_episode_table(
             )
     except (pa.ArrowException, OverflowError) as error:
         raise ReleasePlanError("output coordinates do not fit the source feature types") from error
-    if episode.removed_frames and "language_persistent" in source.column_names:
-        recorded = source["language_persistent"].to_pylist()
-        if any(rows != recorded[0] for rows in recorded):
+    if subtasks is None:
+        inherited = episode_subtasks_metadata(
+            source.schema.metadata or {}, episode.original_episode_index, episode.length
+        )
+        if inherited is not None:
+            subtasks = tuple(SavedSubtask(**segment) for segment in inherited)
+    has_language = "language_persistent" in source.column_names
+    if (episode.removed_frames and has_language) or subtasks is not None or (include_language and not has_language):
+        recorded = source["language_persistent"] if has_language else None
+        if recorded is not None and any(not frame.equals(recorded[0]) for frame in recorded):
             raise ReleasePlanError("persistent language rows must be shared across the source episode")
         try:
-            rows = remap_persistent_language_rows(
-                recorded[0] or [],
-                source_to_output={frame.original_frame_index: frame.output_frame_index for frame in timeline.frames},
-                source_timestamps=timestamps.tolist(),
-                output_timestamps=replacement["timestamp"],
-            )
-            field = source.schema.field("language_persistent")
-            selected = selected.set_column(
-                selected.schema.get_field_index("language_persistent"),
-                field,
-                pa.array([rows] * length, type=field.type),
-            )
+            original = (recorded[0].as_py() or []) if recorded is not None else []
+            rows = [row for row in original if subtasks is None or row.get("style") != "subtask"]
+            if episode.removed_frames:
+                rows = remap_persistent_language_rows(
+                    rows,
+                    source_to_output={
+                        frame.original_frame_index: frame.output_frame_index for frame in timeline.frames
+                    },
+                    source_timestamps=timestamps.tolist(),
+                    output_timestamps=replacement["timestamp"],
+                )
+            if subtasks is not None:
+                segments, changes = _subtask_timeline(subtasks, positions, replacement["timestamp"], episode.length)
+                rows.extend(changes)
+                rows.sort(key=lambda row: (row["timestamp"], row.get("style") or "", row.get("role") or ""))
+                exact = canonical_json_bytes(
+                    {
+                        "episode_index": output_episode_index,
+                        "length": length,
+                        "segments": [asdict(segment) for segment in segments],
+                    }
+                )
+                selected = selected.replace_schema_metadata(
+                    {**(selected.schema.metadata or {}), RELEASE_SUBTASKS_KEY: exact}
+                )
+            kind = source.schema.field("language_persistent").type if has_language else persistent_language_type()
+            sample = pa.array([rows]).cast(kind)
+            if (sample.nbytes + 8) * length * 3 + selected.nbytes > budget:
+                raise ReleasePlanError("persistent language rows exceed the processing memory budget")
+            column = sample.take(pa.array(np.zeros(length, dtype=np.int32)))
+            if has_language:
+                selected = selected.set_column(
+                    selected.schema.get_field_index("language_persistent"),
+                    source.schema.field("language_persistent"),
+                    column,
+                )
+            else:
+                selected = selected.append_column("language_persistent", column)
         except (KeyError, TypeError, ValueError, pa.ArrowException) as error:
             raise ReleasePlanError("persistent language rows cannot be retimed") from error
     return selected
@@ -261,6 +344,9 @@ def generate_native_selection(
     output_offset = 0
     cameras = {name for name, feature in features.items() if feature.get("dtype") == "video"}
     indexed_windows = {(item.window.episode_id, item.camera): item for item in prepared.windows}
+    replacements = dict(prepared.subtasks)
+    if replacements:
+        features.setdefault("language_persistent", {"dtype": "language", "shape": [1], "names": None})
     for output_episode_index, episode in enumerate(prepared.episodes):
         table = generate_episode_table(
             source_tables[episode.episode_id],
@@ -268,6 +354,8 @@ def generate_native_selection(
             output_episode_index=output_episode_index,
             output_from_index=output_offset,
             limits=limits,
+            subtasks=replacements.get(episode.episode_id),
+            include_language=bool(replacements),
         )
         references = {}
         summaries = {}

@@ -71,6 +71,20 @@ def _record(key: str = KEY) -> dict[str, object]:
     return {"schema_version": SCHEMA_VERSION, "job_id": key}
 
 
+def test_blob_point_snapshot_reads_current_job_without_listing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    storage = _storage(tmp_path, "blob")
+    with storage.transaction() as working:
+        working[KEY] = _record()
+    with monkeypatch.context() as point_read:
+        point_read.setattr(storage._container, "list_blobs", Mock(side_effect=AssertionError("unexpected listing")))
+        assert storage.job_snapshot(KEY) == {KEY: _record()}
+        assert storage.job_snapshot(OTHER) == {}
+        assert storage.job_snapshot("../invalid") == {}
+    with storage.transaction() as working:
+        working[KEY]["updated"] = True
+    assert storage.job_snapshot(KEY)[KEY]["updated"] is True
+
+
 def _storage(tmp_path: Path, backend: str, **limits: int) -> RecordStorage:
     if backend == "local":
         return LocalRecordStorage(tmp_path / "records", **limits)
@@ -81,6 +95,34 @@ def _storage(tmp_path: Path, backend: str, **limits: int) -> RecordStorage:
         prefix="selected/subfolder",
         **limits,
     )
+
+
+@pytest.mark.parametrize("backend", ["local", "blob"])
+def test_job_transaction_accounts_for_other_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str
+) -> None:
+    size = len(canonical_json_bytes(_record()))
+    store = _storage(tmp_path, backend, max_record_bytes=size + 16, max_total_bytes=2 * size + 8)
+    for key in (KEY, OTHER):
+        with store.transaction() as working:
+            working[key] = _record(key)
+    if backend == "blob":
+        store._record_cache.clear()
+        read = store._read
+
+        def selected_only(name: str, etag: str) -> tuple[bytes, str]:
+            assert name.endswith(f"/{KEY}.json")
+            return read(name, etag)
+
+        monkeypatch.setattr(store, "_read", selected_only)
+    with store.transaction(job_id=KEY) as working:
+        assert set(working) == {KEY}
+        working[KEY]["x"] = 1
+    with pytest.raises(ReleaseVerificationError, match="max_total_bytes"), store.transaction(job_id=KEY) as working:
+        working[KEY]["x"] = "123456"
+    assert store.job_snapshot(KEY)[KEY]["x"] == 1
+    with pytest.raises(ReleaseVerificationError, match="only update"), store.transaction(job_id=KEY) as working:
+        del working[KEY]
 
 
 @pytest.mark.parametrize("backend", ["local", "blob"])
@@ -290,6 +332,36 @@ def test_given_oversized_blob_record_when_read_directly_then_refused_before_deco
 
     with pytest.raises(ReleaseVerificationError, match="max_record_bytes"):
         storage._read(name, container.blobs[name].etag)
+
+    with pytest.raises(ReleaseVerificationError, match="max_record_bytes"):
+        storage.job_snapshot(KEY)
+
+
+def test_scoped_transaction_preserves_warm_unrelated_blob(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    storage = _storage(tmp_path, "blob")
+    for key in (KEY, OTHER):
+        with storage.transaction() as working:
+            working[key] = _record(key)
+    assert set(storage.snapshot()) == {KEY, OTHER}
+    with storage.transaction(job_id=KEY) as working:
+        working[KEY]["updated"] = True
+
+    read = Mock(wraps=storage._read)
+    monkeypatch.setattr(storage, "_read", read)
+    assert storage.snapshot() == {KEY: {**_record(), "updated": True}, OTHER: _record(OTHER)}
+    assert all(not call.args[0].endswith(f"/{OTHER}.json") for call in read.call_args_list)
+
+
+def test_blob_snapshot_refuses_inconsistent_listed_length(monkeypatch: pytest.MonkeyPatch) -> None:
+    container = _RecordContainer()
+    storage = _blob_record_store(container)
+    name = f"{storage._jobs_prefix}{KEY}.json"
+    body = canonical_json_bytes(_record())
+    container.put(name, body)
+    listed = SimpleNamespace(name=name, size=len(body) - 1, etag=container.blobs[name].etag)
+    monkeypatch.setattr(container, "list_blobs", lambda **_kwargs: [listed])
+    with pytest.raises(ReleaseVerificationError, match="length differs"):
+        storage.snapshot()
 
 
 @pytest.mark.parametrize("container", [None, "ab", "Uppercase"])
