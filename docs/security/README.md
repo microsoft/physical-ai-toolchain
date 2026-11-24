@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Security Documentation
 description: Index of security documentation including threat model and deployment security guide
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-20
+ms.date: 2026-10-07
 ms.topic: overview
 keywords:
   - security
@@ -43,18 +43,6 @@ The [security guide](../operations/security-guide.md) documents:
 - Default security configurations shipped with the architecture
 - Deployment team responsibilities before, during, and after provisioning
 - Security considerations checklist with Azure documentation references
-
-## 🏅 OpenSSF Best Practices
-
-[OpenSSF Best Practices project 12195](https://www.bestpractices.dev/projects/12195) records the maintainers' Silver self-attestation. The public questionnaire was observed on 2026-11-24; it is not an independent OpenSSF certification.
-
-| Level   | Progress |
-|---------|---------:|
-| Passing |     100% |
-| Silver  |     100% |
-| Gold    |      43% |
-
-The public self-attestation and current repository evidence are distinct. The 2026-11-24 reassessment recorded 94 Met, 18 Unmet, 10 N/A, and 7 Unknown criteria in the root `.bestpractices.json`. No questionnaire update was submitted. Run the `openssf-badge-audit` skill to compare the proposal with the live project before a maintainer submits changes through the authenticated OpenSSF interface.
 
 ## 🛠️ Operational Scripts
 

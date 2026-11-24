@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Threat Model — Physical AI Toolchain
 description: STRIDE-based threat model covering infrastructure-as-code components, trust boundaries, and remediation roadmap
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-19
+ms.date: 2026-09-30
 ms.topic: concept
 keywords:
   - threat model
@@ -390,17 +390,17 @@ The following entries preserve the prior assessment, including claims that requi
 
 Goal Structuring Notation (GSN) elements from the prior assessment. Current architectural facts constrain the claims; assurance has not been re-established.
 
-| Element | Statement                                                                                                                                                           |
-|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| G0      | Security adequacy requires a new assessment covering infrastructure, runtime services, and the Dataviewer application                                               |
-| G1      | Managed identities and workload federation coexist with password-based OSMO bootstrap authentication                                                                |
-| G2      | Secrets are stored in Azure Key Vault with RBAC authorization and synced via CSI driver                                                                             |
-| G3      | Private endpoints, VPN, and NSGs coexist with configurable public service access and NAT egress                                                                     |
-| G4      | Supply chain integrity is maintained through SHA-pinned actions and dependency review                                                                               |
-| E1      | 19 STRIDE threats identified; 7 Accepted with compensating controls, 2 Resolved, 10 Open with remediation roadmap                                                   |
-| E2      | Public OpenSSF questionnaire records the maintainers' Passing and Silver self-attestation at 100%; the 2026-11-24 repository reassessment records 18 unmet criteria |
-| A1      | Deployer follows `docs/operations/security-guide.md` hardening checklist                                                                                            |
-| A2      | OSMO vendor provides auth/rate-limiting enablement path in future releases                                                                                          |
+| Element | Statement                                                                                                             |
+|---------|-----------------------------------------------------------------------------------------------------------------------|
+| G0      | Security adequacy requires a new assessment covering infrastructure, runtime services, and the Dataviewer application |
+| G1      | Managed identities and workload federation coexist with password-based OSMO bootstrap authentication                  |
+| G2      | Secrets are stored in Azure Key Vault with RBAC authorization and synced via CSI driver                               |
+| G3      | Private endpoints, VPN, and NSGs coexist with configurable public service access and NAT egress                       |
+| G4      | Supply chain integrity is maintained through SHA-pinned actions and dependency review                                 |
+| E1      | 19 STRIDE threats identified; 7 Accepted with compensating controls, 2 Resolved, 10 Open with remediation roadmap     |
+| E2      | OpenSSF Passing ~85%; 25 Silver criteria assessed (5 Met, 5 Delegated, 13 N/A, 1 Gap)                                 |
+| A1      | Deployer follows `docs/operations/security-guide.md` hardening checklist                                              |
+| A2      | OSMO vendor provides auth/rate-limiting enablement path in future releases                                            |
 
 ## Remediation Roadmap
 
@@ -414,18 +414,16 @@ Goal Structuring Notation (GSN) elements from the prior assessment. Current arch
 
 ## Security Metrics
 
-Threat counts and targets below are retained without remeasurement. The OpenSSF percentages preserve the public maintainer self-attestation observed on 2026-11-24.
+Historical values and targets below are retained without remeasurement.
 
-| Metric                        | Current    | Target      |
-|-------------------------------|------------|-------------|
-| OpenSSF public Passing record | 100%       | 100%        |
-| OpenSSF public Silver record  | 100%       | 100%        |
-| SHA-pinned actions            | 95%        | 100%        |
-| STRIDE threats mitigated      | 9/19 (47%) | 15/19 (79%) |
-| Critical threats open         | 1          | 0           |
-| High threats open             | 6          | 2           |
-
-The public maintainer self-attestation and current repository evidence are distinct. The 2026-11-24 reassessment classified 94 criteria as Met, 18 as Unmet, 10 as N/A, and 7 as Unknown. The root `.bestpractices.json` records that evidence proposal; the public Passing and Silver percentages do not establish current compliance, and no questionnaire update was submitted.
+| Metric                   | Current    | Target      |
+|--------------------------|------------|-------------|
+| OpenSSF Passing badge    | ~85%       | 100%        |
+| OpenSSF Silver badge     | ~30%       | 80%         |
+| SHA-pinned actions       | 95%        | 100%        |
+| STRIDE threats mitigated | 9/19 (47%) | 15/19 (79%) |
+| Critical threats open    | 1          | 0           |
+| High threats open        | 6          | 2           |
 
 ## References
 
