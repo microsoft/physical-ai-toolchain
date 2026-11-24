@@ -8,6 +8,7 @@ Covers:
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import h5py
@@ -371,14 +372,98 @@ class TestExportEpisode:
         assert [(subtask["id"], subtask["frame_range"]) for subtask in carried] == [("st-1", [0, 2]), ("st-2", [3, 7])]
 
         removed = EpisodeEditOperations(dataset_id="test", episode_index=0, subtasks=[])
-        assert exporter.export_episode(episode_index=0, edits=removed).success is True
-        assert not subtasks_path.exists()
+        second_dir = hdf5_export_dir.parent / "second-export"
+        second = HDF5Exporter(hdf5_dataset_dir, second_dir)
+        assert second.export_episode(episode_index=0, edits=removed).success is True
+        assert not (second_dir / "episode_000000.subtasks.json").exists()
 
     def test_export_nonexistent_episode(self, exporter: HDF5Exporter) -> None:
         result = exporter.export_episode(episode_index=999)
 
         assert result.success is False
         assert result.error and "No HDF5 file found for episode 999" in result.error
+
+    def test_failed_write_leaves_no_partial_or_replaced_episode(
+        self, exporter: HDF5Exporter, hdf5_export_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        existing = hdf5_export_dir / "episode_000000.hdf5"
+        existing.write_bytes(b"previous export")
+
+        def fail(*_args: object) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(exporter, "_export_metadata", fail)
+        result = exporter.export_episode(episode_index=0)
+
+        assert result.success is False
+        assert existing.read_bytes() == b"previous export"
+        assert sorted(path.name for path in hdf5_export_dir.iterdir()) == ["episode_000000.hdf5"]
+
+    def test_export_refuses_a_destination_that_appears_before_publication(
+        self, exporter: HDF5Exporter, hdf5_export_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        destination = hdf5_export_dir / "episode_000000.hdf5"
+        write_metadata = exporter._export_metadata
+
+        def appear_then_write(*args: object) -> None:
+            destination.write_bytes(b"another writer")
+            write_metadata(*args)
+
+        monkeypatch.setattr(exporter, "_export_metadata", appear_then_write)
+        result = exporter.export_episodes(episode_indices=[0])
+
+        assert result.success is False
+        assert result.error and "already exists" in result.error
+        assert destination.read_bytes() == b"another writer"
+        assert sorted(path.name for path in hdf5_export_dir.iterdir()) == ["episode_000000.hdf5"]
+
+    def test_batch_refuses_a_non_empty_destination(self, exporter: HDF5Exporter, hdf5_export_dir: Path) -> None:
+        (hdf5_export_dir / "notes.txt").write_text("keep")
+
+        result = exporter.export_episodes(episode_indices=[0])
+
+        assert result.success is False
+        assert result.error == "the output directory must be new or empty"
+        assert sorted(path.name for path in hdf5_export_dir.iterdir()) == ["notes.txt"]
+
+    @pytest.mark.parametrize("pause", ["before-writing", "staging-open"])
+    def test_concurrent_export_is_refused_while_another_holds_the_destination(
+        self, hdf5_dataset_dir: Path, hdf5_export_dir: Path, monkeypatch: pytest.MonkeyPatch, pause: str
+    ) -> None:
+        first = HDF5Exporter(hdf5_dataset_dir, hdf5_export_dir)
+        paused, resume = threading.Event(), threading.Event()
+        method = "_export_batch" if pause == "before-writing" else "_export_metadata"
+        original = getattr(first, method)
+
+        def wait_then_continue(*args: object) -> object:
+            paused.set()
+            assert resume.wait(timeout=30)
+            return original(*args)
+
+        monkeypatch.setattr(first, method, wait_then_continue)
+        results = []
+        worker = threading.Thread(target=lambda: results.append(first.export_episodes(episode_indices=[0])))
+        worker.start()
+        try:
+            assert paused.wait(timeout=30)
+            during = sorted(path.name for path in hdf5_export_dir.iterdir())
+
+            second = HDF5Exporter(hdf5_dataset_dir, hdf5_export_dir)
+            for refused in (second.export_episodes(episode_indices=[0]), second.export_episode(episode_index=0)):
+                assert refused.success is False
+                assert refused.error and "another export" in refused.error
+            assert sorted(path.name for path in hdf5_export_dir.iterdir()) == during
+        finally:
+            resume.set()
+            worker.join(timeout=30)
+
+        assert results and results[0].success is True, results
+        assert sorted(path.name for path in hdf5_export_dir.iterdir()) == [
+            "episode_000000.hdf5",
+            "episode_000000.meta.json",
+        ]
+        with h5py.File(hdf5_export_dir / "episode_000000.hdf5", "r") as f:
+            assert f["data"]["qpos"].shape == (10, 6)
 
     def test_export_multiple_episodes(self, exporter: HDF5Exporter, hdf5_export_dir: Path) -> None:
         result = exporter.export_episodes(episode_indices=[0, 1, 2])
