@@ -68,7 +68,8 @@ remain opaque during this validation, including extensions in nested arguments,
 mapping keys, and metadata. Result metadata is validated before result adapters run.
 
 The class-dictionary adapter accepts fixed decoders for dates, paths, collections,
-and `torch:Tensor`. Every custom wire type requires local registration on each
+and `torch:Tensor`. Built-in paths use stable `pathlib:*` wire names across Python
+versions. Every custom wire type requires local registration on each
 receiving endpoint. Loading its module alone grants no decoding permission.
 Locally configured or decorated remoted classes are registered by the runtime
 when they join the remote-class registry, preserving object synchronization.
@@ -76,7 +77,9 @@ Configured client stubs accept their server class's wire name as a receive-only
 alias. Synchronized server state is restored into the registered local stub without
 importing the server class or changing the stub's encoding name.
 
-Register ordinary state classes during endpoint initialization:
+Register ordinary state classes, including dataclass call arguments, during endpoint
+initialization. Configured modules are imported before the server accepts calls, so
+registration can live in the module that defines the remote function:
 
 ```python
 from remoter import remoter
@@ -89,6 +92,8 @@ Dataclass state must contain every declared field, including fields with default
 or default factories, and no additional fields. Custom descriptors and unsupported
 value payloads require a reviewed `decode_state` function. Registered enums decode
 existing members without invoking missing-value hooks.
+Tensor subclasses such as `torch.nn.Parameter` and tuple subclasses such as named
+tuples require an explicit state decoder.
 
 ```python
 remoter.register_class2dict_type(

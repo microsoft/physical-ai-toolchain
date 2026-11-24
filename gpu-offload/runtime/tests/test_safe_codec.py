@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import contextlib
 import enum
+import pathlib
 import secrets
 import socket
 import subprocess
+import sys
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -14,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from remoter import autoremote, class2dict, msgsock, remoter, rmtclass
+from remoter import autoremote, class2dict, msgsock, remoter, rmtclass, safe_codec
 from remoter.msgtcp import MessengerTCP
 from remoter.safe_codec import (
     AdapterContext,
@@ -1016,3 +1018,65 @@ def test_imagep_style_adapter() -> None:
     assert isinstance(decoded, ImageP)
     assert decoded.b == b"abcd"
     assert decoded.rmtloc_rmt0bf == "tcp://10.0.0.1:9000"
+
+
+@pytest.mark.parametrize("path_type", ["Path", "PosixPath", "PurePath", "PurePosixPath", "PureWindowsPath"])
+def test_builtin_path_wire_names_do_not_depend_on_the_python_version(path_type: str) -> None:
+    cls = getattr(pathlib, path_type)
+    path = cls("model")
+    assert class2dict.to_dict(path)["__type__"] == f"pathlib:{type(path).__qualname__}"
+    assert class2dict.from_dict({"__type__": f"pathlib:{path_type}", "__value__": "model"}) == path
+
+
+def test_builtin_path_registration_ignores_internal_module_names() -> None:
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import pathlib
+
+for name in ("Path", "PosixPath", "WindowsPath", "PurePath", "PurePosixPath", "PureWindowsPath"):
+    getattr(pathlib, name).__module__ = "pathlib._local"
+
+from remoter import class2dict
+
+path = pathlib.Path("model")
+wire_name = f"pathlib:{type(path).__qualname__}"
+assert class2dict.to_dict(path)["__type__"] == wire_name
+assert class2dict.from_dict({"__type__": wire_name, "__value__": "model"}) == path
+""",
+        ],
+        cwd=pathlib.Path(__file__).resolve().parents[1],
+        check=True,
+    )
+
+
+def test_envelope_check_leaves_nested_values_opaque() -> None:
+    seen = []
+    big = list(range(1000))
+    state = _WireClassDictionary({"__type__": "builtins:tuple", "__value__": [1]})
+    payload = _encode_wire_payload(("direct", "m//f", "m", "f", "", (big, "task", {"a": [1]}, state), {"k": big}))
+
+    def validate(envelope: Any) -> None:
+        seen.append(envelope)
+
+    decoded = remoter.deserialize_payload(payload, validate=validate)
+
+    assert decoded[5] == (big, "task", {"a": [1]}, (1,))
+    assert decoded[6] == {"k": big}
+    _, _, _, _, _, args, kwargs = seen[0]
+    assert args == (safe_codec.OPAQUE, "task", safe_codec.OPAQUE, safe_codec.OPAQUE)
+    assert kwargs == {"k": safe_codec.OPAQUE}
+
+
+def test_envelope_check_preserves_full_decode_nesting_limits() -> None:
+    registry = AdapterRegistry()
+    context = AdapterContext(role="test")
+    payload = dumps(("direct", "m//f", "m", "f", "", ([[[1]]],), {}), registry, limits=CodecLimits(), context=context)
+    seen = []
+
+    with pytest.raises(CodecLimitsError, match="nesting depth"):
+        loads(payload, registry, limits=CodecLimits(max_nesting=3), context=context, validate=seen.append)
+
+    assert seen[0][5] == (safe_codec.OPAQUE,)

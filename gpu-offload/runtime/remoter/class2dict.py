@@ -273,7 +273,9 @@ def _decode_tensor(payload: dict[str, Any], device: Any | None, limits: CodecLim
 # Fixed wire decoders are independent of the set of modules loaded by the peer.
 _BUILTIN_DECODERS = {"torch:Tensor": _decode_tensor}
 for _builtin_type in _VALUE_DECODERS:
-    register_type(_builtin_type)
+    # Python 3.13 exposes path classes through pathlib._local.
+    _module = "pathlib" if issubclass(_builtin_type, PurePath) else _builtin_type.__module__
+    register_type(_builtin_type, name=f"{_module}:{_builtin_type.__qualname__}")
 
 
 def from_dict(
