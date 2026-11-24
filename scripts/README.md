@@ -118,6 +118,10 @@ composition; it is not a build-only job. Scheduled Docusaurus calls remain exclu
 main execution inventories. Documentation deployment consumes verified accessibility promotion
 artifacts independently of the release-please gate.
 
+The Dataviewer backend job has a 60-minute budget for the full contract suite, judge tests,
+coverage gates, uploads, and execution receipts. The workflow validator enforces this
+ceiling; the additional time does not change test counts or coverage thresholds.
+
 Use a full workflow rerun after a failure. Partial reruns cannot reuse receipts from an earlier
 attempt. Run `npm run lint:ci` and `npm run test:ci` for graph validation, negative mutations,
 report-adapter tests, and the existing 80% line/branch/function coverage gate.
