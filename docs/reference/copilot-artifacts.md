@@ -4,7 +4,7 @@ description: >-
   Inventory and reference for GitHub Copilot agents, instructions, and
   skills configured in this repository.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-31
+ms.date: 2026-11-24
 ms.topic: reference
 keywords:
   - copilot

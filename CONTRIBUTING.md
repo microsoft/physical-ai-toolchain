@@ -315,7 +315,8 @@ All contributions require appropriate tests. This policy supports code quality a
 Changes to security controls, build and release processes, testing policy, governance, licensing, or contributor requirements can affect the project's [OpenSSF Best Practices questionnaire](https://www.bestpractices.dev/projects/12195). Update `.bestpractices.json` when a contribution changes evidence cited by the questionnaire, then run the `openssf-badge-audit` skill or the standalone collector from the repository root:
 
 ```bash
-uv run --frozen python .github/skills/openssf-badge-audit/scripts/audit_badge.py
+uv run --no-project --python 3.12 python \
+  .github/skills/openssf-badge-audit/scripts/audit_badge.py
 ```
 
 Do not mark a criterion as met without verifiable repository or project evidence. Questionnaire submission remains a maintainer action through the authenticated OpenSSF interface.

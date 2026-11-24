@@ -30,13 +30,17 @@ Produce a read-only audit of OpenSSF Best Practices Badge project [12195](https:
    ```bash
    repo_root="$(git rev-parse --show-toplevel)"
    report_path="$(mktemp "${TMPDIR:-/tmp}/openssf-badge-audit.XXXXXX")"
-   uv --directory "$repo_root" run --python 3.12 python \
+   uv run --no-project --python 3.12 python \
      "$repo_root/.github/skills/openssf-badge-audit/scripts/audit_badge.py" > "$report_path"
    ```
 
    Stop on a nonzero exit. Resolve an unavailable public endpoint, invalid project identity, or missing/invalid root `.bestpractices.json` before continuing.
 3. Record the collector's live badge level; Passing, Silver, Gold, and tiered percentages; update timestamp; proposal differences; and unresolved non-OSPS status fields.
-4. Review each non-OSPS criterion that affects the current Passing or Silver level. Verify the linked repository evidence semantically: confirm that it is current, applicable, and satisfies the criterion rather than merely mentioning related terms. If the caller explicitly requested a Gold assessment, review Gold criteria as a separate scope.
+4. Review each non-OSPS criterion that affects the current Passing or Silver level. Verify the linked repository evidence semantically: confirm that it is current, applicable, and satisfies the criterion rather than merely mentioning related terms. If the caller explicitly requested a Gold assessment, review Gold criteria as a separate scope. Record reproducible provenance for every reassessed value:
+   * Cite repository paths or public URLs for repository and public-service evidence.
+   * For authenticated GitHub Security aggregates, record the REST resource, filters, pagination, field grouping, cutoff timestamp, and collection date. Store only sanitized totals, never raw alert payloads.
+   * For local inventories, record the exact tracked-file selection and matching rule.
+   * Preserve unknown when evidence depends on private records that the reviewer cannot inspect.
 5. Classify each reviewed criterion as `Met`, `Unmet`, or `Unknown`. A live unknown remains reviewable: use current evidence to propose `Met` or `Unmet` when justified. Preserve a proposed unknown or evidence-insufficient criterion as `Unknown`. For every confirmed `Unmet` criterion, record the criterion key, metal tier, evidence inspected, missing condition, and a narrowly scoped remediation.
 6. If the caller asks to submit an authenticated questionnaire update, present the exact proposal fields to submit and obtain explicit confirmation immediately before that one external update. Never accept, pass on the command line, echo, or persist OpenSSF session cookies, API tokens, authentication headers, or other credentials. Submit only the confirmed proposal, then record the sanitized result in the untracked report.
 7. Prepare one GitHub issue draft keyed by each confirmed `Unmet` criterion in the untracked report.
