@@ -11,7 +11,6 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from pathlib import PurePosixPath
 from typing import Any
 
 import pytest
@@ -464,7 +463,7 @@ def test_builtin_values_and_registered_enum_round_trip(class_registry: None) -> 
             raise AssertionError("enum missing hook must never run")
 
     remoter.register_class2dict_type(Choice, wire_name="test:Choice")
-    values = [date(2026, 1, 1), datetime(2026, 1, 1), PurePosixPath("model"), {1, 2}, Choice.A]
+    values = [date(2026, 1, 1), datetime(2026, 1, 1), pathlib.PurePosixPath("model"), {1, 2}, Choice.A]
     assert remoter.deserialize_payload(remoter.serialize_payload(values)) == values
     with pytest.raises(TypeError, match="Unknown value"):
         class2dict.from_dict({"__type__": "test:Choice", "__value__": "unknown"})
