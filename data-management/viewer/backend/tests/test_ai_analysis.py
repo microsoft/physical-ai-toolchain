@@ -1,4 +1,4 @@
-# cspell:ignore prec
+# cspell:ignore prec nextafter
 """Behavior tests for trajectory analysis services and API endpoints."""
 
 from __future__ import annotations
@@ -307,6 +307,28 @@ class TestTrajectoryAnalyzer:
         for bounded in (metrics.smoothness, metrics.normalized_smoothness, metrics.efficiency, metrics.jitter):
             assert 0.0 <= bounded <= 1.0
         _assert_metrics_match(metrics, UNSAFE_EXPECTED[case])
+
+    @pytest.mark.parametrize(
+        ("timestamps", "threshold", "expected"),
+        [
+            pytest.param(np.arange(13) * 5e-310, 10.0, 1 / 17, id="subnormal-interval"),
+            pytest.param(np.array([0.0] * 12 + [np.nextafter(0.0, 1.0)]), 10.0, 1 / 17, id="average-underflow"),
+            pytest.param(np.linspace(-1.0, 1.0, 13) * 1e308, 1e-308, 1 / 17, id="overflowed-frequency-period"),
+            pytest.param(np.zeros(13), 10.0, 0.0, id="zero-span-default-rate"),
+            pytest.param(-np.arange(13, dtype=float), 5.0, 1 / 17, id="negative-span-default-rate"),
+        ],
+    )
+    def test_jitter_preserves_frequency_cutoff_for_extreme_spans(
+        self, timestamps: np.ndarray, threshold: float, expected: float
+    ) -> None:
+        # Bin 3 has power 6**2; the DC bin has power 24**2.
+        velocity = (2 + np.cos(2 * np.pi * 3 * np.arange(12) / 12))[:, None]
+        analyzer = TrajectoryAnalyzer(jitter_frequency_threshold=threshold)
+
+        with np.errstate(over="raise", invalid="raise", divide="raise"):
+            jitter = analyzer._compute_jitter(velocity, timestamps)
+
+        assert jitter == pytest.approx(expected)
 
     def test_radian_overflow_matches_decimal_reference(self, decimal_helper_calls: list[str]) -> None:
         positions, timestamps = _path_length_overflow_case()

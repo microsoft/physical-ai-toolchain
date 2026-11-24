@@ -11,7 +11,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 from functools import partial
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -19,7 +18,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
-from physical_ai_curation.models import EPISODE_KEY_PATTERN, EpisodeIndexKey
+from physical_ai_curation.models import EPISODE_KEY_PATTERN, EpisodeIndexKey, validate_integer_key
 from pydantic import BaseModel, BeforeValidator, Field, StrictBool, StrictFloat
 
 from ..csrf import require_csrf_token
@@ -51,15 +50,9 @@ logger = logging.getLogger(__name__)
 _CHANNEL_KEY_PATTERN = r"^[0-9]+$(?![\s\S])"
 
 
-def _validate_integer_key(value: object, *, pattern: str) -> object:
-    if isinstance(value, bool) or not isinstance(value, (str, int)) or re.fullmatch(pattern, str(value)) is None:
-        raise ValueError("Expected an ASCII decimal integer key")
-    return value
-
-
 ChannelIndexKey = Annotated[
     int,
-    BeforeValidator(partial(_validate_integer_key, pattern=_CHANNEL_KEY_PATTERN)),
+    BeforeValidator(partial(validate_integer_key, pattern=_CHANNEL_KEY_PATTERN)),
     Field(ge=0),
 ]
 

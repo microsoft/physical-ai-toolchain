@@ -62,20 +62,20 @@ _CSV_WHITESPACE = r"[ \t\r\n\f\v]*"
 # Reflect the interpreter's startup conversion limit without counting signs, separators, or stripped CR/LF.
 _INTEGER_DIGIT_LIMIT = sys.get_int_max_str_digits()
 _INTEGER_DIGIT_TAIL = f"{{0,{_INTEGER_DIGIT_LIMIT - 1}}}" if _INTEGER_DIGIT_LIMIT else "*"
-_CSV_INTEGER = rf"[+-]?[\r\n]*[0-9](?:[\r\n]*[0-9]){_INTEGER_DIGIT_TAIL}"
+_CSV_INTEGER = rf"(?:[+-][\r\n]*)?[0-9](?:[\r\n]*[0-9]){_INTEGER_DIGIT_TAIL}"
 _CSV_INTS_PATTERN = (
-    rf"^{_CSV_WHITESPACE}(?:,{_CSV_WHITESPACE})*{_CSV_INTEGER}"
-    rf"(?:{_CSV_WHITESPACE},{_CSV_WHITESPACE}(?:{_CSV_INTEGER})?)*{_CSV_WHITESPACE}$"
+    rf"^{_CSV_WHITESPACE}(?:,{_CSV_WHITESPACE})*{_CSV_INTEGER}{_CSV_WHITESPACE}"
+    rf"(?:,{_CSV_WHITESPACE}(?:{_CSV_INTEGER}{_CSV_WHITESPACE})?)*$"
 )
 _CSV_INTS_RE = re.compile(_CSV_INTS_PATTERN)
 # Unlike str.strip(), int() rejects U+001C through U+001F.
 _INTEGER_WHITESPACE = r"[\t-\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*"
-_RANGE_DIGITS = rf"[\r\n]*[0-9](?:[\r\n]*(?:_[\r\n]*)?[0-9]){_INTEGER_DIGIT_TAIL}"
+_RANGE_DIGITS = rf"[0-9](?:[\r\n]*(?:_[\r\n]*)?[0-9]){_INTEGER_DIGIT_TAIL}"
 _RANGE_UNIT = r"[bB][\r\n]*[yY][\r\n]*[tT][\r\n]*[eE][\r\n]*[sS]"
 _RANGE_PATTERN = (
     rf"^{WHITESPACE_PATTERN}*{_RANGE_UNIT}{WHITESPACE_PATTERN}*="
-    rf"{_INTEGER_WHITESPACE}\+?{_RANGE_DIGITS}{_INTEGER_WHITESPACE}-"
-    rf"(?:{_INTEGER_WHITESPACE}[+-]?{_RANGE_DIGITS}{_INTEGER_WHITESPACE}|[\r\n]*)$"
+    rf"{_INTEGER_WHITESPACE}(?:\+[\r\n]*)?{_RANGE_DIGITS}{_INTEGER_WHITESPACE}-"
+    rf"(?:{_INTEGER_WHITESPACE}(?:[+-][\r\n]*)?{_RANGE_DIGITS}{_INTEGER_WHITESPACE}|[\r\n]*)$"
 )
 _RANGE_RE = re.compile(_RANGE_PATTERN)
 
@@ -160,7 +160,10 @@ def query_string_param(
 
 
 def _validate_integer_parameter(value: object) -> object:
-    """Require integer wire text before the existing coercion and bounds checks."""
+    """Require integer wire text before coercion and bounds checks.
+
+    Append this validator after bounds metadata so it sees the original wire text.
+    """
     if isinstance(value, str):
         try:
             int(value)

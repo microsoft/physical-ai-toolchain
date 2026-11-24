@@ -40,11 +40,12 @@ def _z_scores(magnitudes: MetricArray) -> NDArray[np.float64] | None:
     if magnitudes.dtype != object:
         try:
             with np.errstate(over="raise", invalid="raise", divide="raise"):
-                mean = np.mean(magnitudes)
-                std = np.std(magnitudes)
+                offsets = magnitudes - magnitudes[0]
+                centered = offsets - np.mean(offsets)
+                std = float(np.sqrt(np.mean(centered**2)))
                 if std < 1e-10:
                     return None
-                return (magnitudes - mean) / std
+                return centered / std
         except FloatingPointError:
             pass
 

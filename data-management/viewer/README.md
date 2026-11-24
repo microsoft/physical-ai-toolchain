@@ -372,7 +372,11 @@ judging rather than silently substituting the original video.
 
 #### Settings
 
-The judge API's `process_method` accepts `gvl`, `chronological`, or `null`, with CR/LF characters removed before method selection. Other whitespace and unsupported methods are rejected.
+The per-episode judge endpoint (`POST /api/datasets/{dataset_id}/episodes/{episode_idx}/judge`)
+accepts `process_method` values of `gvl`, `chronological`, or `null`, with CR/LF characters
+removed before method selection. Dataset judge jobs (`POST /api/judge/jobs`) accept the
+same values in `options.process_method` but reject strings containing CR/LF.
+Both endpoints reject other whitespace and unsupported methods.
 
 The launcher selects the evaluator dependencies for the configured backend. For
 container build profiles and Azure setup, see the

@@ -15,7 +15,7 @@ from urllib.parse import quote, unquote
 
 import pytest
 import schemathesis
-from fastapi import Depends
+from fastapi import APIRouter, Depends
 from fastapi.testclient import TestClient
 from hypothesis import HealthCheck, settings
 from hypothesis import strategies as st
@@ -37,6 +37,7 @@ from schemathesis.specs.openapi.schemas import OpenApiSchema
 from src.api.auth import require_auth
 from src.api.models.annotations import EpisodeAnnotation
 from src.api.models.detection import DetectionRequest, EpisodeDetectionSummary
+from src.api.models.errors import error_responses
 from src.api.rate_limiter import limiter
 from src.api.routers import vlm_judge
 from src.api.routers.labels import DEFAULT_LABELS
@@ -46,7 +47,7 @@ from src.api.services.vlm_judge_service import reset_vlm_judge_service
 from src.api.validation import sanitize_user_string
 
 from .api.test_annotations import sample_annotation as sample_annotation
-from .conftest import RANGE_FORMS, _reset_singletons, range_digits_header
+from .conftest import RANGE_FORMS, HostedCaller, _reset_singletons, range_digits_header
 from .lerobot_sources import CAMERA, write_source
 
 schemathesis.checks.load_all_checks()
@@ -92,12 +93,10 @@ def api_schema(
     if request.param:
         monkeypatch.setenv("VLM_JUDGE_ENABLED", "true")
         monkeypatch.setenv("VLM_JUDGE_BACKEND", "echo")
-        client.app.include_router(
-            vlm_judge.router, prefix="/api/datasets", tags=["vlm-judge"], dependencies=[Depends(require_auth)]
-        )
-        client.app.include_router(
-            vlm_judge.build_optional_job_router(), prefix="/api/judge", dependencies=[Depends(require_auth)]
-        )
+        judge_router = APIRouter(dependencies=[Depends(require_auth)], responses=error_responses(401, 403))
+        judge_router.include_router(vlm_judge.router, prefix="/api/datasets", tags=["vlm-judge"])
+        judge_router.include_router(vlm_judge.build_optional_job_router(), prefix="/api/judge")
+        client.app.include_router(judge_router)
     monkeypatch.setattr(client.app.state, "judge_jobs", None, raising=False)
     client.app.openapi_schema = None
     detection_service = MagicMock()
@@ -159,10 +158,7 @@ def _align_matrix(values: list[list[float]], length: int | None = None) -> list[
     return _resize(rows, length, [0.0] * width) if length is not None else rows
 
 
-def prepare_positive_case(case: schemathesis.Case, client: TestClient) -> None:
-    """Establish dependent inputs without changing any negative generated case."""
-    if case.meta is None or case.meta.generation.mode != schemathesis.GenerationMode.POSITIVE:
-        return
+def _coerce_positive_integer_parameters(case: schemathesis.Case) -> None:
     for parameter in case.operation.iter_parameters():
         values = {"path": case.path_parameters, "query": case.query}.get(parameter.location)
         if values is None:
@@ -176,6 +172,9 @@ def prepare_positive_case(case: schemathesis.Case, client: TestClient) -> None:
             and any(option.get("type") == "integer" for option in alternatives)
         ):
             values[parameter.name] = int(value)
+
+
+def _prepare_positive_body(case: schemathesis.Case) -> None:
     path = case.operation.path
     if path.endswith("/annotations") and isinstance(case.body, dict):
         body = deepcopy(case.body)
@@ -212,6 +211,9 @@ def prepare_positive_case(case: schemathesis.Case, client: TestClient) -> None:
                 body["num_clusters"] = min(body["num_clusters"], len(body["trajectories"]))
         case.body = body
 
+
+def _prepare_positive_revision_headers(case: schemathesis.Case, client: TestClient) -> None:
+    path = case.operation.path
     parameter_names = {parameter.name.lower() for parameter in case.operation.iter_parameters()}
     if "if-none-match" in parameter_names:
         parameters = case.path_parameters or {}
@@ -231,6 +233,15 @@ def prepare_positive_case(case: schemathesis.Case, client: TestClient) -> None:
         etag = response.headers.get("ETag")
         headers["if-match" if etag else "if-none-match"] = etag or "*"
         case.headers = headers
+
+
+def prepare_positive_case(case: schemathesis.Case, client: TestClient) -> None:
+    """Establish dependent inputs without changing any negative generated case."""
+    if case.meta is None or case.meta.generation.mode != schemathesis.GenerationMode.POSITIVE:
+        return
+    _coerce_positive_integer_parameters(case)
+    _prepare_positive_body(case)
+    _prepare_positive_revision_headers(case, client)
 
 
 @pytest.mark.parametrize(
@@ -706,6 +717,36 @@ def test_import_scalar_contract(
     else:
         assert after.json() == before.json()
         assert after.headers["ETag"] == before.headers["ETag"]
+
+
+@pytest.mark.parametrize("api_schema", [True], indirect=True, ids=["vlm"])
+@pytest.mark.parametrize("expected_status", [401, 403])
+@pytest.mark.parametrize(
+    ("path", "method", "arguments"),
+    [
+        (
+            "/api/datasets/{dataset_id}/episodes/{episode_idx}/judge",
+            "POST",
+            {"path_parameters": {"dataset_id": "sample", "episode_idx": 0}, "body": {}},
+        ),
+        ("/api/judge/jobs/{job_id}", "GET", {"path_parameters": {"job_id": "missing"}}),
+    ],
+)
+def test_vlm_authentication_failures_match_schema(
+    api_schema: OpenApiSchema,
+    hosted_caller: HostedCaller,
+    expected_status: int,
+    path: str,
+    method: str,
+    arguments: dict[str, Any],
+) -> None:
+    token = hosted_caller.token({"oid": "00000000-0000-0000-0000-0000000000ff"}) if expected_status == 403 else None
+    case = api_schema.make_case(operation=api_schema[path][method], **arguments)
+    response = case.call(
+        headers=dict(hosted_caller.request_headers(include_caller=expected_status != 401, caller_token=token))
+    )
+    assert response.status_code == expected_status
+    case.validate_response(response)
 
 
 @pytest.mark.parametrize("api_schema", [True], indirect=True, ids=["vlm"])

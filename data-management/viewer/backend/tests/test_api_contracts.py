@@ -69,10 +69,15 @@ def test_hosted_auth_responses_match_schema(
         ("bytes= +02 - +04 ", True, (2, 3)),
         ("bytes=0_2-0_4", True, (2, 3)),
         ("by\rtes=0\r2-0\n4", True, (2, 3)),
+        ("bytes=\r\n2-\r\n4\r\n", True, (2, 3)),
+        ("bytes=\r\n+\r\n0_\r\n2 - \r\n+\r\n0_\r\n4\r\n", True, (2, 3)),
+        ("bytes=\u00852-\u00854", True, (2, 3)),
         (" BYTES =2-4", True, (2, 3)),
         ("bytes=٢-٤", False, None),
         ("bytes=0--0", True, (0, 1)),
+        ("bytes=0-\r\n-\r\n0", True, (0, 1)),
         ("bytes=0-", True, (0, None)),
+        ("bytes=\r\n-\r\n", False, None),
         ("bytes=0-1\njunk", False, None),
         ("bytes=0-\x1c1", False, None),
         ("bytes=0- ", False, None),
@@ -225,6 +230,7 @@ def test_integer_parameter_dependencies_preserve_schema_bounds_and_omission() ->
         for path, params in [
             ("/items/-1", {}),
             ("/items/11", {}),
+            ("/items/1.0", {}),
             ("/items/0", {"limit": "0"}),
             ("/items/0", {"limit": "11"}),
             ("/items/0", {"limit": "1.0"}),
@@ -234,6 +240,9 @@ def test_integer_parameter_dependencies_preserve_schema_bounds_and_omission() ->
     assert parameters[0]["schema"]["type"] == "integer"
     assert parameters[0]["schema"]["minimum"] == 0
     assert parameters[0]["schema"]["maximum"] == 10
+    query_integer = next(option for option in parameters[1]["schema"]["anyOf"] if option["type"] == "integer")
+    assert query_integer["minimum"] == 1
+    assert query_integer["maximum"] == 10
 
 
 @pytest.mark.parametrize("field", ["hesitation_count", "correction_count", "motion_score"])
@@ -404,9 +413,11 @@ def test_trajectory_efficiency_preserves_motion_with_constant_offsets(
         ("0,,0", True),
         ("0\r0", True),
         (" \t,+0, , -1,\r\n", True),
+        (", \r\n,+\r\n0\r\n0, \r\n ,-\r\n0,\t", True),
         ("", False),
         (", ,", False),
         ("0,x", False),
+        ("0, +\r\n,0", False),
         ("0 0", False),
         ("0_0", False),
         ("\u0660", False),
@@ -421,6 +432,45 @@ def test_csv_contract_matches_existing_resource_requests(
     response = client.get("/api/datasets/sample/export/preview", params={"episode_indices": "0", parameter: value})
     assert response.status_code == (200 if accepted else 400)
     assert Draft202012Validator(schema).is_valid(value) == accepted
+
+
+_INTEGER_REJECTION_PROBE = """
+import json
+import sys
+
+from fastapi import HTTPException
+from src.api.validation import query_csv_ints_param, range_header_param
+
+kind, value = json.load(sys.stdin)
+dependency = query_csv_ints_param("episode_indices") if kind == "csv" else range_header_param()
+try:
+    dependency(value)
+except HTTPException as error:
+    print(error.status_code)
+"""
+
+
+@pytest.mark.parametrize(
+    ("kind", "value"),
+    [
+        pytest.param("csv", "0" + ", " * 64 + "x", id="repeated-empty-segments"),
+        pytest.param("csv", "\r\n" * 131072 + "x", id="csv-line-break-prefix"),
+        pytest.param("range", "bytes=" + "\r\n" * 131072 + "x-", id="range-start-line-break-prefix"),
+        pytest.param("range", "bytes=0-" + "\r\n" * 131072 + "x", id="range-end-line-break-prefix"),
+    ],
+)
+def test_integer_validators_reject_ambiguous_malformed_inputs(kind: str, value: str) -> None:
+    # Isolate pathological matches so a regression cannot hang the pytest worker.
+    completed = subprocess.run(
+        [sys.executable, "-c", _INTEGER_REJECTION_PROBE],
+        input=json.dumps([kind, value]),
+        capture_output=True,
+        text=True,
+        cwd=BACKEND_ROOT,
+        timeout=10,
+        check=True,
+    )
+    assert completed.stdout.strip() == "400", completed.stderr
 
 
 @pytest.mark.parametrize("parameter", ["episode_indices", "removed_frames"])

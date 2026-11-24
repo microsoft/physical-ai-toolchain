@@ -276,16 +276,23 @@ class TrajectoryAnalyzer:
             n = len(vel_magnitude)
             freq_spectrum = np.abs(scipy_fft.fft(vel_magnitude))[: n // 2]
 
-            # Estimate sample rate
-            time_span = Decimal(float(timestamps[len(velocity)])) - Decimal(float(timestamps[0]))
-            avg_dt = float(time_span / len(velocity))
-            if avg_dt <= 0:
-                avg_dt = 1.0 / 30.0  # Default 30 FPS
-
-            frequencies = scipy_fft.fftfreq(n, avg_dt)[: n // 2]
+            with localcontext() as context:
+                context.prec = DECIMAL_PRECISION
+                time_span = Decimal(float(timestamps[n])) - Decimal(float(timestamps[0]))
+                effective_span = time_span if time_span > 0 else Decimal(n) / 30
+                avg_dt = float(effective_span / n)
+                try:
+                    if avg_dt <= 0 or not np.isfinite(n * avg_dt):
+                        raise FloatingPointError("Sample period is not representable")
+                    with np.errstate(over="raise", invalid="raise", divide="raise"):
+                        frequencies = scipy_fft.fftfreq(n, avg_dt)[: n // 2]
+                    high_freq_mask = np.abs(frequencies) > self.jitter_frequency_threshold
+                except FloatingPointError:
+                    # Compare bin indices instead of forming unrepresentable frequencies.
+                    cutoff = Decimal(float(self.jitter_frequency_threshold)) * effective_span
+                    high_freq_mask = np.array([Decimal(k) > cutoff for k in range(n // 2)], dtype=bool)
 
             # High frequency power (above threshold)
-            high_freq_mask = np.abs(frequencies) > self.jitter_frequency_threshold
             high_freq_power = np.sum(freq_spectrum[high_freq_mask] ** 2)
             total_power = np.sum(freq_spectrum**2)
 

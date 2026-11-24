@@ -233,15 +233,20 @@ class TestExtremeFiniteArithmetic:
         assert spikes[0].severity == AnomalySeverity.LOW
         assert spikes[0].confidence == pytest.approx(math.sqrt(94 / 6) / 5)
 
-    def test_nearly_constant_extreme_forces_retain_representable_spike(self) -> None:
-        timestamps = np.arange(40, dtype=float)
-        forces = np.full((40, 1), 1e200)
-        forces[20] = np.nextafter(1e200, math.inf)
+    @pytest.mark.parametrize("amplitude", [1e16, 1e100, 1e200])
+    @pytest.mark.parametrize(("count", "expected_severity"), [(17, AnomalySeverity.LOW), (40, AnomalySeverity.HIGH)])
+    def test_nearly_constant_extreme_forces_retain_representable_spike(
+        self, amplitude: float, count: int, expected_severity: AnomalySeverity
+    ) -> None:
+        timestamps = np.arange(count, dtype=float)
+        forces = np.full((count, 1), amplitude)
+        forces[count // 2] = np.nextafter(amplitude, math.inf)
         with np.errstate(over="raise", invalid="raise", divide="raise"):
             anomalies = AnomalyDetector().detect(timestamps[:, None], timestamps, forces=forces)
         spikes = [a for a in anomalies if a.type == AnomalyType.FORCE_SPIKE]
-        assert [a.frame_range for a in spikes] == [(20, 21)]
-        assert spikes[0].severity == AnomalySeverity.HIGH
+        assert [a.frame_range for a in spikes] == [(count // 2, count // 2 + 1)]
+        assert spikes[0].severity == expected_severity
+        assert spikes[0].confidence == pytest.approx(min(1.0, math.sqrt(count - 1) / 5))
 
     def test_deviation_floor_precedes_configured_zscore_threshold(self) -> None:
         positions = np.zeros((40, 1))
@@ -314,7 +319,7 @@ class TestExtremeFiniteArithmetic:
         spikes = [a for a in anomalies if a.type == kind]
         assert len(spikes) == (0 if amplitude == 1e-12 else 1)
 
-    @pytest.mark.parametrize("amplitude", [0.0, 1e200, 1e308])
+    @pytest.mark.parametrize("amplitude", [0.0, 1e16, 1e100, 1e200, 1e308])
     def test_constant_extreme_signals_have_no_anomalies(self, amplitude: float) -> None:
         timestamps = np.arange(101, dtype=float)
         values = np.full((101, 3), amplitude)

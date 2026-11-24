@@ -34,18 +34,14 @@ JsonInteger = Annotated[int, BeforeValidator(validate_json_integer)]
 EPISODE_KEY_PATTERN = r"^-?[0-9]+$(?![\s\S])"
 
 
-def validate_episode_key(value: object) -> object:
+def validate_integer_key(value: object, *, pattern: str = EPISODE_KEY_PATTERN) -> object:
     """Require an ASCII decimal key before integer conversion."""
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (str, int))
-        or re.fullmatch(EPISODE_KEY_PATTERN, str(value)) is None
-    ):
+    if isinstance(value, bool) or not isinstance(value, (str, int)) or re.fullmatch(pattern, str(value)) is None:
         raise ValueError("Expected an ASCII decimal integer key")
     return value
 
 
-EpisodeIndexKey = Annotated[int, BeforeValidator(validate_episode_key)]
+EpisodeIndexKey = Annotated[int, BeforeValidator(validate_integer_key)]
 
 
 def sanitize_user_string(value: str) -> str:
