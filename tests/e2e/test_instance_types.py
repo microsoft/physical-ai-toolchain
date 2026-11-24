@@ -169,7 +169,7 @@ def test_only_a_positive_gpu_count_makes_a_gpu_type(count: object, has_gpu: bool
 def _problem(choice: InstanceTypeChoice, types: dict[str, object] | None, category: str = "rl") -> str | None:
     scripts = {
         "rl": (_aml.RL_TRAINING_SCRIPT, _aml.ISAAC_EVAL_SCRIPT),
-        "vla": (_aml.VLA_PI0_TRAINING_SCRIPT, _aml.LEROBOT_EVAL_SCRIPT),
+        "vla": (_aml.LEROBOT_EVAL_SCRIPT,),
         "gpu-smoke": (_aml.GPU_SMOKE_SCRIPT,),
     }[category]
     return _aml.instance_type_problem(choice, _compute(types), category=category, scripts=scripts)
@@ -209,13 +209,6 @@ def test_a_hil_compute_without_gpuspot_asks_for_an_instance_type() -> None:
     assert "submit-azureml-training.sh, submit-azureml-isaaclab-evaluation.sh" in problem
     assert f"Set {_RL_VARIABLE} or {INSTANCE_TYPE_VARIABLE} in {LOCAL_ENV_FILE}" in problem
     assert "GPU instance types: gpu" in problem
-
-
-def test_vla_needs_both_of_its_script_defaults() -> None:
-    problem = _problem(InstanceTypeChoice(None), {"gpuspot": _AKS_TYPES["gpuspot"]}, "vla")
-
-    assert problem is not None
-    assert "named gpu," in problem
 
 
 @pytest.mark.parametrize("category", ["rl", "gpu-smoke"])
@@ -345,21 +338,6 @@ def _lerobot_training(root: Path, instance_type: str | None) -> None:
     )
 
 
-def _vla_training(root: Path, instance_type: str | None) -> None:
-    _aml.submit_aml_vla_pi0_training(
-        root,
-        _WORKSPACE,
-        blob_url="https://sample.invalid/datasets/sample",
-        training_steps=2,
-        save_freq=1,
-        batch_size=1,
-        log_freq=1,
-        register_model_name="sample-model",
-        instance_type=instance_type,
-        compute=_COMPUTE_NAME,
-    )
-
-
 def _lerobot_eval(policy_type: str) -> Callable[[Path, str | None], None]:
     def submit(root: Path, instance_type: str | None) -> None:
         _aml.submit_aml_lerobot_eval(
@@ -386,7 +364,6 @@ def _lerobot_eval(policy_type: str) -> Callable[[Path, str | None], None]:
         pytest.param(_isaac_eval, id="isaac-eval"),
         pytest.param(_lerobot_training, id="il-training"),
         pytest.param(_lerobot_eval("diffusion"), id="il-eval"),
-        pytest.param(_vla_training, id="vla-training"),
         pytest.param(_lerobot_eval("pi0"), id="vla-eval"),
     ],
 )
@@ -438,7 +415,6 @@ def _lerobot_pipeline(root: Path, instance_type: str | None) -> None:
         pytest.param(_isaac_eval, id="isaac-eval"),
         pytest.param(_lerobot_training, id="il-training"),
         pytest.param(_lerobot_eval("diffusion"), id="il-eval"),
-        pytest.param(_vla_training, id="vla-training"),
         pytest.param(_lerobot_eval("pi0"), id="vla-eval"),
         pytest.param(_lerobot_pipeline, id="il-pipeline"),
     ],

@@ -50,7 +50,7 @@ The [category manifest](pathname://../../tests/dependabot/categories.json) maps 
 | `evaluation`     | uv `/evaluation`, `/evaluation/vlm_judge`                                           | Evaluation tests, CPU import smokes                                      | None                                             |
 | `rl`             | uv `/training/rl`                                                                   | Training tests, import smoke                                             | Azure ML RL lifecycle                            |
 | `il`             | uv `/training/il/lerobot`                                                           | Training and inference tests, import smoke                               | Azure ML IL lifecycle and IL pipeline            |
-| `vla`            | uv `/training/vla/lerobot`                                                          | Training tests, import smoke                                             | Azure ML pi0 lifecycle                           |
+| `vla`            | uv `/training/vla/lerobot`                                                          | Training tests, import smoke                                             | Azure ML VLA calibration sweep and training      |
 | `gpu-smoke`      | uv `/training/smoke`                                                                | Training tests, import smoke                                             | Azure ML GPU smoke                               |
 | `workflows`      | uv `/workflows/azureml/scripts`, `/workflows/azureml/osmo-proxy`, `/workflows/osmo` | Import smokes, e2e helper tests                                          | Azure ML IL pipeline with the register component |
 | `gpu-offload`    | uv and docker under `gpu-offload`                                                   | Controller and runtime tests, wheel build                                | None on Azure ML                                 |
@@ -107,9 +107,9 @@ Before submitting, the runner confirms that the Azure CLI is signed in to the bu
 
 Jobs run one at a time with unique names, and their test models are archived afterward. Each job is submitted with the bundle's workspace and compute as explicit flags, so a `.env.local` that names another compute can't redirect it. Each job holds a GPU node for several minutes or more, so run only the categories a pull request touches. Don't run local builds while a job uploads its snapshot.
 
-The pi0 check needs a Hugging Face token that can read the gated base model. Add `HF_TOKEN=<token>` to the untracked repository-root `.env.local`. The runner, the e2e tests, and the submission scripts read it from there, and a value in `.env.local` takes precedence over an exported one. The [VLA training README](pathname://../../training/vla/README.md) explains how to create the token.
+The VLA check runs the calibration sweep and the training pipeline with the public SmolVLA base model, so it needs no Hugging Face token. Both jobs upload `training/` and bind calibration to that code, so the check fails while `training/` has uncommitted changes.
 
-Every submission script loads `.env.local`, and the LeRobot evaluation script passes the token to every evaluation job, not only pi0, as an environment variable that anyone who can read those jobs can see. Use a fine-grained token that can only read that model.
+Tests marked `requires_hf_token` read `HF_TOKEN` from the untracked repository-root `.env.local`, and a value there takes precedence over an exported one. Every submission script loads `.env.local`, and the LeRobot evaluation script passes the token to every evaluation job as an environment variable that anyone who can read those jobs can see. Use a fine-grained token that can only read the gated models those jobs need.
 
 Each environment check has a time limit, set by `timeout_minutes` in the manifest, so a hung Azure call can't stall the run. When a check runs past its limit, the runner interrupts it and gives the test up to 15 minutes to cancel its jobs and archive its models, then stops every process the check started. The check then reports `failed` with a `timed out` reason.
 
@@ -121,13 +121,14 @@ Every job a GPU check submits requests an Azure ML instance type. Set the types 
 
 | Variable                          | Applies to                                       |
 |-----------------------------------|--------------------------------------------------|
-| `E2E_AML_INSTANCE_TYPE`           | Every GPU check: `rl`, `il`, `vla`, `gpu-smoke`  |
+| `E2E_AML_INSTANCE_TYPE`           | GPU checks: `rl`, `il`, `gpu-smoke`              |
 | `E2E_AML_INSTANCE_TYPE_RL`        | RL training and Isaac Lab evaluation             |
 | `E2E_AML_INSTANCE_TYPE_IL`        | LeRobot training and evaluation in the lifecycle |
-| `E2E_AML_INSTANCE_TYPE_VLA`       | pi0 training and evaluation                      |
 | `E2E_AML_INSTANCE_TYPE_GPU_SMOKE` | The GPU smoke job                                |
 
-A category's own variable wins over `E2E_AML_INSTANCE_TYPE`, and for each variable, a value in `.env.local` wins over an exported one, the same rule the submission scripts follow when they load that file. With neither set, each submission script uses its default: `gpuspot`, or `gpu` for pi0 training. The IL pipeline checks run on CPU and ignore these variables.
+A category's own variable wins over `E2E_AML_INSTANCE_TYPE`, and for each variable, a value in `.env.local` wins over an exported one, the same rule the submission scripts follow when they load that file. With neither set, each submission script uses its default, `gpuspot`. The IL pipeline checks run on CPU and ignore these variables.
+
+The VLA check ignores these variables: its sweep and pipeline request the `gpu-high-memory` instance type that their calibration contract is bound to, so the compute must define it.
 
 List the instance types your compute defines:
 
@@ -139,15 +140,13 @@ az ml compute show --name <compute> --resource-group <resource-group> --workspac
 Then match them to the jobs:
 
 * Isaac Lab runs the RL checks and needs a GPU with RT cores; NVIDIA doesn't support it on A100 or H100 GPUs. On a cluster that also has those, give `E2E_AML_INSTANCE_TYPE_RL` a type that selects an RTX-class GPU such as an A10, because `gpuspot` and `gpu` can select any GPU node.
-* pi0 training updates only the action expert, but the gated backbone nearly fills a 24 GB GPU, so give `E2E_AML_INSTANCE_TYPE_VLA` a type with more memory.
 * HiL computes define `gpu` but not `gpuspot`, so set `E2E_AML_INSTANCE_TYPE=gpu` for them.
 * On managed AmlCompute clusters, where the VM size decides, export `E2E_AML_INSTANCE_TYPE` as an empty value to omit the instance type. The GPU smoke can't omit it.
 
-For example, a cluster with spot A10 and regular H100 pools could use:
+For example, a cluster with spot A10 and regular H100 pools could send every check to the A10 pool, which also suits Isaac Lab:
 
 ```bash
 E2E_AML_INSTANCE_TYPE=<a10-instance-type>
-E2E_AML_INSTANCE_TYPE_VLA=<h100-instance-type>
 ```
 
 Before it submits anything, each GPU check confirms that a Kubernetes compute defines the instance type it will request, or each script default it relies on, and that the type has a GPU. Otherwise the check fails at once, naming the variable to set and the compute's GPU instance types. An empty value in `.env.local`, or an exported empty value on a Kubernetes compute, also fails, because the jobs would run on the compute's CPU default.

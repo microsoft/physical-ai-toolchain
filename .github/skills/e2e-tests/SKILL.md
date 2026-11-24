@@ -47,7 +47,7 @@ Do not treat a direct `files.pythonhosted.org` connection failure as a cloud-tes
 
 ## Hugging Face Prerequisite
 
-`tests/e2e/test_e2e_aml_vla_pi0_training.py` requires `HF_TOKEN` with access to the gated `google/paligemma-3b-pt-224` model. Export the token before a default full run or before selecting that test explicitly. The requirement does not apply when an explicit subset omits tests marked `requires_hf_token`.
+Tests marked `requires_hf_token` require `HF_TOKEN` with read access to the gated Hugging Face models they load. Export the token before a default full run or before selecting such a test explicitly. The requirement does not apply when an explicit subset omits those tests. `tests/e2e/test_e2e_aml_vla_training.py` uses the public SmolVLA base model and needs no token.
 
 Never write the token to `config.json`, `command.sh`, logs, manifests, or chat output. Preserve it only in the process environment. A missing or empty token is a non-retryable client-side setup failure: the test must fail before Azure fixture resolution, dataset staging, or job submission.
 

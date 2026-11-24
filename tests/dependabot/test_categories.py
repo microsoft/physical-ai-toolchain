@@ -29,7 +29,7 @@ ENVIRONMENT_ALLOWLIST = {
     "aml-il-lifecycle",
     "aml-il-pipeline-diffusion",
     "aml-il-pipeline-register",
-    "aml-vla-pi0",
+    "aml-vla-training",
     "aml-osmo-proxy",
     "terraform-plan-compare",
     "terraform-plan-compare-vpn",

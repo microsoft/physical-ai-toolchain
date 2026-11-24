@@ -56,7 +56,7 @@ The `baseline` category is selected in every run, and the others by the Dependab
 | `evaluation`     | uv `/evaluation`, `/evaluation/vlm_judge`                                           | None                                                        |
 | `rl`             | uv `/training/rl`                                                                   | `aml-rl-lifecycle`                                          |
 | `il`             | uv `/training/il/lerobot`                                                           | `aml-il-lifecycle`, `aml-il-pipeline-diffusion` (CPU steps) |
-| `vla`            | uv `/training/vla/lerobot`                                                          | `aml-vla-pi0` (needs `HF_TOKEN`)                            |
+| `vla`            | uv `/training/vla/lerobot`                                                          | `aml-vla-training`                                          |
 | `gpu-smoke`      | uv `/training/smoke`                                                                | `aml-gpu-smoke`                                             |
 | `workflows`      | uv `/workflows/azureml/scripts`, `/workflows/azureml/osmo-proxy`, `/workflows/osmo` | `aml-il-pipeline-register` (CPU steps)                      |
 | `gpu-offload`    | uv and docker under `gpu-offload`                                                   | None on Azure ML (uses a local NVIDIA host)                 |
@@ -78,11 +78,13 @@ The bundle must declare `schema_version` 1 and an `environment` equal to `<name>
 
 With a named environment, the tests never consult local Terraform state, and a missing value fails the run. Every job is submitted with the validated workspace and compute as explicit flags, so a `.env.local` that names another compute can't redirect it.
 
-Set `E2E_AML_INSTANCE_TYPE` in `.env.local` to choose the instance type for every GPU job in the `rl`, `il`, `vla`, and `gpu-smoke` checks, and `E2E_AML_INSTANCE_TYPE_<CATEGORY>`, such as `E2E_AML_INSTANCE_TYPE_VLA`, to override one category. A value in `.env.local` wins over an exported one; with neither, each submission script's default applies.
+Set `E2E_AML_INSTANCE_TYPE` in `.env.local` to choose the instance type for every GPU job in the `rl`, `il`, and `gpu-smoke` checks, and `E2E_AML_INSTANCE_TYPE_<CATEGORY>`, such as `E2E_AML_INSTANCE_TYPE_RL`, to override one category. A value in `.env.local` wins over an exported one; with neither, each submission script's default applies. The `vla` check requests the `gpu-high-memory` instance type pinned in its sweep and pipeline.
 
-Each GPU check confirms the compute defines its type before submitting, and `--dry-run` shows the type each check will request. [Choose GPU Instance Types](../../docs/contributing/dependabot-verification.md#choose-gpu-instance-types) covers RT cores for Isaac Lab, memory for pi0, HiL targets, and managed AmlCompute.
+Each GPU check confirms the compute defines its type before submitting, and `--dry-run` shows the type each check will request. [Choose GPU Instance Types](../../docs/contributing/dependabot-verification.md#choose-gpu-instance-types) covers RT cores for Isaac Lab, HiL targets, and managed AmlCompute.
 
-Secrets never go in a bundle. Put `HF_TOKEN` for the VLA check in the untracked repository-root `.env.local`, starting from `.env.local.example`. The runner, the e2e tests, and the submission scripts read it from there, and a value in `.env.local` takes precedence over an exported one. The runner passes the token only to the check that declares it, but every submission script loads all of `.env.local`, so LeRobot evaluation jobs receive it too.
+Secrets never go in a bundle. Put `HF_TOKEN` in the untracked repository-root `.env.local`, starting from `.env.local.example`, when a check needs a gated Hugging Face model. The runner, the e2e tests, and the submission scripts read it from there, and a value in `.env.local` takes precedence over an exported one. The runner passes the token only to checks that declare it, but every submission script loads all of `.env.local`, so LeRobot evaluation jobs receive it too.
+
+The `vla` check uses the public SmolVLA base model and needs no token.
 
 Before submitting anything, the runner checks that `az` is signed in to the environment's subscription. If the AKS cluster behind the compute target is stopped, the Azure ML checks report `not-run`; start the cluster and rerun. Environment checks run one at a time, and they upload your working tree to Azure ML, including uncommitted changes, so commit first and don't run builds at the same time.
 

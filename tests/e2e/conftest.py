@@ -490,6 +490,7 @@ def aml_compute_target(repo_root: Path, aml_workspace: AzureMLWorkspace) -> Azur
     provisioning_state = payload.get("provisioning_state")
     if isinstance(provisioning_state, str) and provisioning_state.lower() != "succeeded":
         pytest.skip(f"AzureML compute target is not ready: {compute_name} ({provisioning_state})")
+    return compute_name
 
     power_state = _attached_aks_power_state(payload, repo_root)
     if power_state and power_state.lower() != "running":

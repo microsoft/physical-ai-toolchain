@@ -31,7 +31,6 @@ Run each script from the repository root.
 | `training/il/scripts/submit-azureml-lerobot-training.sh`       | Submit LeRobot behavioral cloning training                                                                  | Azure ML |
 | `training/il/scripts/submit-azureml-lerobot-pipeline.sh`       | Submit the LeRobot preprocess, train, evaluate, and register pipeline                                       | Azure ML |
 | `training/il/scripts/submit-osmo-lerobot-training.sh`          | Submit LeRobot ACT, Diffusion, or SmolVLA training                                                          | OSMO     |
-| `training/vla/scripts/submit-azureml-vla-pi0-training.sh`      | Submit LeRobot pi0 VLA training                                                                             | Azure ML |
 | `training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh`  | Submit GR00T VLA fine-tuning                                                                                | OSMO     |
 | `training/smoke/scripts/submit-azureml-gpu-smoke.sh`           | Smoke-test a GPU target and training services                                                               | Azure ML |
 | `training/pipelines/run-lerobot-pipeline.sh`                   | Train, evaluate, and register; its evaluation stage is not working ([Script Examples](scripts-examples.md)) | OSMO     |

@@ -8,6 +8,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../.." && pwd))"
 # shellcheck source=../../../scripts/lib/common.sh
 source "$REPO_ROOT/scripts/lib/common.sh"
+
+install_kubectl_wrapper() {
+  local source_path="$1"
+  local target_path="$2"
+
+  if ! sudo test -e "$target_path"; then
+    sudo install -m 0755 "$source_path" "$target_path"
+  elif sudo cmp --silent "$source_path" "$target_path"; then
+    return 0
+  else
+    warn "Preserving existing kubectl at $target_path because it is not the K3s wrapper"
+  fi
+}
 # shellcheck source=../defaults.conf
 source "$SCRIPT_DIR/../defaults.conf"
 
@@ -386,20 +399,42 @@ done
 printf '%s\n' "physical-ai-toolchain:$version" > "$tmp_dir/managed"
 sudo install -m 0600 "$tmp_dir/managed" "$managed_marker"
 
-# Install the local kubectl wrapper when needed, then make sure K3s runs with the current configuration.
-if [[ ! -e /usr/local/bin/kubectl ]]; then
-  cat > "$tmp_dir/kubectl" <<EOF
+# Install or update the local kubectl wrapper, then make sure K3s runs with the current configuration.
+cat > "$tmp_dir/kubectl" <<EOF
 #!/usr/bin/env bash
+export K3S_CONFIG_FILE=/dev/null
 exec $k3s_binary kubectl "\$@"
 EOF
-  sudo install -m 0755 "$tmp_dir/kubectl" /usr/local/bin/kubectl
-fi
+install_kubectl_wrapper "$tmp_dir/kubectl" /usr/local/bin/kubectl
 
 sudo systemctl enable --now k3s
 if [[ "$binary_changed" == "false" && "$config_changed" == "true" ]]; then
   sudo systemctl restart k3s
 fi
 wait_for_k3s "$version"
+
+# Reconcile a stale node status IP left by a host network change until K3s reports the configured address.
+for ((attempt = 1; attempt <= 30; attempt++)); do
+  node_json=$(sudo "$k3s_binary" kubectl get node "$node_name" -o json 2>/dev/null || true)
+  configured_node_ip=$(jq -r '.metadata.annotations["k3s.io/internal-ip"] // empty' \
+    <<< "$node_json")
+  current_node_ip=$(jq -r \
+    '[.status.addresses[]? | select(.type == "InternalIP") | .address][0] // empty' \
+    <<< "$node_json")
+  if [[ -z "$configured_node_ip" || -z "$current_node_ip" || \
+      "$configured_node_ip" == "$current_node_ip" ]]; then
+    break
+  fi
+  (( attempt < 30 )) || fatal "Node $node_name status IP stayed at $current_node_ip instead of $configured_node_ip"
+  warn "Reconciling stale node status IP $current_node_ip to $configured_node_ip"
+  status_patch=$(jq -c --arg ip "$configured_node_ip" '
+    {status: {addresses: [.status.addresses[]
+      | if .type == "InternalIP" then .address = $ip else . end]}}
+  ' <<< "$node_json")
+  sudo "$k3s_binary" kubectl patch node "$node_name" \
+    --subresource=status --type=merge --patch "$status_patch" >/dev/null 2>&1 || true
+  sleep 2
+done
 
 # Copy and rename the operator kubeconfig. The directory is created without sudo so any missing parents
 # under the home directory stay owned by the operator.
@@ -412,9 +447,10 @@ fi
 # owner and mode because other HiL tooling stores operator-readable files there.
 identity_file="$EDGE_STATE_DIR/k3s-identity.json"
 identity_tmp="$tmp_dir/k3s-identity.json"
+api_server=$(kube_api_server "$kubeconfig_out" "$context")
+namespace_uid=$(kube_system_namespace_uid "$kubeconfig_out" "$context")
 jq -n --arg kubeconfig "$kubeconfig_out" --arg context "$context" \
-  --arg server "$(kube_api_server "$kubeconfig_out" "$context")" \
-  --arg namespace_uid "$(kube_system_namespace_uid "$kubeconfig_out" "$context")" \
+  --arg server "$api_server" --arg namespace_uid "$namespace_uid" \
   --arg node "$node_name" --arg version "$version" '
   {schema_version: 1, kind: "physical-ai-local-k3s", kubeconfig: $kubeconfig,
    context: $context, api_server: $server, kube_system_namespace_uid: $namespace_uid,

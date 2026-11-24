@@ -260,7 +260,7 @@
     },
     "gpu_offload": {
       "patterns": [
-        "^gpu-offload/(controller|runtime)/"
+        "^gpu-offload/(controller|runtime|examples/ur10e-single)/"
       ],
       "groups": [
         "python",
@@ -1507,15 +1507,41 @@
               }
             ]
           }
+        },
+        "pytest-gpu-offload-ur10e-single": {
+          "producer": "outcome",
+          "required-steps": [
+            "install",
+            "test"
+          ],
+          "reports": [
+            {
+              "path": "logs/pytest-gpu-offload-{shard}-results.xml",
+              "kind": "junit"
+            }
+          ],
+          "shards": [
+            "ur10e-single"
+          ],
+          "bindings": {
+            "install": {
+              "run-sha256": "bdad651685dd88187b0bfcb38ae85755c6e45544c99a4e8eabef48dbb20a4a68"
+            },
+            "test": {
+              "run-sha256": "bb6209ca646723f5cd108a65261896fee928c46cd5936550981f961de3060191"
+            }
+          },
+          "shard-input": "ur10e-single"
         }
       },
       "aggregate": {
         "job": "aggregate",
         "producer": "outcome",
         "needs": [
-          "pytest-gpu-offload"
+          "pytest-gpu-offload",
+          "pytest-gpu-offload-ur10e-single"
         ],
-        "expected-shards": "{\"pytest-gpu-offload\":[\"controller\",\"runtime\"]}"
+        "expected-shards": "{\"pytest-gpu-offload\":[\"controller\",\"runtime\"],\"pytest-gpu-offload-ur10e-single\":[\"ur10e-single\"]}"
       }
     },
     "gpu-offload-kind-smoke": {

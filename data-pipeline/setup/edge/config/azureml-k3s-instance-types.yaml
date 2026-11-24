@@ -1,0 +1,28 @@
+# Azure ML InstanceTypes for a single-node K3s GPU host
+apiVersion: amlarc.azureml.com/v1alpha1
+kind: InstanceType
+metadata:
+  name: defaultinstancetype
+spec:
+  resources:
+    requests:
+      cpu: "1"
+      memory: "4Gi"
+    limits:
+      cpu: "2"
+      memory: "8Gi"
+---
+apiVersion: amlarc.azureml.com/v1alpha1
+kind: InstanceType
+metadata:
+  name: gpu
+spec:
+  resources:
+    requests:
+      cpu: "4"
+      memory: "16Gi"
+      nvidia.com/gpu: 1
+    limits:
+      cpu: "8"
+      memory: "32Gi"
+      nvidia.com/gpu: 1

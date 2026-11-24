@@ -1,0 +1,43 @@
+$schema: https://azuremlschemas.azureedge.net/latest/sweepJob.schema.json
+type: sweep
+display_name: Arc sweep failure isolation smoke
+experiment_name: vla-sweep-failure-smoke
+description: Verify that a failed trial does not prevent selection and publication of a successful trial output.
+
+compute: azureml:placeholder
+identity:
+  type: managed_identity
+resources:
+  instance_type: defaultinstancetype
+
+sampling_algorithm: grid
+search_space:
+  mode:
+    type: choice
+    values: [success, fail]
+objective:
+  goal: maximize
+  primary_metric: sweep_smoke_score
+limits:
+  max_total_trials: 2
+  max_concurrent_trials: 1
+  trial_timeout: 600
+  timeout: 1800
+
+outputs:
+  smoke_result:
+    type: uri_folder
+    mode: upload
+
+trial:
+  code: ../../scripts
+  environment:
+    image: mcr.microsoft.com/azureml/openmpi5.0-ubuntu24.04:latest
+  resources:
+    instance_type: defaultinstancetype
+  command: >-
+    python -m pip install --quiet --disable-pip-version-check --break-system-packages
+    azureml-mlflow==1.62.0.post6 mlflow-skinny==3.13.0 &&
+    python sweep_failure_smoke.py
+    --mode ${{search_space.mode}}
+    --output-dir ${{outputs.smoke_result}}

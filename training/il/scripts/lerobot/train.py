@@ -24,16 +24,16 @@ Environment variables:
     MLFLOW_TRACKING_URI: MLflow server for the ``mlflow`` backend.
     AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZUREML_WORKSPACE_NAME: Azure context for ``azureml``.
     MIXED_PRECISION: Accelerate mixed-precision mode (``no``/``fp16``/``bf16``).
-        Only effective when more than one CUDA device is visible (multi-GPU
-        Accelerate launch). Under Accelerate the lerobot ``--policy.use_amp``
-        flag is ignored.
+        Explicit mixed precision uses Accelerate on both single-GPU and
+        multi-GPU runs. Under Accelerate the lerobot ``--policy.use_amp`` flag
+        is ignored.
 
 The number of GPUs is detected at runtime via ``torch.cuda.device_count()`` --
 i.e., from the GPU devices the job container can see. On AzureML-on-Kubernetes
 that is driven by the ``InstanceType``'s ``nvidia.com/gpu`` request; on managed
-``AmlCompute`` it is the cluster VM SKU's GPU count. When detection returns
-> 1, ``lerobot-train`` is launched via
-``accelerate launch --multi_gpu --num_processes=N``.
+``AmlCompute`` it is the cluster VM SKU's GPU count. Multi-GPU runs use
+``accelerate launch --multi_gpu --num_processes=N``. Single-GPU runs also use
+Accelerate when explicit mixed precision is requested, without ``--multi_gpu``.
 """
 
 from __future__ import annotations
@@ -55,6 +55,8 @@ from training.utils.tracking import mlflow_module_for, resolve_tracking_backend_
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 
+_DIRECT_LEROBOT_FLAG = "--run-lerobot-direct"
+
 # LeRobot log line pattern:
 # step:200 smpl:2K ep:4 epch:0.31 loss:6.938 grdn:155.563 lr:1.0e-05 updt_s:0.324 data_s:0.011
 _LOG_PATTERN = re.compile(
@@ -70,6 +72,14 @@ _LOG_PATTERN = re.compile(
 )
 
 _VAL_PATTERN = re.compile(r"val[_/]loss[:\s]+([\d.]+)")
+_CUDA_PEAK_PATTERN = re.compile(
+    r"\[CUDA-PEAK\]\s+allocated_bytes=(\d+)\s+reserved_bytes=(\d+)\s+duration_seconds=([\d.]+)"
+)
+# LeRobot PI loaders print one of these and return a randomly initialized policy instead of raising.
+_PRETRAINED_LOAD_FAILURES = (
+    "Returning model without loading pretrained weights",
+    "Warning: Could not load state dict:",
+)
 
 CHECKPOINT_CHECK_INTERVAL = 60
 SYSTEM_METRICS_INTERVAL = 30
@@ -162,8 +172,54 @@ def _resolve_lerobot_train() -> str:
     )
 
 
+def _instrumented_vla_command(cmd: list[str], num_gpus: int, mixed_precision: str) -> list[str]:
+    """Launch LeRobot through an instrumented Accelerate worker."""
+    if not cmd or cmd[0] != "lerobot-train":
+        raise RuntimeError(f"Expected cmd to start with 'lerobot-train' (got {cmd[:1]})")
+    accelerate_args = ["accelerate", "launch"]
+    if num_gpus > 1:
+        accelerate_args.append("--multi_gpu")
+    accelerate_args.extend((f"--num_processes={num_gpus}", f"--mixed_precision={mixed_precision}"))
+    return [
+        *accelerate_args,
+        "--module",
+        "training.il.scripts.lerobot.train",
+        _DIRECT_LEROBOT_FLAG,
+        *cmd[1:],
+    ]
+
+
+def _run_lerobot_direct(args: list[str]) -> int:
+    """Run LeRobot in-process and emit CUDA peaks owned by this process."""
+    import torch
+
+    from lerobot.scripts import lerobot_train
+    from training.vla.scripts.pretrained_load import require_complete_pretrained_load
+
+    has_cuda = torch.cuda.is_available()
+    if has_cuda:
+        torch.cuda.reset_peak_memory_stats()
+    started_at = time.perf_counter()
+    try:
+        sys.argv = ["lerobot-train", *args]
+        with require_complete_pretrained_load(lerobot_train):
+            result = lerobot_train.main()
+        return result if isinstance(result, int) else EXIT_SUCCESS
+    finally:
+        if has_cuda:
+            torch.cuda.synchronize()
+            duration = time.perf_counter() - started_at
+            print(
+                "[CUDA-PEAK] "
+                f"allocated_bytes={torch.cuda.max_memory_allocated()} "
+                f"reserved_bytes={torch.cuda.max_memory_reserved()} "
+                f"duration_seconds={duration:.6f}",
+                flush=True,
+            )
+
+
 def _wrap_with_accelerate(cmd: list[str], num_gpus: int, mixed_precision: str) -> list[str]:
-    """Prepend accelerate launch flags for single-node multi-GPU training.
+    """Prepend Accelerate launch flags for single-node training.
 
     Assumes ``cmd[0] == 'lerobot-train'``. Replaces it with the resolved
     absolute path so accelerate launches the right entrypoint.
@@ -174,9 +230,10 @@ def _wrap_with_accelerate(cmd: list[str], num_gpus: int, mixed_precision: str) -
     accelerate_args = [
         "accelerate",
         "launch",
-        "--multi_gpu",
-        f"--num_processes={num_gpus}",
     ]
+    if num_gpus > 1:
+        accelerate_args.append("--multi_gpu")
+    accelerate_args.append(f"--num_processes={num_gpus}")
     # Default mixed_precision is 'no' (script-level default); pass through
     # explicitly so accelerate's environment config never overrides it.
     accelerate_args.append(f"--mixed_precision={mixed_precision}")
@@ -217,6 +274,15 @@ def _parse_k_value(val: str) -> float:
     if val.endswith("K"):
         return float(val[:-1]) * 1000
     return float(val)
+
+
+def _resolve_log_step(step_token: str, last_logged_step: int | None, log_frequency: int) -> int:
+    """Resolve the exact optimizer step from LeRobot's formatted log token."""
+    if log_frequency <= 0:
+        raise ValueError(f"log_frequency must be positive, got {log_frequency}")
+    if step_token.endswith("K") and last_logged_step is not None:
+        return last_logged_step + log_frequency
+    return int(_parse_k_value(step_token))
 
 
 def _init_system_collector() -> Any | None:
@@ -368,6 +434,12 @@ def run_training(
     uploaded_checkpoints: set[str] = set()
     last_checkpoint_check = 0.0
     last_system_check = 0.0
+    last_logged_step: int | None = None
+    log_frequency = int(os.environ.get("LOG_FREQ", "200"))
+    pretrained_load_failed = False
+    peak_allocated_bytes = 0
+    peak_reserved_bytes = 0
+    training_duration_seconds = 0.0
 
     def upload_checkpoints(run: Any) -> None:
         if tracking_enabled:
@@ -472,9 +544,16 @@ def run_training(
             print(line, end="", flush=True)
             current_time = time.time()
 
+            if not pretrained_load_failed and any(marker in line for marker in _PRETRAINED_LOAD_FAILURES):
+                pretrained_load_failed = True
+                print("[MLflow] Pretrained policy load failed; terminating training subprocess group", flush=True)
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGTERM)
+
             match = _LOG_PATTERN.search(line)
             if match:
-                step = int(_parse_k_value(match.group(1)))
+                step = _resolve_log_step(match.group(1), last_logged_step, log_frequency)
+                last_logged_step = step
                 metrics = {
                     "train/samples": _parse_k_value(match.group(2)),
                     "train/episodes": _parse_k_value(match.group(3)),
@@ -502,7 +581,27 @@ def run_training(
                 with contextlib.suppress(Exception):
                     mlflow.log_metric("val/loss", float(val_match.group(1)))
 
+            cuda_peak_match = _CUDA_PEAK_PATTERN.search(line)
+            if cuda_peak_match:
+                peak_allocated_bytes = max(peak_allocated_bytes, int(cuda_peak_match.group(1)))
+                peak_reserved_bytes = max(peak_reserved_bytes, int(cuda_peak_match.group(2)))
+                training_duration_seconds = max(training_duration_seconds, float(cuda_peak_match.group(3)))
+
         process.wait()
+
+        if training_duration_seconds > 0:
+            peak_metrics = {
+                "system/cuda_peak_allocated_bytes": float(peak_allocated_bytes),
+                "system/cuda_peak_reserved_bytes": float(peak_reserved_bytes),
+                "train/duration_seconds": training_duration_seconds,
+            }
+            with contextlib.suppress(ValueError):
+                steps = int(os.environ["TRAINING_STEPS"])
+                batch_size = int(os.environ["BATCH_SIZE"])
+                peak_metrics["train/throughput_samples_per_second"] = (
+                    steps * batch_size * num_gpus / training_duration_seconds
+                )
+            mlflow.log_metrics(peak_metrics)
 
         if tracking_enabled:
             print("[MLflow] Uploading final checkpoints...")
@@ -511,13 +610,20 @@ def run_training(
 
         mlflow.log_param("output_dir", str(output_dir))
 
-        if process.returncode != 0:
+        if process.returncode != 0 or pretrained_load_failed:
             mlflow.set_tag("training_status", "failed")
-            print(f"[MLflow] Training failed with return code: {process.returncode}")
+            failure_reason = (
+                "pretrained policy weights were not loaded"
+                if pretrained_load_failed
+                else f"subprocess returned {process.returncode}"
+            )
+            print(f"[MLflow] Training failed: {failure_reason}")
         else:
             mlflow.set_tag("training_status", "completed")
 
     print("[MLflow] Run completed" if tracking_enabled else f"[Tracking] Training finished; outputs in {output_dir}")
+    if pretrained_load_failed:
+        return EXIT_FAILURE
     return process.returncode or EXIT_SUCCESS
 
 
@@ -608,18 +714,25 @@ def main() -> int:
 
     # Training hyperparameters from environment
     env_arg_map = {
+        "DATASET_REVISION": "--dataset.revision",
         "TRAINING_STEPS": "--steps",
         "BATCH_SIZE": "--batch_size",
         "LEARNING_RATE": "--policy.optimizer_lr",
         "EVAL_FREQ": "--env_eval_freq",
         "SAVE_FREQ": "--save_freq",
         "LOG_FREQ": "--log_freq",
+        "POLICY_DTYPE": "--policy.dtype",
     }
     for env_var, arg_name in env_arg_map.items():
         if arg_name not in cli_text:
             value = os.environ.get(env_var, "")
             if value:
                 cmd.append(f"{arg_name}={value}")
+
+    if "--policy.gradient_checkpointing" not in cli_text:
+        gradient_checkpointing = os.environ.get("GRADIENT_CHECKPOINTING", "").lower()
+        if gradient_checkpointing == "true":
+            cmd.append("--policy.gradient_checkpointing=true")
 
     if "--policy.train_expert_only" not in cli_text:
         train_expert_only = os.environ.get("TRAIN_EXPERT_ONLY", "")
@@ -632,17 +745,20 @@ def main() -> int:
     platform = "azureml" if os.environ.get("AZUREML_RUN_ID") else "osmo"
     source = f"{platform}-lerobot-{dataset_source()}"
 
-    # Single-node multi-GPU: detect the GPU count visible to the job container
+    # Detect the GPU count visible to the job container
     # (AzureML-on-Kubernetes: pod's `nvidia.com/gpu` request via InstanceType;
-    # AmlCompute: cluster VM SKU's GPU count) and, when > 1, wrap with
-    # `accelerate launch` and strip --policy.use_amp (ignored under Accelerate
-    # per the HF guide).
+    # AmlCompute: cluster VM SKU's GPU count). Use Accelerate for multi-GPU
+    # execution and whenever explicit mixed precision is requested.
     num_gpus = _detect_num_gpus()
     mixed_precision = _read_mixed_precision()
-    if num_gpus > 1:
+    if os.environ.get("VLA_MODEL_ADAPTER"):
+        cmd = _strip_use_amp(cmd)
+        cmd = _instrumented_vla_command(cmd, num_gpus=num_gpus, mixed_precision=mixed_precision)
+        print(f"[CUDA-PEAK] Instrumented VLA run: num_gpus={num_gpus}, mixed_precision={mixed_precision}")
+    elif num_gpus > 1 or mixed_precision != "no":
         cmd = _strip_use_amp(cmd)
         cmd = _wrap_with_accelerate(cmd, num_gpus=num_gpus, mixed_precision=mixed_precision)
-        print(f"[ACCELERATE] Multi-GPU run: num_gpus={num_gpus}, mixed_precision={mixed_precision}")
+        print(f"[ACCELERATE] Run: num_gpus={num_gpus}, mixed_precision={mixed_precision}")
     else:
         print("[ACCELERATE] Single-GPU run: launching lerobot-train directly")
 
@@ -657,4 +773,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == _DIRECT_LEROBOT_FLAG:
+        sys.exit(_run_lerobot_direct(sys.argv[2:]))
     sys.exit(main())

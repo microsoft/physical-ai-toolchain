@@ -1185,20 +1185,18 @@
           "notes": "CI runs the runtime-image smoke on PRs that touch this domain; it pulls a multi-gigabyte image."
         },
         {
-          "id": "aml-vla-pi0",
+          "id": "aml-vla-training",
           "tier": "environment",
           "gpu": true,
           "optional": false,
-          "description": "Azure ML pi0 training, registration, and evaluation on a GPU node.",
-          "timeout_minutes": 180,
-          "pytest": "tests/e2e/test_e2e_aml_vla_pi0_training.py::test_aml_vla_pi0_lifecycle_e2e",
+          "description": "Azure ML VLA calibration sweep and calibrated SmolVLA training on a GPU node.",
+          "timeout_minutes": 300,
+          "pytest": "tests/e2e/test_e2e_aml_vla_training.py::test_aml_vla_calibrated_training_e2e",
           "requires": [
-            "az"
+            "az",
+            "git"
           ],
-          "ci_lanes": [],
-          "env": [
-            "HF_TOKEN"
-          ]
+          "ci_lanes": []
         }
       ]
     },
