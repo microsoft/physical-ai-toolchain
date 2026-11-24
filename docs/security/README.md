@@ -46,7 +46,7 @@ The [security guide](../operations/security-guide.md) documents:
 
 ## 🏅 OpenSSF Best Practices
 
-OpenSSF Best Practices project [12195](https://www.bestpractices.dev/projects/12195) publicly awards the Silver badge. The status was verified on 2026-10-20 against the public project data.
+[OpenSSF Best Practices project 12195](https://www.bestpractices.dev/projects/12195) publicly awards the Silver badge. The status was verified on 2026-10-20 against the public project data.
 
 | Level   | Progress |
 |---------|---------:|

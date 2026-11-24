@@ -34,7 +34,7 @@ Tier IDs, stage names, boundaries, and the fleet vocabulary are defined once in 
 
 The latest release recorded in [CHANGELOG.md](pathname://../../CHANGELOG.md) is v0.8.0, dated 2026-05-08; `package.json` also reports 0.8.0.
 Releases v0.2.0 through v0.8.0 are recorded, but release numbers alone do not establish completion of every originally planned deliverable.
-The priorities, success-metric baseline, and timeline below retain the historical planning record. OpenSSF percentages and milestone issue completion were not reassessed during this source review; future tier and autonomy plans are not marked shipped by this update.
+The priorities, success-metric baseline, and timeline below retain the historical planning record. Public OpenSSF percentages were verified on 2026-10-20; milestone issue completion was not reassessed during this source review. Future tier and autonomy plans are not marked shipped by this update.
 
 ## Priorities
 
@@ -228,16 +228,18 @@ Fleet intelligence (`T5`) is not a single leap. It decomposes into four ordered 
 
 ## Success Metrics
 
-| Metric                       | Current | Q2 2026 Target | Q4 2026 Target |
-|------------------------------|---------|----------------|----------------|
-| OpenSSF Passing criteria met | 100%    | 95%            | 100%           |
-| OpenSSF Silver criteria met  | 100%    | 50%            | 100%           |
-| Test coverage (Python)       | Unknown | 60%            | 80%            |
-| CI workflow count            | 4       | 8              | 10             |
-| Contributing guide count     | 7       | 8              | 9              |
-| Average PR review time       | N/A     | < 3 days       | < 2 days       |
+| Metric                        | Current | Q2 2026 Target | Q4 2026 Target |
+|-------------------------------|---------|----------------|----------------|
+| OpenSSF public Passing record | 100%    | 95%            | 100%           |
+| OpenSSF public Silver record  | 100%    | 50%            | 100%           |
+| Test coverage (Python)        | Unknown | 60%            | 80%            |
+| CI workflow count             | 4       | 8              | 10             |
+| Contributing guide count      | 7       | 8              | 9              |
+| Average PR review time        | N/A     | < 3 days       | < 2 days       |
 
-The Python coverage baseline is unknown as of 2026-10-20 because CI reports coverage by component and does not publish one authoritative repository-wide aggregate.
+The OpenSSF values reflect public project 12195, not a recomputation from current repository evidence. The root `.bestpractices.json` records three mandatory criteria as unmet for community remediation.
+
+The current repository-wide Python coverage baseline is unknown because CI reports coverage by component and does not publish one authoritative aggregate. The `.bestpractices.json` evidence for `test_statement_coverage80_status` separately records an 82.42% Codecov branch report from 2026-10-19 and required 80% per-component Codecov targets.
 
 ## Timeline Overview
 

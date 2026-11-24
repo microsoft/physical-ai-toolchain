@@ -33,8 +33,9 @@ _AUDIT = _load_audit()
 
 
 class _Response:
-    def __init__(self, payload: bytes) -> None:
+    def __init__(self, payload: bytes, url: str = "https://example.invalid/project.json") -> None:
         self._payload = payload
+        self._url = url
 
     def __enter__(self) -> _Response:
         return self
@@ -42,8 +43,11 @@ class _Response:
     def __exit__(self, *_args: object) -> None:
         return None
 
-    def read(self) -> bytes:
-        return self._payload
+    def geturl(self) -> str:
+        return self._url
+
+    def read(self, size: int = -1) -> bytes:
+        return self._payload if size < 0 else self._payload[:size]
 
 
 def _project(**overrides: object) -> dict[str, object]:
@@ -101,14 +105,83 @@ class TestFetchJson:
         with pytest.raises(_AUDIT.AuditError, match=message):
             _AUDIT.fetch_json("https://example.invalid/project.json")
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://example.invalid/project.json",
+            "https:///project.json",
+            "https://user:password@example.invalid/project.json",
+        ],
+    )
+    def test_rejects_unsafe_request_urls(self, url: str) -> None:
+        with pytest.raises(_AUDIT.AuditError, match="must use HTTPS"):
+            _AUDIT.fetch_json(url)
+
+    def test_rejects_unsafe_redirect_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            _AUDIT,
+            "urlopen",
+            lambda *_args, **_kwargs: _Response(b"{}", "http://example.invalid/project.json"),
+        )
+
+        with pytest.raises(_AUDIT.AuditError, match="Response URL must use HTTPS"):
+            _AUDIT.fetch_json("https://example.invalid/project.json")
+
+    def test_rejects_oversized_response(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        payload = b"x" * (_AUDIT._MAX_RESPONSE_BYTES + 1)
+        monkeypatch.setattr(_AUDIT, "urlopen", lambda *_args, **_kwargs: _Response(payload))
+
+        with pytest.raises(_AUDIT.AuditError, match="exceeds"):
+            _AUDIT.fetch_json("https://example.invalid/project.json")
+
+    def test_reports_socket_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def raise_os_error(*_args: object, **_kwargs: object) -> None:
+            raise OSError("socket failed")
+
+        monkeypatch.setattr(_AUDIT, "urlopen", raise_os_error)
+
+        with pytest.raises(_AUDIT.AuditError, match="socket failed"):
+            _AUDIT.fetch_json("https://example.invalid/project.json")
+
+    def test_reports_excessively_nested_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(_AUDIT, "urlopen", lambda *_args, **_kwargs: _Response(b"{}"))
+        monkeypatch.setattr(_AUDIT.json, "loads", lambda _contents: (_ for _ in ()).throw(RecursionError))
+
+        with pytest.raises(_AUDIT.AuditError, match="not valid JSON"):
+            _AUDIT.fetch_json("https://example.invalid/project.json")
+
 
 class TestReadRepositoryProposal:
+    def test_loads_and_validates_committed_repository_proposal(self) -> None:
+        repository_root = _AUDIT.find_repository_root(_SCRIPT_PATH)
+
+        assert repository_root == _REPOSITORY_ROOT
+        proposal = _AUDIT.read_repository_proposal(repository_root)
+        _AUDIT.validate_proposal_fields(_project(), proposal)
+
     def test_rejects_missing_file(self, tmp_path: Path) -> None:
         with pytest.raises(_AUDIT.AuditError, match="Required repository proposal is missing"):
             _AUDIT.read_repository_proposal(tmp_path)
 
     def test_rejects_invalid_json(self, tmp_path: Path) -> None:
         (tmp_path / ".bestpractices.json").write_text("{invalid", encoding="utf-8")
+
+        with pytest.raises(_AUDIT.AuditError, match="is not valid JSON"):
+            _AUDIT.read_repository_proposal(tmp_path)
+
+    def test_rejects_invalid_utf8(self, tmp_path: Path) -> None:
+        (tmp_path / ".bestpractices.json").write_bytes(b"\xff")
+
+        with pytest.raises(_AUDIT.AuditError, match="is not UTF-8"):
+            _AUDIT.read_repository_proposal(tmp_path)
+
+    def test_reports_excessively_nested_json(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        (tmp_path / ".bestpractices.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(_AUDIT.json, "loads", lambda _contents: (_ for _ in ()).throw(RecursionError))
 
         with pytest.raises(_AUDIT.AuditError, match="is not valid JSON"):
             _AUDIT.read_repository_proposal(tmp_path)
@@ -177,6 +250,37 @@ class TestValidateProposalFields:
         with pytest.raises(_AUDIT.AuditError, match="unsupported status"):
             _AUDIT.validate_proposal_fields(project, _proposal())
 
+    @pytest.mark.parametrize("status", [None, "unknown", " UNKNOWN "])
+    def test_accepts_live_unknown_status_variants(self, status: object) -> None:
+        project = _project(crypto_random_status=status)
+
+        _AUDIT.validate_proposal_fields(project, _proposal())
+
+    def test_accepts_repository_unknown_status_variant(self) -> None:
+        proposal = _proposal(crypto_random_status="unknown")
+
+        _AUDIT.validate_proposal_fields(_project(), proposal)
+
+    @pytest.mark.parametrize("justification", [123, [], {}])
+    def test_rejects_invalid_live_justification(self, justification: object) -> None:
+        project = _project(crypto_random_justification=justification)
+
+        with pytest.raises(_AUDIT.AuditError, match="must be a string or null"):
+            _AUDIT.validate_proposal_fields(project, _proposal())
+
+    @pytest.mark.parametrize("justification", [None, "", "   ", 123])
+    def test_rejects_invalid_repository_justification(self, justification: object) -> None:
+        proposal = _proposal(crypto_random_justification=justification)
+
+        with pytest.raises(_AUDIT.AuditError, match="must be a nonempty string"):
+            _AUDIT.validate_proposal_fields(_project(), proposal)
+
+    def test_rejects_unrecognized_repository_field(self) -> None:
+        proposal = _proposal(crypto_random_note="unsupported")
+
+        with pytest.raises(_AUDIT.AuditError, match="not a recognized criterion field"):
+            _AUDIT.validate_proposal_fields(_project(), proposal)
+
 
 class TestReport:
     def test_difference_order_is_deterministic(self) -> None:
@@ -195,6 +299,20 @@ class TestReport:
             "build_status",
             "crypto_random_justification",
             "crypto_random_status",
+        ]
+
+    def test_differences_include_live_only_justification(self) -> None:
+        project = _project(build_justification="Live evidence")
+
+        differences = _AUDIT.compare_proposals(project, _proposal())
+
+        assert differences == [
+            {
+                "criterion": "build",
+                "field": "build_justification",
+                "live": "Live evidence",
+                "repository_proposal": None,
+            }
         ]
 
     def test_unresolved_statuses_include_unknown_on_either_side(self) -> None:

@@ -398,7 +398,7 @@ Goal Structuring Notation (GSN) elements from the prior assessment. Current arch
 | G3      | Private endpoints, VPN, and NSGs coexist with configurable public service access and NAT egress                       |
 | G4      | Supply chain integrity is maintained through SHA-pinned actions and dependency review                                 |
 | E1      | 19 STRIDE threats identified; 7 Accepted with compensating controls, 2 Resolved, 10 Open with remediation roadmap     |
-| E2      | OpenSSF Passing ~85%; 25 Silver criteria assessed (5 Met, 5 Delegated, 13 N/A, 1 Gap)                                 |
+| E2      | Public OpenSSF project records Passing and Silver at 100%; repository evidence tracks three mandatory unmet criteria  |
 | A1      | Deployer follows `docs/operations/security-guide.md` hardening checklist                                              |
 | A2      | OSMO vendor provides auth/rate-limiting enablement path in future releases                                            |
 
@@ -414,7 +414,7 @@ Goal Structuring Notation (GSN) elements from the prior assessment. Current arch
 
 ## Security Metrics
 
-Historical values and targets below are retained without remeasurement.
+Threat counts and targets below are retained without remeasurement. The OpenSSF percentages reflect the public project record verified on 2026-10-20.
 
 | Metric                   | Current    | Target      |
 |--------------------------|------------|-------------|
@@ -424,6 +424,8 @@ Historical values and targets below are retained without remeasurement.
 | STRIDE threats mitigated | 9/19 (47%) | 15/19 (79%) |
 | Critical threats open    | 1          | 0           |
 | High threats open        | 6          | 2           |
+
+The public OpenSSF award and current repository evidence are distinct. The root `.bestpractices.json` records `static_analysis_fixed`, `vulnerabilities_critical_fixed`, and `vulnerabilities_fixed_60_days` as unmet; the public Passing and Silver percentages do not establish that these known gaps are resolved.
 
 ## References
 

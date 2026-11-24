@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+# Copyright (c) Microsoft Corporation.
+# SPDX-License-Identifier: MIT
+"""Collect and compare OpenSSF Best Practices badge evidence for project 12195."""
+
 from __future__ import annotations
 
 import json
@@ -5,6 +10,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 type JsonValue = str | int | float | bool | list[JsonValue] | dict[str, JsonValue] | None
@@ -15,6 +21,7 @@ _PROJECT_NAME = "Physical AI Toolchain"
 _REPOSITORY_URL = "https://github.com/microsoft/physical-ai-toolchain"
 _PROJECT_URL = f"https://www.bestpractices.dev/projects/{_PROJECT_ID}.json"
 _BADGE_URL = f"https://www.bestpractices.dev/projects/{_PROJECT_ID}/badge.json"
+_MAX_RESPONSE_BYTES = 1024 * 1024
 _CRITERION_SUFFIXES = ("_status", "_justification")
 _BADGE_LEVELS = {"in_progress", "passing", "silver", "gold"}
 _CRITERION_STATUSES = {"Met", "Unmet", "N/A", "?", "Unknown"}
@@ -174,24 +181,32 @@ def find_repository_root(script_path: Path) -> Path:
 
 def fetch_json(url: str) -> JsonObject:
     """Fetch and decode one public JSON document."""
+    require_safe_https_url(url, "Request URL")
     request = Request(url, headers={"User-Agent": "physical-ai-toolchain-openssf-badge-audit/1.0"})
 
     try:
         with urlopen(request, timeout=30) as response:
-            payload = response.read()
+            final_url = response.geturl()
+            require_safe_https_url(final_url, "Response URL")
+            payload = response.read(_MAX_RESPONSE_BYTES + 1)
     except HTTPError as error:
         raise AuditError(f"Request to {url} failed with HTTP {error.code}.") from error
     except TimeoutError as error:
         raise AuditError(f"Request to {url} timed out.") from error
     except URLError as error:
         raise AuditError(f"Request to {url} failed: {error.reason}.") from error
+    except OSError as error:
+        raise AuditError(f"Request to {url} failed: {error}.") from error
+
+    if len(payload) > _MAX_RESPONSE_BYTES:
+        raise AuditError(f"Response from {url} exceeds {_MAX_RESPONSE_BYTES} bytes.")
 
     try:
         decoded = payload.decode("utf-8")
         document = json.loads(decoded)
     except UnicodeDecodeError as error:
         raise AuditError(f"Response from {url} was not UTF-8.") from error
-    except json.JSONDecodeError as error:
+    except (json.JSONDecodeError, RecursionError) as error:
         raise AuditError(f"Response from {url} was not valid JSON.") from error
 
     if not isinstance(document, dict):
@@ -208,18 +223,33 @@ def read_repository_proposal(repository_root: Path) -> JsonObject:
         contents = proposal_path.read_text(encoding="utf-8")
     except FileNotFoundError as error:
         raise AuditError(f"Required repository proposal is missing: {proposal_path}.") from error
+    except UnicodeDecodeError as error:
+        raise AuditError(f"Repository proposal {proposal_path} is not UTF-8.") from error
     except OSError as error:
         raise AuditError(f"Unable to read repository proposal {proposal_path}: {error.strerror}.") from error
 
     try:
         proposal = json.loads(contents)
-    except json.JSONDecodeError as error:
+    except (json.JSONDecodeError, RecursionError) as error:
         raise AuditError(f"Repository proposal {proposal_path} is not valid JSON.") from error
 
     if not isinstance(proposal, dict):
         raise AuditError(f"Repository proposal {proposal_path} must be a JSON object.")
 
     return proposal
+
+
+def require_safe_https_url(url: str, source: str) -> None:
+    """Require an HTTPS URL with a host and without embedded credentials."""
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+        has_credentials = parsed.username is not None or parsed.password is not None
+    except ValueError as error:
+        raise AuditError(f"{source} is not a valid URL.") from error
+
+    if parsed.scheme != "https" or not hostname or has_credentials:
+        raise AuditError(f"{source} must use HTTPS with a hostname and no embedded credentials.")
 
 
 def require_string(document: JsonObject, field: str, source: str) -> str:
@@ -291,22 +321,35 @@ def is_non_osps_criterion_field(field: str) -> bool:
     return not field.startswith("OSPS-") and field.endswith(_CRITERION_SUFFIXES)
 
 
+def is_non_osps_status_field(field: str) -> bool:
+    """Return whether a field is an in-scope questionnaire status."""
+    return not field.startswith("OSPS-") and field.endswith("_status")
+
+
 def is_unknown_status(value: JsonValue) -> bool:
     """Return whether a status value explicitly represents unknown evidence."""
     return value is None or (isinstance(value, str) and value.strip().casefold() in {"?", "unknown"})
 
 
+def is_supported_status(value: JsonValue) -> bool:
+    """Return whether a value is a supported or explicitly unknown status."""
+    return is_unknown_status(value) or (isinstance(value, str) and value in _CRITERION_STATUSES)
+
+
 def validate_proposal_fields(project: JsonObject, proposal: JsonObject) -> None:
     """Validate proposed criterion fields against the live questionnaire schema."""
     for field, value in project.items():
-        if field.endswith("_status") and not field.startswith("OSPS-") and value not in _CRITERION_STATUSES:
+        if is_non_osps_status_field(field) and not is_supported_status(value):
             raise AuditError(f"Project response field {field!r} has unsupported status {value!r}.")
+        if (
+            not field.startswith("OSPS-")
+            and field.endswith("_justification")
+            and value is not None
+            and not isinstance(value, str)
+        ):
+            raise AuditError(f"Project response field {field!r} must be a string or null.")
 
-    proposed_criteria = {
-        field.removesuffix("_status")
-        for field in proposal
-        if field.endswith("_status") and not field.startswith("OSPS-")
-    }
+    proposed_criteria = {field.removesuffix("_status") for field in proposal if is_non_osps_status_field(field)}
     if proposed_criteria != _CRITERIA:
         missing = sorted(_CRITERIA - proposed_criteria)
         unexpected = sorted(proposed_criteria - _CRITERIA)
@@ -317,7 +360,7 @@ def validate_proposal_fields(project: JsonObject, proposal: JsonObject) -> None:
 
     for field, value in proposal.items():
         if not is_non_osps_criterion_field(field):
-            continue
+            raise AuditError(f"Repository proposal field {field!r} is not a recognized criterion field.")
 
         criterion, suffix = field.rsplit("_", 1)
         if criterion not in _CRITERIA:
@@ -325,13 +368,15 @@ def validate_proposal_fields(project: JsonObject, proposal: JsonObject) -> None:
         live_status_field = f"{criterion}_status"
         if live_status_field not in project:
             raise AuditError(f"Project response is missing declared criterion field {live_status_field!r}.")
-        if suffix == "status" and value not in _CRITERION_STATUSES:
+        if suffix == "status" and not is_supported_status(value):
             raise AuditError(f"Repository proposal field {field!r} has unsupported status {value!r}.")
+        if suffix == "justification" and (not isinstance(value, str) or not value.strip()):
+            raise AuditError(f"Repository proposal field {field!r} must be a nonempty string.")
 
 
 def compare_proposals(project: JsonObject, proposal: JsonObject) -> list[JsonObject]:
     """Return stable, field-level differences between live and proposed criteria."""
-    fields = sorted(field for field in proposal if is_non_osps_criterion_field(field))
+    fields = sorted({field for field in (*project, *proposal) if is_non_osps_criterion_field(field)})
     differences: list[JsonObject] = []
 
     for field in fields:
