@@ -2,9 +2,9 @@
 
 ![AVOPS workflow architecture](assets/avops.png)
 
-The AVOPS workflow on Azure turns your curated driving data into targeted ODD insights and richer synthetic scenes—using the Cosmos DAG workflow or the optional CARLA + Cosmos pipeline.
+The AVOPS workflow on Azure turns your recorded driving data into targeted ODD insights and richer synthetic scenes—using the Cosmos Data Factory AV Dataset Generation DAG workflow or the optional CARLA + Cosmos pipeline.
 
-This feature provides workflows for Autonomous Vehicles specific synthetic data generation using Nvidia PAIDF on a Kubernetes GPU cluster. The scripts configure and manage the workflow without vendoring or modifying its repository.
+This feature provides workflows for Autonomous Vehicles specific synthetic data generation using the [NVIDIA Cosmos Data Factory AV Dataset Generation Skill](https://github.com/NVIDIA/cdf-orchestration/blob/main/docs/autonomous-vehicle-dataset-generation/getting-started.md) on a Kubernetes GPU cluster. The scripts configure, initialize, and manage the workflow.
 
 ## 🚀 Quick Start
 
@@ -25,9 +25,15 @@ Install the following tools and configure access to a Kubernetes cluster with GP
 
 The cluster needs a GPU node for GPU workloads. Preflight warns if Kubernetes reports no allocatable NVIDIA GPUs.
 
+### Azure setup instructions
+
+Configure Azure access and storage using the [Azure Support document](https://github.com/NVIDIA/cdf-orchestration/blob/main/docs/autonomous-vehicle-dataset-generation/azure-support.md) in the CDF Orchestration docs before continuing. This ensures the workflow can run in an Azure environment.
+
 ### Downloads, model access, and disk
 
-The first run downloads these images, assets, source files, or model weights. The Hugging Face model pages require the user to sign in and accept their access terms before downloading. `HF_TOKEN` must belong to an account with access to each gated model.
+This section covers requirements for the additional components outside the NVIDIA CDF AV Dataset Generation workflow. Setup details for the NVIDIA CDF AV Dataset Generation workflow, which uses the Cosmos Curator, Search, and Cosmos3 Generator modules, are documented in the [AV Dataset Generation prerequisites](https://github.com/NVIDIA/cdf-orchestration/blob/main/docs/autonomous-vehicle-dataset-generation/prerequisites.md#check-capacity).
+
+The first run downloads the following images, assets, source files, or model weights. The Hugging Face model pages require the user to sign in and accept their access terms before downloading. `HF_TOKEN` must belong to an account with access to each gated model.
 
 | Artifact                                        | Source                                                                                                                 |     First-download size | Access and storage notes                                                                                                                                               |
 |-------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|------------------------:|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -75,7 +81,7 @@ The Airflow UI is available at <http://127.0.0.1:8080> while port forwarding is 
 
 | Setting                                                                                       | Required | Purpose                                                                                                                        |
 |-----------------------------------------------------------------------------------------------|---------:|--------------------------------------------------------------------------------------------------------------------------------|
-| `SDG_WORKFLOW_DIR`                                                                            |      Yes | Absolute path to the external SDG workflow checkout                                                                            |
+| `SDG_WORKFLOW_DIR`                                                                            |      Yes | Absolute path to the external Cosmos Data Factory AV Dataset Generation workflow checkout                                      |
 | `KUBECONFIG`                                                                                  |      Yes | Path to the kubeconfig file for the target cluster                                                                             |
 | `NGC_API_KEY`                                                                                 |      Yes | NVIDIA NGC authentication                                                                                                      |
 | `HF_TOKEN`                                                                                    |      Yes | Hugging Face model-download authentication                                                                                     |
@@ -96,21 +102,21 @@ Values exported in the shell take precedence over values in `sdg.env`. The loade
 
 Run `AVOPS/scripts/sdg.sh --help` to display the available commands.
 
-| Command                     | Action                                                                                                                                                    |
-|-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `preflight`                 | Check required tools, credentials, kubeconfig, and cluster access                                                                                         |
-| `setup`                     | Run preflight, then generate Helm secret values in the external repository                                                                                |
-| `nfs`                       | Install the host NFS export and Kubernetes StorageClass                                                                                                   |
-| `build`                     | Build and push the Airflow controller image                                                                                                               |
-| `install`                   | Install or upgrade the SDG controller                                                                                                                     |
-| `run`                       | Run preflight, setup, NFS installation, image build, and controller installation in order                                                                 |
-| `port-forward`              | Forward the Airflow UI to `http://127.0.0.1:8080`                                                                                                         |
-| `trigger <payload>`         | Submit a JSON payload to the configured Airflow DAG                                                                                                       |
-| `odd-build`                 | Build the ODD gap-analysis image from `AVOPS/ODD`                                                                                                         |
-| `odd <in> <out>`            | Run the ODD container on a directory of videos                                                                                                            |
-| `pipeline <payload>`        | Run curation, ODD gap analysis, then generation (one run per gap); `--backend carla` generates with CARLA + Cosmos Transfer multi-view instead of the DAG |
-| `carla <odd-dir> [out-dir]` | Generate from an existing ODD output with CARLA + Cosmos Transfer 2.5 multi-view                                                                          |
-| `uninstall`                 | Uninstall the controller                                                                                                                                  |
+| Command                     | Action                                                                                                                                                        |
+|-----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `preflight`                 | Check required tools, credentials, kubeconfig, and cluster access                                                                                             |
+| `setup`                     | Run preflight, then generate Helm secret values in the external repository                                                                                    |
+| `nfs`                       | Install the host NFS export and Kubernetes StorageClass                                                                                                       |
+| `build`                     | Build and push the Airflow controller image                                                                                                                   |
+| `install`                   | Install or upgrade the SDG controller                                                                                                                         |
+| `run`                       | Run preflight, setup, NFS installation, image build, and controller installation in order                                                                     |
+| `port-forward`              | Forward the Airflow UI to `http://127.0.0.1:8080`                                                                                                             |
+| `trigger <payload>`         | Submit a JSON payload to the configured Airflow DAG                                                                                                           |
+| `odd-build`                 | Build the ODD gap-analysis image from `AVOPS/ODD`                                                                                                             |
+| `odd <in> <out>`            | Run the ODD container on a directory of videos                                                                                                                |
+| `pipeline <payload>`        | Run curation, ODD gap analysis, then generation (one run per gap); `--backend carla` generates with CARLA + Cosmos Transfer multi-view instead of the CDF DAG |
+| `carla <odd-dir> [out-dir]` | Generate from an existing ODD output with CARLA + Cosmos Transfer 2.5 multi-view                                                                              |
+| `uninstall`                 | Uninstall the controller                                                                                                                                      |
 
 Individual installation steps can be run separately when needed. For example:
 
@@ -145,7 +151,7 @@ The trigger command obtains a bearer token from the Airflow authentication endpo
 
 ## 🔍 ODD Gap Analysis Between Curation and Generation
 
-The SDG DAG runs curation, Cosmos Dataset Search retrieval, and generation as one run. The ODD (Operational Design Domain) step is spliced in from this feature without changing the external repository: `sdg.sh pipeline` runs the DAG twice around the ODD container.
+The Cosmos Data Factory DAG runs CDF curation, CDF search and retrieval, and CDF generation as one run. The ODD (Operational Design Domain) step is spliced in from this feature without changing the external repository: `sdg.sh pipeline` runs the DAG twice around the ODD container.
 
 ```text
 sdg.sh pipeline <payload>
