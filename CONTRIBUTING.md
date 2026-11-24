@@ -310,6 +310,17 @@ No external interface is removed without a deprecation notice in a prior release
 
 All contributions require appropriate tests. This policy supports code quality and the project's [OpenSSF Best Practices](https://www.bestpractices.dev/) goals.
 
+### OpenSSF Evidence
+
+Changes to security controls, build and release processes, testing policy, governance, licensing, or contributor requirements can affect the project's [OpenSSF Best Practices questionnaire](https://www.bestpractices.dev/projects/12195). Update `.bestpractices.json` when a contribution changes evidence cited by the questionnaire, then run the `openssf-badge-audit` skill or the standalone collector from the repository root:
+
+```bash
+uv run --no-project --python 3.12 python \
+  .github/skills/openssf-badge-audit/scripts/audit_badge.py
+```
+
+Do not mark a criterion as met without verifiable repository or project evidence. Questionnaire submission remains a maintainer action through the authenticated OpenSSF interface.
+
 ### Policy
 
 - New features require accompanying unit tests.
@@ -432,7 +443,7 @@ uv run pytest data-pipeline/capture/tests -v
 # Fleet deployment inference (fleet-deployment/inference/tests)
 uv run pytest fleet-deployment/inference/tests -v
 
-# Shared CI scripts (shared/ci/tests)
+# Shared CI and OpenSSF audit scripts (shared/ci/tests)
 uv run pytest shared/ci/tests -v
 
 # Dataviewer backend and curation (from the repository root)
@@ -454,6 +465,8 @@ cd gpu-offload/runtime && uv sync --extra test && uv run pytest -o addopts="" te
 # Fuzz / regression (tests/, run from repo root)
 uv run pytest tests/ -v
 ```
+
+The `pytest-shared-ci` component tests the collector through `shared/ci/tests` and measures source coverage for `.github/skills/openssf-badge-audit/scripts`.
 
 Run the five root-discovered suites (`tests`, `training/tests`,
 `data-management/tools/tests`, `fleet-deployment/inference/tests`,
