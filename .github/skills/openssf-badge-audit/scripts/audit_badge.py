@@ -374,6 +374,13 @@ def validate_proposal_fields(project: JsonObject, proposal: JsonObject) -> None:
             raise AuditError(f"Repository proposal field {field!r} must be a nonempty string.")
 
 
+def _comparison_value(value: JsonValue) -> JsonValue:
+    """Normalize serialization-only differences before proposal comparison."""
+    if isinstance(value, str):
+        return value.replace("\r\n", "\n").replace("\r", "\n")
+    return value
+
+
 def compare_proposals(project: JsonObject, proposal: JsonObject) -> list[JsonObject]:
     """Return stable, field-level differences between live and proposed criteria."""
     fields = sorted({field for field in (*project, *proposal) if is_non_osps_criterion_field(field)})
@@ -382,7 +389,7 @@ def compare_proposals(project: JsonObject, proposal: JsonObject) -> list[JsonObj
     for field in fields:
         live_value = project.get(field)
         repository_value = proposal.get(field)
-        if live_value != repository_value:
+        if _comparison_value(live_value) != _comparison_value(repository_value):
             differences.append(
                 {
                     "criterion": field.rsplit("_", 1)[0],

@@ -315,6 +315,12 @@ class TestReport:
             }
         ]
 
+    def test_differences_ignore_line_ending_serialization(self) -> None:
+        project = _project(build_justification="First line\r\nSecond line\rThird line")
+        proposal = _proposal(build_justification="First line\nSecond line\nThird line")
+
+        assert _AUDIT.compare_proposals(project, proposal) == []
+
     def test_unresolved_statuses_include_unknown_on_either_side(self) -> None:
         project = _project(build_status="?", crypto_random_status="Met")
         proposal = _proposal(build_status="Met", crypto_random_status="?")
