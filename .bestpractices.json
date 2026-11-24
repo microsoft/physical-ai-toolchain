@@ -194,7 +194,7 @@
   "test_policy_mandated_justification": "Justification: `CONTRIBUTING.md` formally requires tests with major new functionality: new features require accompanying unit tests, refactors must not reduce coverage, and local/CI test commands plus coverage targets are documented.\n\nEvidence URLs: https://github.com/microsoft/physical-ai-toolchain/blob/main/CONTRIBUTING.md",
   "test_policy_mandated_status": "Met",
   "test_policy_status": "Met",
-  "test_statement_coverage80_justification": "Codecov reported 82.42% aggregate coverage for main commit `2befdd0b5b2e5cb2d406cb258ef51c3d380cdafc` on 2026-10-19, above the 80% requirement. The repository also configures 80% project targets for required Python component coverage flags.\n\nEvidence:\n- https://api.codecov.io/api/v2/github/microsoft/repos/physical-ai-toolchain/branches/main/\n- https://github.com/microsoft/physical-ai-toolchain/blob/main/codecov.yml",
+  "test_statement_coverage80_justification": "Evidence reassessment (2026-11-24): Codecov reports 87.36% statement coverage for main commit `d17a33bfc7abfde8754783ce39a09c166c3de736`, above the 80% requirement. The repository also configures 80% project targets for required Python component coverage flags.\n\nEvidence:\n- https://api.codecov.io/api/v2/github/microsoft/repos/physical-ai-toolchain/branches/main/\n- https://github.com/microsoft/physical-ai-toolchain/blob/main/codecov.yml",
   "test_statement_coverage80_status": "Met",
   "test_statement_coverage90_justification": "Evidence reassessment (2026-11-24): Codecov reports 87.36% statement coverage for current main commit d17a33bf, below the 90% requirement.",
   "test_statement_coverage90_status": "Unmet",

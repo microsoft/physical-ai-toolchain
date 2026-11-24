@@ -239,7 +239,7 @@ Fleet intelligence (`T5`) is not a single leap. It decomposes into four ordered 
 
 The OpenSSF values preserve the maintainer self-attestation recorded by public project 12195; they are not an independent certification or a recomputation from current repository evidence. The separate 2026-11-24 evidence reassessment classified 94 criteria as Met, 18 as Unmet, 10 as N/A, and 7 as Unknown. The root `.bestpractices.json` records that current proposal without changing the public questionnaire.
 
-The current repository-wide Python coverage baseline is unknown because CI reports coverage by component and does not publish one authoritative aggregate. The `.bestpractices.json` evidence for `test_statement_coverage80_status` separately records an 82.42% Codecov branch report from 2026-10-19 and required 80% per-component Codecov targets.
+The historical roadmap baseline remains unknown because CI reports coverage by component. The separate 2026-11-24 badge evidence reassessment records 87.36% Codecov statement coverage for main commit `d17a33bf`, above the 80% criterion and below the 90% Gold criterion.
 
 ## Timeline Overview
 
