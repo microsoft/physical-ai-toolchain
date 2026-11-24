@@ -46,7 +46,7 @@ The [security guide](../operations/security-guide.md) documents:
 
 ## 🏅 OpenSSF Best Practices
 
-[OpenSSF Best Practices project 12195](https://www.bestpractices.dev/projects/12195) publicly awards the Silver badge. The status was verified on 2026-10-20 against the public project data.
+[OpenSSF Best Practices project 12195](https://www.bestpractices.dev/projects/12195) records the maintainers' Silver self-attestation. The public questionnaire was observed on 2026-11-24; it is not an independent OpenSSF certification.
 
 | Level   | Progress |
 |---------|---------:|
@@ -54,7 +54,7 @@ The [security guide](../operations/security-guide.md) documents:
 | Silver  |     100% |
 | Gold    |      43% |
 
-The public award and current repository evidence are distinct. The root `.bestpractices.json` records `static_analysis_fixed`, `vulnerabilities_critical_fixed`, and `vulnerabilities_fixed_60_days` as unmet because code-scanning findings, critical Dependabot alerts, and aged medium-or-higher Dependabot alerts remain open. Run the `openssf-badge-audit` skill to compare the proposal with the live project before a maintainer submits changes through the authenticated OpenSSF interface.
+The public self-attestation and current repository evidence are distinct. The 2026-11-24 reassessment recorded 94 Met, 18 Unmet, 10 N/A, and 7 Unknown criteria in the root `.bestpractices.json`. No questionnaire update was submitted. Run the `openssf-badge-audit` skill to compare the proposal with the live project before a maintainer submits changes through the authenticated OpenSSF interface.
 
 ## 🛠️ Operational Scripts
 

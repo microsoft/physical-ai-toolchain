@@ -34,7 +34,7 @@ Tier IDs, stage names, boundaries, and the fleet vocabulary are defined once in 
 
 The latest release recorded in [CHANGELOG.md](pathname://../../CHANGELOG.md) is v0.8.0, dated 2026-05-08; `package.json` also reports 0.8.0.
 Releases v0.2.0 through v0.8.0 are recorded, but release numbers alone do not establish completion of every originally planned deliverable.
-The priorities, success-metric baseline, and timeline below retain the historical planning record. Public OpenSSF percentages were verified on 2026-10-20; milestone issue completion was not reassessed during this source review. Future tier and autonomy plans are not marked shipped by this update.
+The priorities, success-metric baseline, and timeline below retain the historical planning record. Public OpenSSF percentages were observed on 2026-10-20 and remained unchanged when checked again on 2026-11-24; milestone issue completion was not reassessed during this source review. Future tier and autonomy plans are not marked shipped by this update.
 
 ## Priorities
 
@@ -237,7 +237,7 @@ Fleet intelligence (`T5`) is not a single leap. It decomposes into four ordered 
 | Contributing guide count      | 7       | 8              | 9              |
 | Average PR review time        | N/A     | < 3 days       | < 2 days       |
 
-The OpenSSF values reflect public project 12195, not a recomputation from current repository evidence. The root `.bestpractices.json` records three mandatory criteria as unmet for community remediation.
+The OpenSSF values preserve the maintainer self-attestation recorded by public project 12195; they are not an independent certification or a recomputation from current repository evidence. The separate 2026-11-24 evidence reassessment classified 94 criteria as Met, 18 as Unmet, 10 as N/A, and 7 as Unknown. The root `.bestpractices.json` records that current proposal without changing the public questionnaire.
 
 The current repository-wide Python coverage baseline is unknown because CI reports coverage by component and does not publish one authoritative aggregate. The `.bestpractices.json` evidence for `test_statement_coverage80_status` separately records an 82.42% Codecov branch report from 2026-10-19 and required 80% per-component Codecov targets.
 
