@@ -6,7 +6,7 @@
 # pytest-dm-tools      | pytest-dm-tools.yml            | repo root                       | logs/coverage-dm-tools.xml        | --cov=data-management/tools
 # pytest-data-pipeline | pytest-data-pipeline.yml       | repo root                       | logs/coverage-data-pipeline.xml   | --cov=data-pipeline/capture
 # pytest-inference     | pytest-inference.yml           | repo root                       | logs/coverage-inference.xml       | --cov=fleet-deployment/inference
-# pytest-shared-ci     | pytest-shared-ci.yml           | repo root                       | logs/coverage-shared-ci.xml       | --cov=shared/ci
+# pytest-shared-ci     | pytest-shared-ci.yml           | repo root                       | logs/coverage-shared-ci.xml       | --cov=shared/ci --cov=.github/skills/openssf-badge-audit/scripts
 # pytest-dataviewer    | dataviewer-backend-pytests.yml | data-management/viewer/backend  | logs/coverage-dataviewer.xml       | --cov=src
 # pytest-curation      | dataviewer-backend-pytests.yml | data-management/viewer/backend  | logs/coverage-curation.xml         | --cov=../../curation/physical_ai_curation
 # pytest-dataset-io    | dataviewer-backend-pytests.yml | data-management/viewer/backend  | logs/coverage-dataset-io.xml       | --cov=../../dataset-io/physical_ai_dataset_io
@@ -118,6 +118,7 @@ flags:
   pytest-shared-ci:
     paths:
       - shared/ci/
+      - .github/skills/openssf-badge-audit/scripts/
     carryforward: true
   pytest-dataviewer:
     paths:
@@ -316,6 +317,7 @@ component_management:
       paths:
         - shared/ci/**
         - "!shared/ci/tests/**"
+        - .github/skills/openssf-badge-audit/scripts/**
     - component_id: infrastructure-terraform
       name: Infrastructure / Terraform
       paths:
