@@ -173,7 +173,7 @@ async def list_destinations(
 async def list_jobs(
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
-    cursor: int = Depends(query_int_param("cursor", default=0, ge=0)),
+    cursor: int = Depends(query_int_param("cursor", default=0, ge=0, le=(1 << 63) - 1)),
     limit: int = Depends(query_int_param("limit", default=50, ge=1, le=100)),
     dataset_id: str | None = Query(default=None, max_length=255),
 ) -> dict[str, Any]:

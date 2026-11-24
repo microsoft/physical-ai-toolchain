@@ -83,13 +83,24 @@ schemathesis.openapi.format(
 )
 
 
+@pytest.fixture(scope="module")
+def api_schema_documents() -> dict[tuple[bool, tuple[int, ...]], dict[str, Any]]:
+    """Reuse generated documents without sharing mutable Schemathesis state."""
+    return {}
+
+
 @pytest.fixture(params=[False, True], ids=["default", "vlm"])
 def api_schema(
-    client: TestClient, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    client: TestClient,
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    api_schema_documents: dict[tuple[bool, tuple[int, ...]], dict[str, Any]],
 ) -> Iterator[OpenApiSchema]:
     """Load OpenAPI schema from the in-process ASGI app used in tests."""
     original_routes = list(client.app.router.routes)
     original_lifespan = client.app.router.lifespan_context
+    document_key = (bool(request.param), tuple(id(route) for route in original_routes))
     if request.param:
         monkeypatch.setenv("VLM_JUDGE_ENABLED", "true")
         monkeypatch.setenv("VLM_JUDGE_BACKEND", "echo")
@@ -116,6 +127,11 @@ def api_schema(
     checks = ChecksConfig()
     checks.negative_data_rejection.expected_statuses = [*checks.negative_data_rejection.expected_statuses, "413"]
     try:
+        if document_key not in api_schema_documents:
+            api_schema_documents[document_key] = client.app.openapi()
+        document = deepcopy(api_schema_documents[document_key])
+        client.app.openapi_schema = document
+        monkeypatch.setattr(client.app, "openapi", lambda: document)
         yield schemathesis.openapi.from_asgi(
             "/openapi.json",
             client.app,
@@ -146,6 +162,20 @@ def api_schema(
 
 
 schema = schemathesis.pytest.from_fixture("api_schema")
+
+
+def test_contract_schema_documents_are_isolated(
+    api_schema: OpenApiSchema,
+    api_schema_documents: dict[tuple[bool, tuple[int, ...]], dict[str, Any]],
+    client: TestClient,
+) -> None:
+    documents = deepcopy(api_schema_documents)
+    api_schema.raw_schema["info"]["title"] = "Isolated contract document"
+    api_schema.raw_schema["paths"].clear()
+    client.app.openapi()["paths"].clear()
+
+    assert api_schema_documents == documents
+    assert all(document["paths"] for document in api_schema_documents.values())
 
 
 def _resize[T](values: list[T], length: int, fill: T) -> list[T]:
@@ -348,6 +378,23 @@ def test_release_submission_requires_valid_idempotency_header(
         meta=_generation_meta(schemathesis.GenerationMode.NEGATIVE),
     ).call_and_validate()
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize("cursor", [0, (1 << 63) - 1, 1 << 63])
+def test_release_job_cursor_matches_storage_bounds(api_schema: OpenApiSchema, cursor: int) -> None:
+    accepted = cursor < 1 << 63
+    operation = api_schema["/api/releases/v1/jobs"]["GET"]
+    response = api_schema.make_case(
+        operation=operation,
+        query={"cursor": cursor},
+        meta=_generation_meta(
+            schemathesis.GenerationMode.POSITIVE if accepted else schemathesis.GenerationMode.NEGATIVE
+        ),
+    ).call_and_validate()
+    assert response.status_code == (200 if accepted else 422)
+    parameters = api_schema.raw_schema["paths"][operation.path]["get"]["parameters"]
+    cursor_schema = next(parameter["schema"] for parameter in parameters if parameter["name"] == "cursor")
+    assert Draft202012Validator(cursor_schema).is_valid(cursor) == accepted
 
 
 @schema.parametrize()

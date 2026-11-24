@@ -883,6 +883,8 @@ Release selections require distinct non-negative integer episode indices and JSO
 flags. Saved resources identify a supported kind, episode, and nonempty revision; only
 annotation resources accept an author ID. The OpenAPI schema describes these constraints,
 release error responses, and the JSON-encoded selection used by the GET preview endpoint.
+Release-job pagination cursors range from 0 through 9,223,372,036,854,775,807,
+matching the stored acceptance-sequence range; larger cursors return HTTP 422.
 No payload-download fallback is used. Copied objects are recorded with storage revision evidence,
 not content hashes.
 
@@ -1237,6 +1239,9 @@ npm run test:backend -- tests/test_api_fuzzing.py -q
 ```
 
 The suite runs every default Schemathesis check against the default and VLM-enabled APIs, with deterministic positive and negative generation and `max_examples=200`. It uses synthetic datasets and an echo judge, without cloud credentials or downloaded models.
+Generated OpenAPI documents are reused for unchanged routes within the module, with an
+independent copy and fresh Schemathesis state for each test. Storage and application
+overrides remain isolated per test.
 
 ### Frontend Development
 
