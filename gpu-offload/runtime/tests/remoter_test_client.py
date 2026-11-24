@@ -42,6 +42,7 @@ def main() -> None:
 
     stub_accumulator = remoter_test_fixture.create_stub_accumulator(50)
     stub_added_value = stub_accumulator.add(5)
+    stub_accumulator.syncwithremote()
 
     result = {
         "add": remoter_test_fixture.add(7, 8),
@@ -64,6 +65,7 @@ def main() -> None:
         "singleton_shared_value": first_singleton.get_value(),
         "stub_proxy_type": type(stub_accumulator).__name__,
         "stub_added_value": stub_added_value,
+        "stub_synced_value": stub_accumulator.__dict__["value"],
         "stub_attribute_value": stub_accumulator.value,
         "stub_description": stub_accumulator.describe(),
         "stub_server_pid": stub_accumulator.get_created_by_pid(),

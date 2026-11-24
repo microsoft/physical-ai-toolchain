@@ -1,7 +1,7 @@
 ---
 title: Xavier Porting Notes
 description: Decisions and deviations during GPU-offload port
-ms.date: 2026-08-10
+ms.date: 2026-11-23
 ms.topic: guidance
 ---
 
@@ -48,15 +48,65 @@ existing byte-oriented socket transport while restricting decoding to data types
 explicitly registered adapters.
 
 **Implementation**: Versioned MessagePack envelope with explicit adapters. Unknown
-types fail serialization and remote exceptions become inert error descriptors.
+wire types fail decoding and remote exceptions become inert error descriptors.
 
 **Compatibility**: The binary protocol is backward-incompatible with unmodified
 upstream servers. Client and server images must use this runtime.
 
 **Validation**: Unit tests cover built-in types, explicit adapters, resource limits,
-unknown-type rejection, and safe remote errors.
+unknown-type rejection, safe remote errors, and rejection of unauthorized calls
+before adapter execution.
 
 **Status**: Implemented
+
+### RPC Authorization and Class Dictionaries
+
+AES-GCM authenticates possession of the workload's shared key. The server also
+validates primitive RPC metadata, canonical callable identity, and membership in
+the frozen callable allowlist before decoding argument adapters. Custom extensions
+remain opaque during this validation, including extensions in nested arguments,
+mapping keys, and metadata. Result metadata is validated before result adapters run.
+
+The class-dictionary adapter accepts fixed decoders for dates, paths, collections,
+and `torch:Tensor`. Built-in paths use stable `pathlib:*` wire names across Python
+versions. Every custom wire type requires local registration on each
+receiving endpoint. Loading its module alone grants no decoding permission.
+Locally configured or decorated remoted classes are registered by the runtime
+when they join the remote-class registry, preserving object synchronization.
+Configured client stubs accept their server class's wire name as a receive-only
+alias. Synchronized server state is restored into the registered local stub without
+importing the server class or changing the stub's encoding name.
+
+Register ordinary state classes, including dataclass call arguments, during endpoint
+initialization. Configured modules are imported before the server accepts calls, so
+registration can live in the module that defines the remote function:
+
+```python
+from remoter import remoter
+
+remoter.register_class2dict_type(ModelState, wire_name="application:ModelState")
+```
+
+Default state reconstruction bypasses constructors and custom attribute setters.
+Dataclass state must contain every declared field, including fields with defaults
+or default factories, and no additional fields. Custom descriptors and unsupported
+value payloads require a reviewed `decode_state` function. Registered enums decode
+existing members without invoking missing-value hooks.
+Tensor subclasses such as `torch.nn.Parameter` and tuple subclasses such as named
+tuples require an explicit state decoder.
+
+```python
+remoter.register_class2dict_type(
+    ModelState,
+    wire_name="application:ModelState",
+    decode_state=decode_model_state,
+)
+```
+
+Validate the schema and bounds in custom decoders. Keep them limited to reconstructing
+the expected data type. A decoder is trusted endpoint code; generic wire-selected
+constructor calls are unsupported. Rebuild and roll out both client and server images
+with this runtime and any required registrations.
 
 ## Deviation 2: Remove Node-Agent and HostPath Mounts
 
