@@ -39,12 +39,20 @@ class TestDetectionRequest:
         with pytest.raises(ValidationError, match="non-negative"):
             DetectionRequest(frames=[0, -1, 2])
 
-    @pytest.mark.parametrize("frame", [True, False, 1.0, 1.5, "1"])
+    @pytest.mark.parametrize("frame", [0, 1, 0.0, 1.0])
+    def test_given_integral_json_number_when_validating_frames_then_accepts(self, frame: int | float) -> None:
+        request = DetectionRequest.model_validate_json(json.dumps({"frames": [0, frame, 2]}))
+
+        assert request.frames == [0, int(frame), 2]
+        assert all(type(index) is int for index in request.frames)
+
+    @pytest.mark.parametrize("frame", [True, False, 1.5, "1"])
     def test_given_non_integer_frame_when_validating_json_then_rejects(self, frame: bool | float | str) -> None:
         payload = json.dumps({"frames": [0, frame, 2]})
 
-        with pytest.raises(ValidationError, match="valid integer"):
+        with pytest.raises(ValidationError) as error:
             DetectionRequest.model_validate_json(payload)
+        assert [item["loc"] for item in error.value.errors()] == [("frames", 1)]
 
     @pytest.mark.parametrize("confidence", [-0.01, 1.01])
     def test_confidence_out_of_range(self, confidence: float):

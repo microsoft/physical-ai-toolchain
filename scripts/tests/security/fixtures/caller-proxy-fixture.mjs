@@ -8,8 +8,7 @@
 // JWT verification are covered by the backend and caller helper unit tests.
 //
 // Usage: node caller-proxy-fixture.mjs backend|helper
-// Receipts stay in memory and are read through a container-loopback control endpoint.
-// /fixture/helper-mode selects the helper response (ok, empty, malformed, unavailable, slow).
+// Receipts and response modes stay in memory behind container-loopback control endpoints.
 
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
@@ -31,6 +30,7 @@ const unsigned = [
 const token = `${unsigned}.${sign('RSA-SHA256', Buffer.from(unsigned), privateKey).toString('base64url')}`
 const mediaBytes = Buffer.from('0123456789abcdef')
 const requestReceipts = []
+let responseMode = 'ok'
 
 function record(entry) {
   requestReceipts.push(entry)
@@ -47,15 +47,16 @@ function readBody(request) {
 function backendHandler(request, response) {
   readBody(request).then(async (body) => {
     const url = new URL(request.url, 'https://fixture')
-    record({
+    const receipt = {
       method: request.method,
       url: request.url,
       headers: request.headers,
       body: body.toString('base64'),
-    })
+    }
+    record(receipt)
 
     if (url.pathname === '/health') {
-      if (helperMode() === 'storage-slow') {
+      if (responseMode === 'storage-slow') {
         setTimeout(() => response.writeHead(200).end(), 20000)
         return
       }
@@ -68,6 +69,7 @@ function backendHandler(request, response) {
       const verified = await fetch(`${process.env.CALLER_FIXTURE_ENDPOINT}/verify`, {
         method: 'POST', body: JSON.stringify(request.headers),
       })
+      receipt.verificationStatus = verified.status
       if (!verified.ok) {
         response.writeHead(verified.status).end()
         return
@@ -121,24 +123,17 @@ function backendHandler(request, response) {
   })
 }
 
-function helperMode() {
-  try {
-    return readFileSync(`${fixture}/helper-mode`, 'utf8').trim() || 'ok'
-  } catch {
-    return 'ok'
-  }
-}
-
 function helperHandler(request, response) {
   readBody(request).then(async (body) => {
+    const mode = responseMode
     record({
       method: request.method,
       url: request.url,
       headers: request.headers,
       bodyBytes: body.length,
+      mode,
     })
 
-    const mode = helperMode()
     const path = new URL(request.url, 'http://helper').pathname
     if (path !== '/token' && path !== '/ready') {
       response.writeHead(404).end()
@@ -186,6 +181,13 @@ async function runTransport() {
     return JSON.parse(docker('exec', container, 'node', '--input-type=module', '-e',
       'const response = await fetch("http://127.0.0.1:8091/receipts"); if (!response.ok) throw new Error("Receipt lookup failed"); process.stdout.write(await response.text())'))
   }
+  const setMode = (mode) => {
+    for (const container of containers.filter((name) => /^caller-(backend|helper)-/.test(name))) {
+      docker('exec', container, 'node', '--input-type=module', '-e',
+        'const response = await fetch("http://127.0.0.1:8091/mode", { method: "PUT", body: process.argv[1] }); if (!response.ok) throw new Error("Mode update failed")',
+        mode)
+    }
+  }
   const check = (condition, message) => { assert.ok(condition, message); checks += 1 }
   const principal = Buffer.from(JSON.stringify({ claims: [{ typ: 'sub', val: 'user-1' }] })).toString('base64')
   const headers = {
@@ -222,7 +224,7 @@ async function runTransport() {
       '--add-host', 'host.docker.internal:host-gateway', ...fixtureArgs, nodeImage, 'node', '/fixture/server.mjs', 'backend')
     await waitReady(() => readFileSync(join(directory, 'backend-ready')) !== null)
     for (const mode of ['off', 'pending', 'managed_identity']) {
-      writeFileSync(join(directory, 'helper-mode'), 'ok')
+      setMode('ok')
       const nginx = `caller-nginx-${mode}-${suffix}`
       containers.push(nginx)
       docker('run', '-d', '--name', nginx, '--network', network, '-p', '127.0.0.1::8080',
@@ -259,13 +261,13 @@ async function runTransport() {
           const helperReceipt = receipts('helper').at(-1)
           check(helperReceipt.method === 'GET' && helperReceipt.bodyBytes === 0 && !helperReceipt.headers.cookie && !helperReceipt.headers.authorization && !helperReceipt.headers['x-ms-client-principal'], 'helper is body/header isolated')
           for (const failure of ['empty', 'malformed', 'oversized', 'unavailable', 'slow']) {
-            writeFileSync(join(directory, 'helper-mode'), failure)
+            setMode(failure)
             const count = receipts('backend').length
             const denied = await request(port, '/api/echo')
             check(denied.status >= 500 && denied.body.length < 4096 && receipts('backend').length === count, `${failure}: fail before backend receipt`)
             check(denied.headers['x-content-type-options'] === 'nosniff' && !denied.headers['x-dataviewer-caller-token'], 'denials retain security without proof')
           }
-          writeFileSync(join(directory, 'helper-mode'), 'ok')
+          setMode('ok')
           for (const path of ['/_caller_proof', '/_caller_ready', '/%5fcaller_proof', '/_caller_proof/']) {
             const count = receipts('helper').length
             await request(port, path)
@@ -293,11 +295,11 @@ async function runTransport() {
         check(budget.status === 200 && receipts('backend').at(-1).headers['x-ms-client-principal'] === paddedPrincipal, 'principal and cookie header budgets preserve bytes')
         const budgetCount = receipts('backend').length
         check((await request(port, '/api/echo', 'GET', { 'X-MS-CLIENT-PRINCIPAL': 'p'.repeat(20000) })).status === 400 && receipts('backend').length === budgetCount, 'oversized ingress header fails without truncation or backend work')
-        writeFileSync(join(directory, 'helper-mode'), 'unavailable')
+        setMode('unavailable')
         const healthCount = receipts('backend').length
         check((await request(port, '/health')).status >= 500 && receipts('backend').length === healthCount, 'unready caller prevents storage-health receipt')
         check((await request(port, '/')).status === 200, 'static liveness survives identity outage')
-        writeFileSync(join(directory, 'helper-mode'), 'ok')
+        setMode('ok')
         for (const method of ['GET', 'HEAD']) {
           const media = await request(port, '/api/media', method, { Range: 'bytes=2-5', 'If-Range': '"fixture"' })
           check(media.status === 206 && media.headers['content-range'] === 'bytes 2-5/16' && media.headers['content-length'] === '4', 'native Range/HEAD content metadata')
@@ -323,11 +325,16 @@ async function runTransport() {
         check(Number(readFileSync(join(directory, 'stream-closed'))) < 128, 'browser cancellation closes upstream media')
         if (process.env.CALLER_FIXTURE_ENDPOINT) {
           for (const [proofCase, status] of [['expired', 401], ['wrong-audience', 401], ['forged', 401], ['unauthorized', 403]]) {
-            writeFileSync(join(directory, 'helper-mode'), proofCase)
-            check((await request(port, '/api/echo')).status === status, `production verifier rejects ${proofCase}`)
+            const before = receipts('backend').length
+            setMode(proofCase)
+            const denied = await request(port, '/api/echo')
+            const after = receipts('backend')
+            check(receipts('helper').at(-1).mode === proofCase, `helper issues ${proofCase} proof`)
+            check(after.length === before + 1 && after.at(-1).verificationStatus === status, `production verifier receives and rejects ${proofCase}`)
+            check(denied.status === status, `proxy preserves ${proofCase} rejection: expected ${status}, received ${denied.status}`)
           }
         }
-        writeFileSync(join(directory, 'helper-mode'), 'storage-slow')
+        setMode('storage-slow')
         const start = Date.now()
         const unhealthy = await request(port, '/health')
         check(unhealthy.status >= 500 && Date.now() - start < 9000, 'storage health timeout is bounded')
@@ -350,6 +357,13 @@ async function runTransport() {
 
 if (role === 'backend' || role === 'helper') {
   createHttpServer((request, response) => {
+    if (request.method === 'PUT' && request.url === '/mode') {
+      readBody(request).then((body) => {
+        responseMode = body.toString()
+        response.writeHead(204).end()
+      })
+      return
+    }
     if (request.method !== 'GET' || request.url !== '/receipts') {
       response.writeHead(404).end()
       return

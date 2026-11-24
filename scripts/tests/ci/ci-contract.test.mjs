@@ -185,7 +185,7 @@ test('skill packages: CLI reports invalid repositories', t => {
 });
 
 test('product workspace: judge tests and coverage remain required in the backend owner', () => {
-  assert.equal(graph['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer']['timeout-minutes'], 40);
+  assert.equal(graph['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer']['timeout-minutes'], 60);
   const steps = graph['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer'].steps;
   const install = steps.find(step => step.id === 'install').run;
   assert.match(install, /--project \.\.\/\.\.\/\.\. --all-packages --frozen/);
@@ -1729,12 +1729,23 @@ for (const [name, mutate, diagnostic] of graphMutations) {
   });
 }
 
-test('execution graph: backend suite timeout remains bounded', () => {
-  const candidate = structuredClone(graph);
-  candidate['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer']['timeout-minutes'] = 41;
-  const errors = validateWorkflows(candidate, contract);
-  assert.ok(errors.some(error => error.includes('dataviewer-backend-pytests:pytest-dataviewer: timeout must be within the execution budget')));
-});
+for (const [workflow, job, minutes, valid] of [
+  ['dataviewer-backend-pytests', 'pytest-dataviewer', 60, true],
+  ['dataviewer-backend-pytests', 'pytest-dataviewer', 61, false],
+  ['fuzz-regression-tests', 'fuzz-regression', 20, true],
+  ['fuzz-regression-tests', 'fuzz-regression', 21, false],
+]) {
+  test(`execution budget: ${workflow} ${minutes} minutes is ${valid ? 'allowed' : 'rejected'}`, () => {
+    const candidate = structuredClone(graph);
+    candidate[`.github/workflows/${workflow}.yml`].jobs[job]['timeout-minutes'] = minutes;
+    const errors = validateWorkflows(candidate, contract);
+    if (valid) {
+      assert.deepEqual(errors, []);
+    } else {
+      assert.ok(errors.includes(`${workflow}:${job}: timeout must be within the execution budget`));
+    }
+  });
+}
 
 const executionMutations = [
   ['missing reusable output', ({ workflow }) => { delete workflow.on.workflow_call.outputs['work-status']; }, 'broken reusable output work-status'],

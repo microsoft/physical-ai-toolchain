@@ -6,12 +6,12 @@ from datetime import datetime
 from itertools import pairwise
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import BeforeValidator, ConfigDict, Field, model_validator
 
-from ..validation import SanitizedModel
+from ..validation import SanitizedModel, validate_json_integer
 
-FrameIndex = Annotated[int, Field(ge=0, strict=True)]
-PositiveDimension = Annotated[int, Field(gt=0, strict=True)]
+FrameIndex = Annotated[int, Field(ge=0), BeforeValidator(validate_json_integer)]
+PositiveDimension = Annotated[int, Field(gt=0), BeforeValidator(validate_json_integer)]
 
 
 class EditModel(SanitizedModel):

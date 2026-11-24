@@ -8,12 +8,14 @@ and episode clustering.
 from __future__ import annotations
 
 import math
+from typing import Annotated
 
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field, StrictFloat
 
 from ..csrf import require_csrf_token
+from ..models.errors import ErrorResponse
 from ..services import (
     AnomalyDetector,
     AnomalySeverity,
@@ -23,8 +25,13 @@ from ..services import (
     TrajectoryMetrics,
 )
 from ..services.trajectory_analysis import DEFAULT_SMOOTHNESS_MODE, SmoothnessMode
+from ..validation import validate_json_integer
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+
+type JointPositions = Annotated[list[StrictFloat], Field(json_schema_extra={"minItems": 1})]
+type PositionMatrix = Annotated[list[JointPositions], Field(json_schema_extra={"minItems": 1})]
+type TrajectoryPositions = Annotated[list[JointPositions], Field(json_schema_extra={"minItems": 3})]
 
 
 def _validate_matrix(values: list[list[float]], field_name: str) -> None:
@@ -68,19 +75,13 @@ def _validate_trajectory_inputs(
 class TrajectoryData(BaseModel):
     """Trajectory data for analysis."""
 
-    positions: list[list[float]] = Field(description="Joint positions array of shape (N, num_joints)")
-    timestamps: list[float] = Field(description="Timestamps for each position")
-    gripper_states: list[float] | None = Field(default=None, description="Optional gripper states")
+    positions: TrajectoryPositions = Field(description="Joint positions array of shape (N, num_joints)")
+    timestamps: list[StrictFloat] = Field(description="Timestamps for each position", json_schema_extra={"minItems": 3})
+    gripper_states: list[StrictFloat] | None = Field(default=None, description="Optional gripper states")
     smoothness_mode: SmoothnessMode = Field(
         default=DEFAULT_SMOOTHNESS_MODE,
         description="Normalization for normalized_smoothness: 'log-scaled' (default) or 'radian-based'",
     )
-
-
-class ErrorResponse(BaseModel):
-    """HTTP error response."""
-
-    detail: str
 
 
 class TrajectoryMetricsResponse(BaseModel):
@@ -140,11 +141,11 @@ class AnomalyResponse(BaseModel):
 class AnomalyDetectionRequest(BaseModel):
     """Request for anomaly detection."""
 
-    positions: list[list[float]] = Field(description="Joint positions")
-    timestamps: list[float] = Field(description="Timestamps")
-    forces: list[list[float]] | None = Field(default=None, description="Optional force/torque data")
-    gripper_states: list[float] | None = Field(default=None, description="Optional gripper states")
-    gripper_commands: list[float] | None = Field(default=None, description="Optional gripper commands")
+    positions: TrajectoryPositions = Field(description="Joint positions")
+    timestamps: list[StrictFloat] = Field(description="Timestamps", json_schema_extra={"minItems": 3})
+    forces: PositionMatrix | None = Field(default=None, description="Optional force/torque data")
+    gripper_states: list[StrictFloat] | None = Field(default=None, description="Optional gripper states")
+    gripper_commands: list[StrictFloat] | None = Field(default=None, description="Optional gripper commands")
 
 
 class AnomalyDetectionResponse(BaseModel):
@@ -158,8 +159,12 @@ class AnomalyDetectionResponse(BaseModel):
 class ClusterRequest(BaseModel):
     """Request for episode clustering."""
 
-    trajectories: list[list[list[float]]] = Field(description="List of trajectory arrays")
-    num_clusters: int | None = Field(default=None, ge=2, le=20, description="Optional fixed number of clusters")
+    trajectories: list[PositionMatrix] = Field(
+        description="List of trajectory arrays", json_schema_extra={"minItems": 2}
+    )
+    num_clusters: Annotated[int, Field(ge=2, le=20), BeforeValidator(validate_json_integer)] | None = Field(
+        default=None, description="Optional fixed number of clusters"
+    )
 
 
 class ClusterAssignmentResponse(BaseModel):
@@ -182,10 +187,10 @@ class ClusterResponse(BaseModel):
 class SuggestAnnotationRequest(BaseModel):
     """Request for AI-suggested annotations."""
 
-    positions: list[list[float]] = Field(description="Joint positions")
-    timestamps: list[float] = Field(description="Timestamps")
-    gripper_states: list[float] | None = Field(default=None, description="Optional gripper states")
-    forces: list[list[float]] | None = Field(default=None, description="Optional force data")
+    positions: TrajectoryPositions = Field(description="Joint positions")
+    timestamps: list[StrictFloat] = Field(description="Timestamps", json_schema_extra={"minItems": 3})
+    gripper_states: list[StrictFloat] | None = Field(default=None, description="Optional gripper states")
+    forces: PositionMatrix | None = Field(default=None, description="Optional force data")
 
 
 class AnnotationSuggestion(BaseModel):

@@ -16,11 +16,18 @@ from pydantic import Field, ValidationError
 
 from ..config import get_app_config
 from ..csrf import require_csrf_token
+from ..models.errors import error_responses
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..storage.base import RevisionConflictError, VersionedValue
 from ..storage.blob_dataset import BlobDatasetProvider
 from ..storage.local_revision import content_etag, write_conditional
-from ..validation import SAFE_DATASET_ID_PATTERN, SanitizedModel, path_string_param, validate_path_containment
+from ..validation import (
+    SAFE_DATASET_ID_PATTERN,
+    JsonInteger,
+    SanitizedModel,
+    path_string_param,
+    validate_path_containment,
+)
 from .labels import RevisionPrecondition, require_revision_precondition
 
 try:
@@ -35,7 +42,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(responses=error_responses(400))
 defaults_router = APIRouter()
 
 
@@ -44,7 +51,7 @@ class JointGroupConfig(SanitizedModel):
 
     id: str
     label: str
-    indices: list[int] = Field(default_factory=list)
+    indices: list[JsonInteger] = Field(default_factory=list)
 
 
 class JointConfig(SanitizedModel):
@@ -297,6 +304,7 @@ async def get_joint_config(
 @router.put(
     "/{dataset_id}/joint-config",
     dependencies=[Depends(require_csrf_token)],
+    responses=error_responses(412, 428),
 )
 async def update_joint_config(
     response: Response,
@@ -320,6 +328,7 @@ async def get_joint_config_defaults(response: Response) -> JointConfig:
 @defaults_router.put(
     "/joint-config/defaults",
     dependencies=[Depends(require_csrf_token)],
+    responses=error_responses(400, 412, 428),
 )
 async def update_joint_config_defaults(
     response: Response,

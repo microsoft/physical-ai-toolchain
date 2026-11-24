@@ -24,6 +24,7 @@ import httpx
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+import schemathesis
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from physical_ai_curation.models import DatasetLabelsFile
@@ -2078,6 +2079,50 @@ def test_given_body_preview_when_requested_then_no_state_is_written(release_api:
     assert response.status_code == 200, response.json()
     assert response.json()["digest"] == _preview(test_client, spec)["digest"]
     assert not settings.job_root.exists()
+    assert not settings.destinations["local"].exists()
+
+
+def test_release_admission_and_lookup_responses_match_openapi(release_api: tuple) -> None:
+    _client, spec, settings, app, _root = release_api
+    schema = schemathesis.openapi.from_asgi("/openapi.json", app)
+    preview = schema[BASE + "/preview"]["POST"].Case(body=spec).call_and_validate()
+    assert preview.status_code == 200
+    accepted = (
+        schema[BASE + "/jobs"]["POST"]
+        .Case(
+            headers={"Idempotency-Key": "contract-release"},
+            body={
+                **spec,
+                "preview_digest": preview.json()["digest"],
+                "processing_digest": preview.json()["summary"]["processing_digest"],
+                "local_disk_acknowledged": True,
+            },
+        )
+        .call_and_validate()
+    )
+    assert accepted.status_code == 202
+    job_id = accepted.json()["job_id"]
+    lookup = schema[BASE + "/requests"]["GET"].Case(headers={"Idempotency-Key": "contract-release"}).call_and_validate()
+    assert lookup.status_code == 200
+    assert lookup.json()["job_id"] == job_id
+    status = schema[BASE + "/jobs/{job_id}"]["GET"].Case(path_parameters={"job_id": job_id}).call_and_validate()
+    assert status.status_code == 200
+    assert (
+        schema[BASE + "/jobs/{job_id}"]["GET"]
+        .Case(path_parameters={"job_id": "0" * 32})
+        .call_and_validate()
+        .status_code
+        == 404
+    )
+    conflict = (
+        schema[BASE + "/jobs"]["POST"]
+        .Case(
+            headers={"Idempotency-Key": "contract-release"},
+            body={**spec, "episode_indices": [0]},
+        )
+        .call_and_validate()
+    )
+    assert conflict.status_code == 409
     assert not settings.destinations["local"].exists()
 
 

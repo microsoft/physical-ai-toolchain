@@ -4,21 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Awaitable
-from typing import Annotated, Any, NoReturn
+from typing import Annotated, Any, Literal, NoReturn
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response
 from physical_ai_curation.release.inputs import SavedSelection
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from ..auth import PrincipalContext, require_principal_context
 from ..csrf import require_csrf_token
+from ..models.errors import ErrorResponse
 from ..services.release_service import (
     ReleaseApiError,
     ReleaseService,
     ReleaseSpec,
     get_release_service,
 )
+from ..validation import DATASET_ID_INPUT_PATTERN, JsonInteger, path_int_param, query_int_param
 
 
 class ReleaseErrorBody(BaseModel):
@@ -27,29 +30,69 @@ class ReleaseErrorBody(BaseModel):
     detail: dict[str, Any] | list[dict[str, Any]]
 
 
-router = APIRouter(responses={422: {"model": ReleaseErrorBody}})
+router = APIRouter(
+    responses={
+        status: {"model": ReleaseErrorBody | ErrorResponse} for status in (400, 404, 409, 422, 499, 503, 504, 507)
+    }
+)
 
 JobId = Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")]
 MAX_EPISODE_SELECTION = 10_000
+_IDENTITY_PATTERN = r"^[\r\n]*[A-Za-z0-9](?:[\r\n]*[A-Za-z0-9_-]){0,127}[\r\n]*$"
+_NAME_PATTERN = r"^(?![\s\S]*-[\r\n]*-)[\r\n]*[A-Za-z0-9](?:[\r\n]*[A-Za-z0-9._-]){0,127}[\r\n]*$"
+_IDEMPOTENCY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+ReleaseDatasetId = Annotated[str, Path(pattern=DATASET_ID_INPUT_PATTERN)]
+
+
+class SavedResourceBody(BaseModel):
+    """Persisted resource identity; content is read from storage rather than supplied by callers."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "if": {"properties": {"kind": {"const": "annotation"}}},
+            "else": {"properties": {"annotation_author_id": {"type": "null"}}},
+        },
+    )
+
+    kind: Literal["annotation", "edits", "labels", "ledger", "evidence", "recording_receipt", "import_mapping"]
+    episode_index: Annotated[JsonInteger, Field(ge=0, json_schema_extra={"minimum": 0})]
+    expected_revision: str = Field(min_length=1, pattern=r"[^\r\n]")
+    annotation_author_id: str | None = Field(default=None, min_length=1, pattern=r"[^\r\n]")
 
 
 class ReleaseSpecBody(BaseModel):
     """Client release selection. Destinations are aliases; no filesystem paths are accepted."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "if": {"properties": {"dataset_name": {"type": "null"}}},
+            "then": {"properties": {"package_id": {"pattern": r"^(?![\s\S]*-[\r\n]*-)[\s\S]*$"}}},
+        },
+    )
 
-    destination: str = Field(min_length=1, max_length=63)
-    package_id: str = Field(min_length=1, max_length=128)
-    attempt_id: str = Field(min_length=1, max_length=128)
-    dataset_name: str | None = Field(default=None, min_length=1, max_length=128)
-    dataset_id: str = Field(min_length=1, max_length=255)
-    episode_indices: list[int] = Field(min_length=1, max_length=MAX_EPISODE_SELECTION)
-    resources: list[dict[str, Any]] = Field(default_factory=list, max_length=30000)
-    finalized: bool = False
+    destination: str = Field(min_length=1, max_length=63, pattern=r"^[\r\n]*[a-z](?:[\r\n]*[a-z0-9-]){0,62}[\r\n]*$")
+    package_id: str = Field(min_length=1, max_length=128, pattern=_IDENTITY_PATTERN)
+    attempt_id: str = Field(min_length=1, max_length=128, pattern=_IDENTITY_PATTERN)
+    dataset_name: str | None = Field(default=None, min_length=1, max_length=128, pattern=re.compile(_NAME_PATTERN))
+    dataset_id: str = Field(min_length=1, max_length=255, pattern=DATASET_ID_INPUT_PATTERN)
+    episode_indices: list[Annotated[JsonInteger, Field(ge=0, json_schema_extra={"minimum": 0})]] = Field(
+        min_length=1, max_length=MAX_EPISODE_SELECTION, json_schema_extra={"uniqueItems": True}
+    )
+    resources: list[SavedResourceBody] = Field(default_factory=list, max_length=30000)
+    finalized: StrictBool = False
     description: str = Field(default="", max_length=2000)
     preview_digest: str = Field(default="", max_length=64)
     processing_digest: str = Field(default="", max_length=64)
-    local_disk_acknowledged: bool = False
+    local_disk_acknowledged: StrictBool = False
+
+    @field_validator("episode_indices")
+    @classmethod
+    def unique_episodes(cls, value: list[int]) -> list[int]:
+        if len(set(value)) != len(value):
+            raise ValueError("episode selection contains duplicates")
+        return value
 
     def to_spec(self) -> ReleaseSpec:
         return ReleaseSpec(
@@ -59,7 +102,7 @@ class ReleaseSpecBody(BaseModel):
             dataset_name=self.dataset_name or self.package_id,
             dataset_id=self.dataset_id,
             episode_indices=tuple(self.episode_indices),
-            resources=tuple(SavedSelection(**item) for item in self.resources),
+            resources=tuple(SavedSelection(**item.model_dump()) for item in self.resources),
             finalized=self.finalized,
             description=self.description,
         )
@@ -130,8 +173,8 @@ async def list_destinations(
 async def list_jobs(
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
-    cursor: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=100),
+    cursor: int = Depends(query_int_param("cursor", default=0, ge=0, le=(1 << 63) - 1)),
+    limit: int = Depends(query_int_param("limit", default=50, ge=1, le=100)),
     dataset_id: str | None = Query(default=None, max_length=255),
 ) -> dict[str, Any]:
     """List release jobs owned by the caller, ordered by acceptance."""
@@ -150,7 +193,7 @@ async def list_jobs(
 
 @router.get("/requests")
 async def lookup_request(
-    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128, pattern=_IDEMPOTENCY_PATTERN),
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
 ) -> dict[str, Any]:
@@ -183,11 +226,9 @@ async def submit_job(
     request: Request,
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str = Header(alias="Idempotency-Key", pattern=_IDEMPOTENCY_PATTERN),
 ) -> dict[str, Any]:
     """Accept a release job. Replays with the same Idempotency-Key return the existing job."""
-    if not idempotency_key:
-        raise HTTPException(status_code=400, detail="Idempotency-Key header is required")
     try:
         body = ReleaseSpecBody.model_validate(_sanitized(body.model_dump()))
         body.episode_indices = [int(index) for index in body.episode_indices]
@@ -232,7 +273,14 @@ async def preview_release_body(
 @router.get("/preview")
 async def preview_release(
     request: Request,
-    selection: str = Query(max_length=1024 * 1024),
+    selection: str = Query(
+        max_length=1024 * 1024,
+        json_schema_extra={
+            "format": "release-selection",
+            "contentMediaType": "application/json",
+            "contentSchema": {"$ref": "#/components/schemas/ReleaseSpecBody"},
+        },
+    ),
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
 ) -> dict[str, Any]:
@@ -277,9 +325,9 @@ async def retry_registration(
 
 @router.get("/inventory/{dataset_id}")
 async def source_inventory(
-    dataset_id: str,
-    cursor: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=100),
+    dataset_id: ReleaseDatasetId,
+    cursor: int = Depends(query_int_param("cursor", default=0, ge=0)),
+    limit: int = Depends(query_int_param("limit", default=50, ge=1, le=100)),
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
 ) -> dict[str, Any]:
@@ -296,8 +344,12 @@ async def source_inventory(
 
 @router.get("/inventory/{dataset_id}/details")
 async def source_inventory_details(
-    dataset_id: str,
-    episodes: str = Query(max_length=1024),
+    dataset_id: ReleaseDatasetId,
+    episodes: str = Query(
+        max_length=1024,
+        description="Comma-separated list of 1 to 100 distinct integer episode indices.",
+        json_schema_extra={"format": "release-episodes"},
+    ),
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
 ) -> dict[str, Any]:
@@ -347,7 +399,7 @@ async def get_result(
 
 @router.get("/sources/{dataset_id}/releases")
 async def list_source_releases(
-    dataset_id: str,
+    dataset_id: ReleaseDatasetId,
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
 ) -> dict[str, Any]:
@@ -365,7 +417,7 @@ async def list_source_releases(
 
 @router.get("/sources/{dataset_id}/releases/{handle}")
 async def get_source_release(
-    dataset_id: str,
+    dataset_id: ReleaseDatasetId,
     handle: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")],
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
@@ -385,10 +437,10 @@ async def get_source_release(
 
 @router.get("/sources/{dataset_id}/releases/{handle}/episodes")
 async def list_source_episodes(
-    dataset_id: str,
+    dataset_id: ReleaseDatasetId,
     handle: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")],
-    cursor: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=100),
+    cursor: int = Depends(query_int_param("cursor", default=0, ge=0)),
+    limit: int = Depends(query_int_param("limit", default=50, ge=1, le=100)),
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
 ) -> dict[str, Any]:
@@ -407,13 +459,17 @@ async def list_source_episodes(
         _raise(error)
 
 
-@router.get("/sources/{dataset_id}/releases/{handle}/episodes/{episode_index}/media/{camera}")
+@router.get(
+    "/sources/{dataset_id}/releases/{handle}/episodes/{episode_index}/media/{camera}",
+    response_class=Response,
+    responses={200: {"content": {"video/mp4": {}}}},
+)
 async def get_source_episode_media(
     request: Request,
-    dataset_id: str,
+    dataset_id: ReleaseDatasetId,
     handle: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")],
-    episode_index: Annotated[int, Path(ge=0)],
     camera: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]{1,128}$")],
+    episode_index: int = Depends(path_int_param("episode_index", ge=0)),
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
 ) -> Response:

@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 try:
     from starlette.requests import Request
@@ -45,6 +45,7 @@ from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
 from physical_ai_curation.adapters.local_storage import LocalCurationStorage
 from physical_ai_curation.application import apply_judge_result
 from physical_ai_curation.jobs import DatasetResolver, JudgeJobs, fingerprint
+from physical_ai_curation.models import EPISODE_KEY_PATTERN, EpisodeIndexKey, validate_json_integer
 from physical_ai_curation.saved_input import SavedInputError
 from physical_ai_curation.storage import CurationStorage, JobStore
 
@@ -71,7 +72,12 @@ class JobOptions(BaseModel):
     """Caller-controlled options, separate from operator-owned runtime identity."""
 
     model_config = ConfigDict(extra="forbid")
-    views: list[str] = Field(default_factory=list, max_length=16)
+    views: list[
+        Annotated[
+            str,
+            Field(json_schema_extra={"pattern": r"^[\r\n]*[a-zA-Z0-9](?:[\r\n]*[a-zA-Z0-9._-]){0,127}[\r\n]*$"}),
+        ]
+    ] = Field(default_factory=list, max_length=16)
     annotation_author_id: str | None = Field(default=None, min_length=1, max_length=256)
     process_method: Literal["gvl", "chronological"] | None = None
     force: bool = Field(default=False, strict=True)
@@ -115,12 +121,18 @@ class JobRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     dataset_id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._ -]{0,254}$")
-    episode_indices: list[Annotated[int, Field(strict=True, ge=0)]] = Field(min_length=1, max_length=10000)
+    episode_indices: list[Annotated[int, Field(ge=0), BeforeValidator(validate_json_integer)]] = Field(
+        min_length=1, max_length=10000
+    )
     options: JobOptions = Field(default_factory=JobOptions)
-    snapshot_ids: dict[int, str] = Field(default_factory=dict, max_length=10000)
+    snapshot_ids: dict[EpisodeIndexKey, str] = Field(
+        default_factory=dict, max_length=10000, json_schema_extra={"propertyNames": {"pattern": EPISODE_KEY_PATTERN}}
+    )
     mode: Literal["judge", "sample", "judge-and-label"] = "judge"
     approval_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
-    samples: dict[int, SampleReference] = Field(default_factory=dict, max_length=10000)
+    samples: dict[EpisodeIndexKey, SampleReference] = Field(
+        default_factory=dict, max_length=10000, json_schema_extra={"propertyNames": {"pattern": EPISODE_KEY_PATTERN}}
+    )
 
 
 class ResetPreviewRequest(BaseModel):
@@ -138,7 +150,7 @@ class ResetPlanRequest(ResetPreviewRequest):
 
 class ApplicationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    episode_indices: list[Annotated[int, Field(strict=True, ge=0)]] | None = Field(
+    episode_indices: list[Annotated[int, Field(ge=0), BeforeValidator(validate_json_integer)]] | None = Field(
         default=None, min_length=1, max_length=10000
     )
 

@@ -12,22 +12,22 @@ from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated, ClassVar, Literal, Self
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import BeforeValidator, Field, StrictBool, StrictFloat, field_validator, model_validator
 
-from ..validation import SanitizedModel
+from ..validation import WHITESPACE_PATTERN, JsonInteger, SanitizedModel, validate_json_integer
 from .contributions import ContributionLedger
 from .episode_edits import SavedEpisodeEdits
 
-_BCP47_LANGUAGE = r"(?:[a-z]{2,3}(?:-[a-z]{3}){0,3}|[a-z]{4}|[a-z]{5,8})"
-_BCP47_SCRIPT = r"(?:-[a-z]{4})?"
-_BCP47_REGION = r"(?:-(?:[a-z]{2}|[0-9]{3}))?"
-_BCP47_VARIANTS = r"(?:-(?:[a-z0-9]{5,8}|[0-9][a-z0-9]{3}))*"
-_BCP47_EXTENSIONS = r"(?:-[0-9a-wy-z](?:-[a-z0-9]{2,8})+)*"
-_BCP47_PRIVATE_USE = r"(?:-x(?:-[a-z0-9]{1,8})+)?"
+_NONEMPTY_SANITIZED_TEXT_PATTERN = r"[^\r\n]"
+_BCP47_LANGUAGE = r"(?:[a-zA-Z]{2,3}(?:-[a-zA-Z]{3}){0,3}|[a-zA-Z]{4}|[a-zA-Z]{5,8})"
+_BCP47_SCRIPT = r"(?:-[a-zA-Z]{4})?"
+_BCP47_REGION = r"(?:-(?:[a-zA-Z]{2}|[0-9]{3}))?"
+_BCP47_VARIANTS = r"(?:-(?:[a-zA-Z0-9]{5,8}|[0-9][a-zA-Z0-9]{3}))*"
+_BCP47_EXTENSIONS = r"(?:-[0-9a-wA-Wy-zY-Z](?:-[a-zA-Z0-9]{2,8})+)*"
+_BCP47_PRIVATE_USE = r"(?:-[xX](?:-[a-zA-Z0-9]{1,8})+)?"
 _BCP47_PATTERN = re.compile(
-    rf"^(?:{_BCP47_LANGUAGE}{_BCP47_SCRIPT}{_BCP47_REGION}{_BCP47_VARIANTS}"
-    rf"{_BCP47_EXTENSIONS}{_BCP47_PRIVATE_USE}|x(?:-[a-z0-9]{{1,8}})+)$",
-    re.IGNORECASE,
+    rf"(?:{_BCP47_LANGUAGE}{_BCP47_SCRIPT}{_BCP47_REGION}{_BCP47_VARIANTS}"
+    rf"{_BCP47_EXTENSIONS}{_BCP47_PRIVATE_USE}|[xX](?:-[a-zA-Z0-9]{{1,8}})+)",
 )
 
 # ============================================================================
@@ -58,8 +58,8 @@ class TaskCompletenessAnnotation(SanitizedModel):
     """Task completeness annotation with rating and optional details."""
 
     rating: TaskCompletenessRating
-    confidence: ConfidenceLevel
-    completion_percentage: int | None = Field(None, ge=0, le=100)
+    confidence: Annotated[ConfidenceLevel, BeforeValidator(validate_json_integer)]
+    completion_percentage: Annotated[int, Field(ge=0, le=100), BeforeValidator(validate_json_integer)] | None = None
     failure_reason: str | None = None
     subtask_reached: str | None = None
 
@@ -81,6 +81,9 @@ class QualityScore(int, Enum):
     FIVE = 5
 
 
+JsonQualityScore = Annotated[QualityScore, BeforeValidator(validate_json_integer)]
+
+
 class TrajectoryFlag(StrEnum):
     """Flags indicating specific trajectory issues."""
 
@@ -96,10 +99,10 @@ class TrajectoryFlag(StrEnum):
 class TrajectoryQualityMetrics(SanitizedModel):
     """Individual trajectory quality metrics."""
 
-    smoothness: QualityScore
-    efficiency: QualityScore
-    safety: QualityScore
-    precision: QualityScore
+    smoothness: JsonQualityScore
+    efficiency: JsonQualityScore
+    safety: JsonQualityScore
+    precision: JsonQualityScore
 
     model_config: ClassVar = {"use_enum_values": True}
 
@@ -107,7 +110,7 @@ class TrajectoryQualityMetrics(SanitizedModel):
 class TrajectoryQualityAnnotation(SanitizedModel):
     """Complete trajectory quality annotation."""
 
-    overall_score: QualityScore
+    overall_score: JsonQualityScore
     metrics: TrajectoryQualityMetrics
     flags: list[TrajectoryFlag] = Field(default_factory=list)
 
@@ -154,7 +157,7 @@ class DataQualityIssue(SanitizedModel):
 
     type: DataQualityIssueType
     severity: IssueSeverity
-    affected_frames: tuple[int, int] | None = None
+    affected_frames: tuple[JsonInteger, JsonInteger] | None = None
     affected_streams: list[str] | None = None
     notes: str | None = None
 
@@ -202,11 +205,11 @@ class Anomaly(SanitizedModel):
     id: str
     type: AnomalyType
     severity: AnomalySeverity
-    frame_range: tuple[int, int]
-    timestamp: tuple[float, float]
+    frame_range: tuple[JsonInteger, JsonInteger]
+    timestamp: tuple[StrictFloat, StrictFloat]
     description: str
-    auto_detected: bool = False
-    verified: bool = False
+    auto_detected: StrictBool = False
+    verified: StrictBool = False
 
     model_config: ClassVar = {"use_enum_values": True}
 
@@ -246,9 +249,14 @@ class LanguageInstructionAnnotation(SanitizedModel):
     policy conditioning.
     """
 
-    instruction: str = Field(min_length=1, max_length=1000)
+    instruction: str = Field(min_length=1, max_length=1000, pattern=_NONEMPTY_SANITIZED_TEXT_PATTERN)
     source: InstructionSource
-    language: str = Field(default="en", max_length=35)
+    language: str = Field(
+        default="en",
+        max_length=35,
+        description="BCP 47 tag. Surrounding whitespace is trimmed after the 35-character input limit is checked.",
+        json_schema_extra={"pattern": rf"^{WHITESPACE_PATTERN}*{_BCP47_PATTERN.pattern}{WHITESPACE_PATTERN}*$"},
+    )
 
     @field_validator("language")
     @classmethod
@@ -289,15 +297,17 @@ class LanguageInstructionAnnotation(SanitizedModel):
 class ObjectDetectionBox(SanitizedModel):
     """Single saved object detection with label and bounding box."""
 
-    label: str = Field(min_length=1, max_length=100)
-    confidence: float = Field(ge=0.0, le=1.0)
-    bbox: tuple[float, float, float, float] = Field(description="Pixel bounding box (x1, y1, x2, y2)")
+    label: str = Field(min_length=1, max_length=100, pattern=_NONEMPTY_SANITIZED_TEXT_PATTERN)
+    confidence: StrictFloat = Field(ge=0.0, le=1.0)
+    bbox: tuple[StrictFloat, StrictFloat, StrictFloat, StrictFloat] = Field(
+        description="Pixel bounding box (x1, y1, x2, y2)"
+    )
 
 
 class ObjectDetectionAnnotation(SanitizedModel):
     """Open-vocabulary object detections saved for a single reference frame."""
 
-    frame_index: int = Field(ge=0)
+    frame_index: JsonInteger = Field(ge=0)
     camera: str = Field(default="il-camera", max_length=64)
     queried_labels: list[Annotated[str, Field(max_length=100)]] = Field(default_factory=list, max_length=64)
     detections: list[ObjectDetectionBox] = Field(default_factory=list, max_length=200)
@@ -336,6 +346,14 @@ class EpisodeAnnotation(SanitizedModel):
         if not self.instruction_adoption.keys() <= allowed:
             raise ValueError("Instruction adoption must reference existing fields")
         return self
+
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def validate_timestamp_type(cls, value: object) -> object:
+        """Keep JSON timestamps textual while allowing internal datetime values."""
+        if not isinstance(value, (str, datetime)):
+            raise ValueError("Expected a datetime string")
+        return value
 
 
 class EpisodeConsensus(SanitizedModel):
