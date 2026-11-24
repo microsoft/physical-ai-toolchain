@@ -32,8 +32,7 @@ class ReleaseErrorBody(BaseModel):
 
 router = APIRouter(
     responses={
-        status: {"model": ReleaseErrorBody | ErrorResponse}
-        for status in (400, 404, 409, 422, 499, 503, 504, 507)
+        status: {"model": ReleaseErrorBody | ErrorResponse} for status in (400, 404, 409, 422, 499, 503, 504, 507)
     }
 )
 
@@ -73,9 +72,7 @@ class ReleaseSpecBody(BaseModel):
         },
     )
 
-    destination: str = Field(
-        min_length=1, max_length=63, pattern=r"^[\r\n]*[a-z](?:[\r\n]*[a-z0-9-]){0,62}[\r\n]*$"
-    )
+    destination: str = Field(min_length=1, max_length=63, pattern=r"^[\r\n]*[a-z](?:[\r\n]*[a-z0-9-]){0,62}[\r\n]*$")
     package_id: str = Field(min_length=1, max_length=128, pattern=_IDENTITY_PATTERN)
     attempt_id: str = Field(min_length=1, max_length=128, pattern=_IDENTITY_PATTERN)
     dataset_name: str | None = Field(default=None, min_length=1, max_length=128, pattern=re.compile(_NAME_PATTERN))

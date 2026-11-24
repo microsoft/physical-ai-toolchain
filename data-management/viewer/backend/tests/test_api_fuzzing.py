@@ -315,9 +315,7 @@ def test_release_selection_schema_matches_runtime(
     response = api_schema.make_case(
         operation=api_schema["/api/releases/v1/preview"]["POST"],
         body=body,
-        meta=_generation_meta(
-            schemathesis.GenerationMode.POSITIVE if valid else schemathesis.GenerationMode.NEGATIVE
-        ),
+        meta=_generation_meta(schemathesis.GenerationMode.POSITIVE if valid else schemathesis.GenerationMode.NEGATIVE),
     ).call_and_validate()
     assert response.status_code == (404 if valid else 422), response.text
 

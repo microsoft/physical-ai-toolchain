@@ -2087,31 +2087,41 @@ def test_release_admission_and_lookup_responses_match_openapi(release_api: tuple
     schema = schemathesis.openapi.from_asgi("/openapi.json", app)
     preview = schema[BASE + "/preview"]["POST"].Case(body=spec).call_and_validate()
     assert preview.status_code == 200
-    accepted = schema[BASE + "/jobs"]["POST"].Case(
-        headers={"Idempotency-Key": "contract-release"},
-        body={
-            **spec,
-            "preview_digest": preview.json()["digest"],
-            "processing_digest": preview.json()["summary"]["processing_digest"],
-            "local_disk_acknowledged": True,
-        },
-    ).call_and_validate()
+    accepted = (
+        schema[BASE + "/jobs"]["POST"]
+        .Case(
+            headers={"Idempotency-Key": "contract-release"},
+            body={
+                **spec,
+                "preview_digest": preview.json()["digest"],
+                "processing_digest": preview.json()["summary"]["processing_digest"],
+                "local_disk_acknowledged": True,
+            },
+        )
+        .call_and_validate()
+    )
     assert accepted.status_code == 202
     job_id = accepted.json()["job_id"]
-    lookup = schema[BASE + "/requests"]["GET"].Case(
-        headers={"Idempotency-Key": "contract-release"}
-    ).call_and_validate()
+    lookup = schema[BASE + "/requests"]["GET"].Case(headers={"Idempotency-Key": "contract-release"}).call_and_validate()
     assert lookup.status_code == 200
     assert lookup.json()["job_id"] == job_id
     status = schema[BASE + "/jobs/{job_id}"]["GET"].Case(path_parameters={"job_id": job_id}).call_and_validate()
     assert status.status_code == 200
-    assert schema[BASE + "/jobs/{job_id}"]["GET"].Case(
-        path_parameters={"job_id": "0" * 32}
-    ).call_and_validate().status_code == 404
-    conflict = schema[BASE + "/jobs"]["POST"].Case(
-        headers={"Idempotency-Key": "contract-release"},
-        body={**spec, "episode_indices": [0]},
-    ).call_and_validate()
+    assert (
+        schema[BASE + "/jobs/{job_id}"]["GET"]
+        .Case(path_parameters={"job_id": "0" * 32})
+        .call_and_validate()
+        .status_code
+        == 404
+    )
+    conflict = (
+        schema[BASE + "/jobs"]["POST"]
+        .Case(
+            headers={"Idempotency-Key": "contract-release"},
+            body={**spec, "episode_indices": [0]},
+        )
+        .call_and_validate()
+    )
     assert conflict.status_code == 409
     assert not settings.destinations["local"].exists()
 
