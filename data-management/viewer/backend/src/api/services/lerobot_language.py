@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import pyarrow as pa
+from physical_ai_dataset_io.lerobot import persistent_language_type, remap_persistent_language_rows
 
 from .episode_edits import PlannedFrame, SubtaskSegment, output_indices, remap_subtasks
 
@@ -39,9 +40,7 @@ _ROW_FIELDS = [
 _TARGET_FIELDS = [pa.field("camera", pa.string()), pa.field("tool_calls", pa.list_(pa.json_()))]
 # The column types ``lerobot.datasets.language`` declares in LeRobot 0.6.
 _LANGUAGE_TYPES = {
-    LANGUAGE_PERSISTENT: pa.list_(
-        pa.struct([*_ROW_FIELDS, pa.field("timestamp", pa.float32(), nullable=False), *_TARGET_FIELDS])
-    ),
+    LANGUAGE_PERSISTENT: persistent_language_type(),
     LANGUAGE_EVENTS: pa.list_(pa.struct([*_ROW_FIELDS, *_TARGET_FIELDS])),
 }
 
@@ -109,23 +108,13 @@ def plan_persistent_rows(
     one style, role and camera onto the same output frame, only the rows from the latest source time
     stay, since those are the ones active at that frame.
     """
-    positions = output_indices(plan)
-    kept = sorted(positions)
-    placed: dict[tuple[Any, ...], tuple[float, list[LanguageRow]]] = {}
-    for row in rows:
-        source_time = float(row["timestamp"])
-        frame = bisect_left(source_timestamps, source_time - _TIMESTAMP_TOLERANCE_S)
-        index = bisect_left(kept, frame)
-        if index == len(kept):
-            continue
-        key = (row.get("style"), row.get("role"), row.get("camera"), positions[kept[index]])
-        current = placed.get(key)
-        if current is None or source_time > current[0]:
-            placed[key] = (source_time, [row])
-        elif source_time == current[0]:
-            current[1].append(row)
-    planned = [{**row, "timestamp": output_timestamps[key[-1]]} for key, (_, group) in placed.items() for row in group]
-    return sorted(planned, key=_sort_key)
+    return remap_persistent_language_rows(
+        rows,
+        source_to_output=output_indices(plan),
+        source_timestamps=source_timestamps,
+        output_timestamps=output_timestamps,
+        timestamp_tolerance_s=_TIMESTAMP_TOLERANCE_S,
+    )
 
 
 def plan_events(events_by_frame: list[list[LanguageRow] | None], plan: list[PlannedFrame]) -> list[list[LanguageRow]]:

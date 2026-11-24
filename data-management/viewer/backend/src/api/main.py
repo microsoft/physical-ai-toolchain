@@ -30,34 +30,25 @@ from .auth import (
     issue_media_session,
     require_auth,
     require_principal_context,
-    validate_hosted_auth_configuration,
+    validate_auth_configuration,
 )
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token, require_csrf_token
+from .logging_config import configure_logging
 from .middleware import ContentSizeLimitMiddleware, EpisodeCompressionMiddleware, SecurityHeadersMiddleware
 from .models.errors import error_responses
 from .rate_limiter import limiter
-from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, vlm_judge
+from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, releases, vlm_judge
 from .routes import ai_analysis
 from .services.dataset_service import EpisodeLoadError
+from .services.release_service import close_release_offload
 from .storage import RevisionConflictError
 from .swagger_ui import install_responsive_swagger_ui
-
-# Match application verbosity to uvicorn's effective CLI level without replacing its handlers.
-_log_level = logging.getLogger("uvicorn.error").level or logging.INFO
-logging.basicConfig(
-    level=_log_level,
-    format="%(asctime)s - %(levelname)s %(name)s - %(message)s",
-)
-logging.getLogger("src.api").setLevel(_log_level)
-
-# Suppress verbose Azure SDK HTTP request logging
-logging.getLogger("azure").setLevel(logging.WARNING)
-logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 
 # Load .env before any config or service singletons are initialized so that
 # all env vars are available to get_app_config() on first access.
 env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(env_path)
+configure_logging(logging.getLogger("uvicorn.error").level or logging.INFO)
 
 # Read config once at module load. CORS origins must be known before the app object
 # is created, and all service singletons share this same config instance.
@@ -113,7 +104,7 @@ def _validate_local_storage_writable(data_path: str) -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Validate local storage and clean up blob sync directories."""
-    validate_hosted_auth_configuration()
+    validate_auth_configuration()
     if _config.storage_backend == "local":
         await asyncio.to_thread(_validate_local_storage_writable, _config.data_path)
 
@@ -128,6 +119,11 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         _app.state.judge_jobs = jobs
         workers = [asyncio.create_task(jobs.run_forever()) for _ in range(_config.vlm_judge_capacity)]
     try:
+        from .release_worker import start_release_worker
+
+        release_worker = start_release_worker()
+        if release_worker is not None:
+            workers.append(release_worker)
         yield
     finally:
         for worker in workers:
@@ -135,6 +131,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         for worker in workers:
             with suppress(asyncio.CancelledError):
                 _ = await worker
+        await asyncio.to_thread(close_release_offload)
 
     try:
         service = get_dataset_service()
@@ -224,9 +221,11 @@ app.add_middleware(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_config.cors_origins,
+    allow_origin_regex=_config.cors_origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-API-Key", "X-Request-ID"],
+    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-API-Key", "X-Request-ID", "Idempotency-Key"],
+    expose_headers=["Location", "Retry-After", "ETag"],
 )
 app.add_middleware(HostedAuthMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
@@ -243,6 +242,7 @@ api_router.include_router(ai_analysis.router, prefix="/api", tags=["ai"])
 api_router.include_router(labels.router, prefix="/api/datasets", tags=["labels"])
 api_router.include_router(joint_config.router, prefix="/api/datasets", tags=["joint-config"])
 api_router.include_router(joint_config.defaults_router, prefix="/api", tags=["joint-config"])
+api_router.include_router(releases.router, prefix="/api/releases/v1", tags=["releases"])
 if _config.vlm_judge_enabled:
     if _job_router is not None:
         api_router.include_router(_job_router, prefix="/api/judge")

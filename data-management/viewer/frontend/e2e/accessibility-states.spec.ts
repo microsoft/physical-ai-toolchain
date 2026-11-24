@@ -42,6 +42,7 @@ test('P06 job controls retain progress through refresh failure and keyboard canc
     })
   })
   await page.goto('http://127.0.0.1:4173/?dataset=integration-fixture')
+  await expect(page.getByRole('heading', { name: 'Episode 0' })).toBeVisible()
   const disclosure = page.getByRole('button', { name: /Dataset workspace/ })
   await disclosure.click()
   const workspace = page.getByRole('region', { name: 'Dataset workspace', exact: true })
@@ -525,7 +526,7 @@ test('P06 real echo grounding blocks unmounted drafts before approval and separa
   await page
     .getByRole('button', { name: 'Evaluate grounding episodes', exact: true })
     .press('Enter')
-  await expect(page.getByRole('heading', { name: 'Job review: succeeded' })).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Grounding evaluation: succeeded' })).toBeVisible({
     timeout: 20_000,
   })
   await page
@@ -643,7 +644,9 @@ test('P06 pending save and real label conflict block grounding until acknowledge
     await page.getByRole('button', { name: 'Refresh dataset jobs', exact: true }).press('Enter')
     await expect(evaluate).toBeEnabled()
     await evaluate.press('Enter')
-    await expect(page.getByRole('heading', { name: 'Job review: succeeded' })).toBeVisible({
+    await expect(
+      page.getByRole('heading', { name: 'Grounding evaluation: succeeded' }),
+    ).toBeVisible({
       timeout: 20_000,
     })
   } finally {
@@ -855,7 +858,9 @@ for (const resource of ['annotation', 'episode-edit'] as const) {
     await page.getByRole('textbox', { name: 'Grounding episodes', exact: true }).fill('0')
     await expect(evaluate).toBeEnabled()
     await evaluate.press('Enter')
-    await expect(page.getByRole('heading', { name: 'Job review: succeeded' })).toBeVisible({
+    await expect(
+      page.getByRole('heading', { name: 'Grounding evaluation: succeeded' }),
+    ).toBeVisible({
       timeout: 20_000,
     })
     expect(submissions).toHaveLength(1)

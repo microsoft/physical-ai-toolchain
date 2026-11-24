@@ -512,8 +512,12 @@ class DatasetService:
         """Recursively scan for datasets, building --separated IDs. Max 5 levels; hidden folders are skipped."""
         if len(prefix_parts) >= 5:
             return
+        from physical_ai_curation.release.publication import OPERATIONAL_RELEASE_NAMESPACES, local_dataset_admitted
+
         for item in directory.iterdir():
-            if not item.is_dir() or item.name.startswith("."):
+            if not item.is_dir() or item.name.startswith(".") or item.name in OPERATIONAL_RELEASE_NAMESPACES:
+                continue
+            if not local_dataset_admitted(item):
                 continue
             current_parts = [*prefix_parts, item.name]
             handled = False
@@ -710,19 +714,16 @@ class DatasetService:
     # Episode operations
     # ------------------------------------------------------------------
 
-    async def list_episodes(
-        self,
-        dataset_id: str,
-        offset: int = 0,
-        limit: int = 100,
-        has_annotations: bool | None = None,
-        task_index: int | None = None,
-        require_actual: bool = False,
-    ) -> list[EpisodeMeta]:
-        """List episodes for a dataset with filtering."""
-        dataset = self._datasets.get(dataset_id)
-        annotated_indices = set(await self._storage.list_annotated_episodes(dataset_id))
+    async def list_actual_episode_indices(self, dataset_id: str, limit: int) -> list[int]:
+        """Return up to ``limit`` raw actual episode indices in source order.
 
+        Skips annotation lookups and display-record construction. Never synthesizes indices.
+        """
+        episode_indices, _episode_info_map = await self._discover_episode_source(dataset_id)
+        return episode_indices[:limit]
+
+    async def _discover_episode_source(self, dataset_id: str) -> tuple[list[int], dict[int, dict]]:
+        """Discover actual episode indices and handler metadata from the owning source."""
         episode_indices: list[int] = []
         episode_info_map: dict[int, dict] = {}
         use_blob_metadata = self._blob_provider is not None and dataset_id not in self._local_dataset_ids
@@ -746,6 +747,23 @@ class DatasetService:
             synced_path = await self._ensure_blob_hdf5_synced(dataset_id)
             if synced_path is not None and self._hdf5_handler.get_loader(dataset_id, synced_path):
                 episode_indices, episode_info_map = self._hdf5_handler.list_episodes(dataset_id)
+
+        return episode_indices, episode_info_map
+
+    async def list_episodes(
+        self,
+        dataset_id: str,
+        offset: int = 0,
+        limit: int = 100,
+        has_annotations: bool | None = None,
+        task_index: int | None = None,
+        require_actual: bool = False,
+    ) -> list[EpisodeMeta]:
+        """List episodes for a dataset with filtering."""
+        dataset = self._datasets.get(dataset_id)
+        annotated_indices = set(await self._storage.list_annotated_episodes(dataset_id))
+
+        episode_indices, episode_info_map = await self._discover_episode_source(dataset_id)
 
         # Fallback: generate indices from dataset metadata
         if not episode_indices and dataset is not None and not require_actual:
@@ -907,6 +925,12 @@ class DatasetService:
     async def get_source_revision(self, dataset_id: str, episode_idx: int) -> tuple[str, str]:
         """Identify the source and its current dataset generation without curation files."""
         _validate_dataset_id(dataset_id)
+        if (
+            self._blob_provider is not None
+            and dataset_id not in self._blob_dataset_ids
+            and dataset_id not in self._local_dataset_ids
+        ):
+            await self.get_dataset(dataset_id)
         if dataset_id in self._blob_dataset_ids and dataset_id not in self._local_dataset_ids:
             return await self._get_blob_source_revision(dataset_id, episode_idx)
 
@@ -1285,7 +1309,11 @@ class DatasetService:
         """
         if self._blob_provider is not None:
             raise ValueError("Local dataset access is disabled in Azure mode")
+        from physical_ai_curation.release.publication import OPERATIONAL_RELEASE_NAMESPACES
+
         parts = dataset_id.split("--") if "--" in dataset_id else [dataset_id]
+        if OPERATIONAL_RELEASE_NAMESPACES.intersection(parts):
+            raise ValueError("reserved releases require marker-aware admission")
         if len(parts) > 5:
             raise ValueError(f"Dataset nesting too deep (max 5 levels): {dataset_id}")
 
@@ -1307,6 +1335,10 @@ class DatasetService:
                     break
             if not found:
                 raise ValueError(f"Dataset directory not found: {dataset_id}")
+            from physical_ai_curation.release.publication import local_dataset_admitted
+
+            if not local_dataset_admitted(current):
+                raise ValueError("release requires verified marker-aware admission")
         return current
 
     async def get_frame_image(self, dataset_id: str, episode_idx: int, frame_idx: int, camera: str) -> bytes | None:

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Iterator
 from copy import deepcopy
@@ -23,6 +24,7 @@ from physical_ai_curation.api import JobRequest
 from pydantic import ValidationError
 from requests.structures import CaseInsensitiveDict
 from schemathesis.config import (
+    ChecksConfig,
     GenerationConfig,
     ProjectConfig,
     ProjectsConfig,
@@ -39,6 +41,7 @@ from src.api.rate_limiter import limiter
 from src.api.routers import vlm_judge
 from src.api.routers.labels import DEFAULT_LABELS
 from src.api.services.detection_service import get_detection_service
+from src.api.services.release_service import ReleaseApiSettings, ReleaseService, get_release_service
 from src.api.services.vlm_judge_service import reset_vlm_judge_service
 from src.api.validation import sanitize_user_string
 
@@ -57,11 +60,31 @@ def _byte_range_headers(draw: st.DrawFn) -> str:
 
 
 schemathesis.openapi.format("http-byte-range", _byte_range_headers())
+schemathesis.openapi.format(
+    "release-selection",
+    st.fixed_dictionaries(
+        {
+            "destination": st.from_regex(r"[a-z][a-z0-9-]{0,20}", fullmatch=True),
+            "package_id": st.from_regex(r"[A-Za-z0-9][A-Za-z0-9_]{0,20}", fullmatch=True),
+            "attempt_id": st.from_regex(r"[A-Za-z0-9][A-Za-z0-9_-]{0,20}", fullmatch=True),
+            "dataset_id": st.from_regex(r"[A-Za-z0-9][A-Za-z0-9._ -]{0,20}", fullmatch=True),
+            "episode_indices": st.lists(
+                st.integers(min_value=0, max_value=10000), min_size=1, max_size=10, unique=True
+            ),
+        }
+    ).map(json.dumps),
+)
+schemathesis.openapi.format(
+    "release-episodes",
+    st.lists(st.integers(min_value=0, max_value=10000), min_size=1, max_size=100, unique=True).map(
+        lambda values: ",".join(map(str, values))
+    ),
+)
 
 
 @pytest.fixture(params=[False, True], ids=["default", "vlm"])
 def api_schema(
-    client: TestClient, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> Iterator[OpenApiSchema]:
     """Load OpenAPI schema from the in-process ASGI app used in tests."""
     original_routes = list(client.app.router.routes)
@@ -89,6 +112,10 @@ def api_schema(
         )
     )
     client.app.dependency_overrides[get_detection_service] = lambda: detection_service
+    release_service = ReleaseService(ReleaseApiSettings(tmp_path / "release-jobs"))
+    client.app.dependency_overrides[get_release_service] = lambda: release_service
+    checks = ChecksConfig()
+    checks.negative_data_rejection.expected_statuses = [*checks.negative_data_rejection.expected_statuses, "413"]
     try:
         yield schemathesis.openapi.from_asgi(
             "/openapi.json",
@@ -96,13 +123,14 @@ def api_schema(
             config=SchemathesisConfig(
                 projects=ProjectsConfig(
                     default=ProjectConfig(
+                        checks=checks,
                         generation=GenerationConfig(
                             modes=[
                                 schemathesis.GenerationMode.POSITIVE,
                                 schemathesis.GenerationMode.NEGATIVE,
                             ],
                             deterministic=True,
-                        )
+                        ),
                     )
                 )
             ),
@@ -115,6 +143,7 @@ def api_schema(
         client.app.router.routes[:] = original_routes
         client.app.router.lifespan_context = original_lifespan
         client.app.openapi_schema = None
+        client.app.dependency_overrides.pop(get_release_service, None)
 
 
 schema = schemathesis.pytest.from_fixture("api_schema")
@@ -202,6 +231,114 @@ def prepare_positive_case(case: schemathesis.Case, client: TestClient) -> None:
         etag = response.headers.get("ETag")
         headers["if-match" if etag else "if-none-match"] = etag or "*"
         case.headers = headers
+
+
+@pytest.mark.parametrize(
+    ("path", "method", "arguments"),
+    [
+        ("/api/releases/v1/preview", "GET", {"query": {"selection": ""}}),
+        ("/api/releases/v1/jobs", "POST", {"body": {}}),
+        ("/api/releases/v1/sources/{dataset_id}/releases", "GET", {"path_parameters": {"dataset_id": "!"}}),
+    ],
+)
+def test_given_release_validation_failure_when_called_then_matches_openapi(
+    api_schema: OpenApiSchema, path: str, method: str, arguments: dict[str, Any]
+) -> None:
+    case = api_schema[path][method].Case(**arguments)
+    response = case.call_and_validate()
+    assert response.status_code == 422
+
+
+def test_given_oversized_release_request_when_called_then_refused(api_schema: OpenApiSchema) -> None:
+    case = api_schema["/api/releases/v1/jobs"]["POST"].Case(
+        body={"resources": [{}] * 30_001, "processing_digest": "x" * (10 * 1024**2 + 1)},
+        media_type="application/json",
+    )
+    response = case.call_and_validate()
+    assert response.status_code == 413
+
+
+@pytest.mark.parametrize(
+    ("changes", "valid"),
+    [
+        ({"destination": "0"}, False),
+        ({"episode_indices": [-1]}, False),
+        ({"episode_indices": [0, 0]}, False),
+        ({"episode_indices": [True]}, False),
+        ({"episode_indices": ["0"]}, False),
+        ({"finalized": "true"}, False),
+        ({"package_id": "release--name"}, False),
+        (
+            {
+                "resources": [
+                    {"kind": "edits", "episode_index": 0, "expected_revision": "rev", "annotation_author_id": "author"}
+                ]
+            },
+            False,
+        ),
+        ({"resources": [{"kind": "annotation", "episode_index": -1, "expected_revision": "rev"}]}, False),
+        ({"resources": [{"kind": "annotation", "episode_index": 0, "expected_revision": "\r\n"}]}, False),
+        ({"episode_indices": [1.0]}, True),
+        ({"destination": "lo\r\ncal", "dataset_id": "sample\r\n"}, True),
+        ({"package_id": "release--name", "dataset_name": "published"}, True),
+        (
+            {
+                "resources": [
+                    {
+                        "kind": "annotation",
+                        "episode_index": 0,
+                        "expected_revision": "rev",
+                        "annotation_author_id": "author",
+                    }
+                ]
+            },
+            True,
+        ),
+    ],
+)
+def test_release_selection_schema_matches_runtime(
+    api_schema: OpenApiSchema, changes: dict[str, Any], valid: bool
+) -> None:
+    body = {
+        "destination": "local",
+        "package_id": "release",
+        "attempt_id": "attempt",
+        "dataset_id": "sample",
+        "episode_indices": [0],
+        **changes,
+    }
+    document = api_schema.raw_schema
+    validator = Draft202012Validator(
+        {"$ref": "#/components/schemas/ReleaseSpecBody", "components": document["components"]}
+    )
+    assert validator.is_valid(body) == valid
+    response = api_schema.make_case(
+        operation=api_schema["/api/releases/v1/preview"]["POST"],
+        body=body,
+        meta=_generation_meta(
+            schemathesis.GenerationMode.POSITIVE if valid else schemathesis.GenerationMode.NEGATIVE
+        ),
+    ).call_and_validate()
+    assert response.status_code == (404 if valid else 422), response.text
+
+
+@pytest.mark.parametrize("headers", [{}, {"Idempotency-Key": ""}, {"Idempotency-Key": "invalid/key"}])
+def test_release_submission_requires_valid_idempotency_header(
+    api_schema: OpenApiSchema, headers: dict[str, str]
+) -> None:
+    response = api_schema.make_case(
+        operation=api_schema["/api/releases/v1/jobs"]["POST"],
+        headers=headers,
+        body={
+            "destination": "local",
+            "package_id": "release",
+            "attempt_id": "attempt",
+            "dataset_id": "sample",
+            "episode_indices": [0],
+        },
+        meta=_generation_meta(schemathesis.GenerationMode.NEGATIVE),
+    ).call_and_validate()
+    assert response.status_code == 422
 
 
 @schema.parametrize()
