@@ -21,7 +21,7 @@ dev = [
     "physical-ai-curation==0.1.0",
     "physical-ai-dataset-io==0.1.0",
     "hypothesis==6.170.15",
-    "numpy==2.5.4",
+    "numpy==2.5.5",
     "ruff==0.17.1",
     "pyarrow==26.0.0",
     "imageio==2.38.1",
