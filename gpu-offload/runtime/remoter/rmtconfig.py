@@ -1,16 +1,19 @@
 """
 PyRemote Configuration File Management
 This module provides functions to read, write, and update configuration files in YAML format.
-It uses the `portalocker` library to ensure that the file is locked during read/write
-operations to prevent concurrent access issues.
+Each operation holds a `filelock` lock on `<file>.lock`, and writes go to a temporary file in the
+same directory that then replaces the configuration file, so readers never see a partial write.
 """
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import logging
 import os
+import shutil
 import threading
+import uuid
 
 import filelock
 import flask
@@ -20,51 +23,61 @@ import yaml
 from .simplelog import initlog
 
 
-def read_config_file(file_path):
-    # lock the file to prevent concurrent access
-    with filelock.FileLock(file_path + ".lock"):
-        try:
-            with open(file_path, encoding="utf-8") as file:
-                # read the YAML file
-                config = yaml.safe_load(file)
-        except (FileNotFoundError, yaml.YAMLError) as e:
-            logger.error(f"Error reading configuration file {file_path}: {e}")
-            config = {}  # return an empty dict if file not found or error in YAML format
+def _lock(file_path: str) -> filelock.FileLock:
+    # This module never deletes the lock file. Unlinking it while another process holds or waits for the
+    # lock would let a third process lock a new file at the same path and enter at the same time.
+    return filelock.FileLock(file_path + ".lock")
+
+
+def _read(file_path: str) -> dict:
     try:
-        os.remove(file_path + ".lock")
-        logger.info(f"Removed lock file for {file_path}")
-    except Exception:
-        logger.error(f"Error removing lock file for {file_path}")
-        pass
-    # return the configuration
-    return config
+        with open(file_path, encoding="utf-8") as file:
+            return yaml.safe_load(file)
+    except FileNotFoundError as e:
+        logger.error(f"Error reading configuration file {file_path}: {e}")
+        return {}
+    except yaml.YAMLError as e:
+        # Raise rather than return {}, which update_config_file would write back over the file.
+        logger.error(f"Error parsing configuration file {file_path}: {e}")
+        raise
 
 
-def write_config_file(file_path, config):
-    # lock the file to prevent concurrent access
-    with filelock.FileLock(file_path + ".lock"):
-        try:
-            with open(file_path, "w", encoding="utf-8") as file:
-                # write the YAML file
-                yaml.safe_dump(config, file)
-        except (OSError, yaml.YAMLError) as e:
-            logger.error(f"Error writing configuration file {file_path}: {e}")
-            raise e  # re-raise the exception to notify the caller
+def _write(file_path: str, config: dict) -> None:
+    tmp_path = f"{file_path}.{uuid.uuid4().hex}.tmp"
     try:
-        os.remove(file_path + ".lock")
-        logger.info(f"Removed lock file for {file_path}")
-    except Exception:
-        logger.error(f"Error removing lock file for {file_path}")
-        pass
+        with open(tmp_path, "x", encoding="utf-8") as file:
+            # Keep the permission bits of the file being replaced, before any content is written.
+            with contextlib.suppress(FileNotFoundError):
+                shutil.copymode(file_path, tmp_path)
+            yaml.safe_dump(config, file)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(tmp_path, file_path)
+    except (OSError, yaml.YAMLError) as e:
+        logger.error(f"Error writing configuration file {file_path}: {e}")
+        raise
+    finally:
+        # After a successful os.replace the temporary file is already gone.
+        with contextlib.suppress(OSError):
+            os.remove(tmp_path)
 
 
-def update_config_file(file_path, new_config):
-    # read the existing configuration
-    config = read_config_file(file_path)
-    # update the configuration with new values
-    config.update(new_config)
-    # write the updated configuration back to the file
-    write_config_file(file_path, config)
+def read_config_file(file_path: str) -> dict:
+    with _lock(file_path):
+        return _read(file_path)
+
+
+def write_config_file(file_path: str, config: dict) -> None:
+    with _lock(file_path):
+        _write(file_path, config)
+
+
+def update_config_file(file_path: str, new_config: dict) -> None:
+    # One lock around the read, merge and write, so concurrent updates cannot drop each other's keys.
+    with _lock(file_path):
+        config = _read(file_path)
+        config.update(new_config)
+        _write(file_path, config)
 
 
 class Config:
@@ -91,7 +104,7 @@ class Config:
         # except Exception:
         #     pass
 
-    def watch_config_file(self):
+    def watch_config_file(self) -> None:
         # watch the configuration file for changes
         for changes in watchfiles.watch(self.file_path):
             if self.stop:
@@ -109,12 +122,16 @@ class Config:
                         logger.error(f"Error reading configuration file {self.file_path}: {e}")
                         self.config = oldconfig
                 elif change[0] == watchfiles.Change.deleted:
+                    if os.path.exists(self.file_path):
+                        # Replaced by a rename (os.replace), which some platforms report as deleted
+                        # plus added; the added event reloads it.
+                        continue
                     logger.info(f"Configuration file {self.file_path} deleted, stopping watch...")
                     self.config = {}
                     break
         self.stopevent.set()
 
-    def stopwatch(self):
+    def stopwatch(self) -> None:
         # stop watching the config file
         logger.info(f"Stopping watch on configuration file {self.file_path}")
         # currently no way to stop watchfiles.watch, so just exit the thread
@@ -126,12 +143,6 @@ class Config:
         except Exception:
             pass
         ret = self.stopevent.wait(timeout=5)
-        try:
-            os.remove(self.file_path + ".lock")
-            logger.info(f"Removed lock file for {self.file_path}")
-        except Exception:
-            logger.error(f"Error removing lock file for {self.file_path}")
-            pass
         if not ret:
             logger.warning(f"Timeout waiting for watch thread to stop for file {self.file_path}")
 
