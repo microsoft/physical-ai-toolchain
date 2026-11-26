@@ -45,7 +45,7 @@ DEFAULT_NEGATIVE_PROMPT = {
         {
             "description": "Blurry, distorted vehicles or road markings with unnatural motion.",
             "appearance_details": "Compression artifacts, flickering edges, broken geometry, muddy textures.",
-            "action": "Jerky slideshow motion or abrupt teleporting objects.",
+            "action": "Jerky slideshow motion or abrupt position jumping of objects.",
             "state_changes": "Sudden unmotivated flickering or color shifts between frames.",
         }
     ],
@@ -400,14 +400,14 @@ def select_diverse_gap_jobs(
             ordered = [candidates[(round_idx + bucket_idx + i) % len(candidates)] for i in range(len(candidates))]
             video = next((v for v in ordered if str(v["scene_name"]) not in used_scenes), ordered[0])
             scene_name = str(video["scene_name"])
-            dedup_key = (attribute, value, scene_name)
-            if dedup_key in used_pairs:
+            unique_key = (attribute, value, scene_name)
+            if unique_key in used_pairs:
                 video = next((v for v in ordered if (attribute, value, str(v["scene_name"])) not in used_pairs), None)
                 if video is None:
                     continue
                 scene_name = str(video["scene_name"])
-                dedup_key = (attribute, value, scene_name)
-            used_pairs.add(dedup_key)
+                unique_key = (attribute, value, scene_name)
+            used_pairs.add(unique_key)
             used_scenes.add(scene_name)
             raw_path = Path(str(video["video_path"]))
             resolved_video = (video_dir_override / raw_path.name) if video_dir_override else raw_path

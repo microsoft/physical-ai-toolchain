@@ -36,6 +36,7 @@ resource "azurerm_network_interface" "jumpbox" {
 // ============================================================
 
 resource "azurerm_linux_virtual_machine" "jumpbox" {
+  # checkov:skip=CKV_AZURE_50:Entra ID SSH login requires the Microsoft AADSSHLoginForLinux VM extension.
   count = var.should_deploy_jumpbox ? 1 : 0
 
   name                            = "vm-jb-${local.resource_name_suffix}"
