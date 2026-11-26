@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Infrastructure Reference
 description: Architecture, module structure, outputs, and troubleshooting for the Terraform deployment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-07
+ms.date: 2026-11-25
 ms.topic: reference
 keywords:
   - architecture
@@ -45,8 +45,10 @@ infrastructure/terraform/
 │   │   ├── observability.tf           # Container Insights, Prometheus DCRs
 │   │   └── osmo-federated-credentials.tf  # OSMO workload identity
 │   ├── vpn/                           # VPN Gateway module
+│   ├── bastion/                       # Azure Bastion and jumpbox module
 │   └── automation/                    # Automation Account module
 ├── vpn/                               # Standalone VPN deployment
+├── bastion/                           # Standalone Azure Bastion deployment
 ├── dns/                               # OSMO UI DNS configuration
 └── automation/                        # Scheduled startup deployment
 ```
@@ -217,6 +219,7 @@ Clusters whose GPU pools scale from zero use both settings so that CPU pods wait
 | [platform](https://github.com/microsoft/physical-ai-toolchain/tree/main/infrastructure/terraform/modules/platform) | Networking, storage, Key Vault, ML workspace, PostgreSQL, Redis |
 | [sil](https://github.com/microsoft/physical-ai-toolchain/tree/main/infrastructure/terraform/modules/sil)           | AKS cluster with GPU node pools                                 |
 | [vpn](https://github.com/microsoft/physical-ai-toolchain/tree/main/infrastructure/terraform/modules/vpn)           | VPN Gateway module (used by vpn/ standalone deployment)         |
+| [bastion](https://github.com/microsoft/physical-ai-toolchain/tree/main/infrastructure/terraform/modules/bastion)   | Azure Bastion and private jumpbox module (used by bastion/)     |
 
 ## 📤 Outputs
 
@@ -249,7 +252,7 @@ Standalone deployments extend the base infrastructure.
 Point-to-Site VPN for secure remote access to the private AKS cluster and Azure services.
 
 > [!IMPORTANT]
-> **Required for default configuration.** With `should_enable_private_aks_cluster = true`, you cannot run `kubectl` commands or cluster setup scripts without VPN connectivity. To skip VPN, set `should_enable_private_aks_cluster = false` in your `terraform.tfvars`.
+> **Required for default configuration.** With `should_enable_private_aks_cluster = true`, you cannot run `kubectl` commands or cluster setup scripts without VPN Gateway or [Azure Bastion](bastion.md) connectivity. To skip private access, set `should_enable_private_aks_cluster = false` in your `terraform.tfvars`.
 
 ```bash
 cd vpn
@@ -258,6 +261,18 @@ terraform init && terraform apply -var-file=terraform.tfvars
 ```
 
 See [VPN Gateway](vpn.md) for configuration options and VPN client setup.
+
+### Azure Bastion and Jumpbox
+
+Standalone Azure Bastion Standard with native client tunneling and an optional private Entra-authenticated Linux jumpbox as an alternative or companion to VPN Gateway.
+
+```bash
+cd bastion
+cp terraform.tfvars.example terraform.tfvars
+terraform init && terraform apply -var-file=terraform.tfvars
+```
+
+See [Azure Bastion Access](bastion.md) for Entra ID SSH, port forwarding with `connect-bastion.sh`, and NSG rules.
 
 ### Private DNS for OSMO UI
 

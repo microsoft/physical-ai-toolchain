@@ -2,7 +2,7 @@
 title: Infrastructure as Code
 description: Terraform configuration for Azure resources including AKS, Azure ML, storage, and OSMO backend services
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-11-25
 ms.topic: how-to
 keywords:
   - terraform
@@ -18,7 +18,7 @@ Terraform configuration for the robotics reference architecture. Deploys Azure r
 <!-- markdownlint-disable MD028 -->
 
 > [!IMPORTANT]
-> Private AKS clusters require VPN connectivity. Deploy [VPN Gateway](vpn/) before accessing cluster resources.
+> Private AKS clusters require VPN Gateway or Azure Bastion connectivity. Deploy [VPN Gateway](vpn/) or [Azure Bastion](bastion/) before accessing cluster resources.
 
 <!-- markdownlint-enable MD028 -->
 
@@ -50,11 +50,12 @@ aml_managed_network_isolation_mode = "AllowOnlyApprovedOutbound"
 |-----------------------------------------------------------------------------------|------------------------------------------------------|
 | [Infrastructure Deployment](../../docs/infrastructure/infrastructure.md)          | Configuration, variables, and deployment walkthrough |
 | [Infrastructure Reference](../../docs/infrastructure/infrastructure-reference.md) | Architecture, module structure, and troubleshooting  |
+| [Azure Bastion Access](../../docs/infrastructure/bastion.md)                      | Bastion Standard and jumpbox access without VPN      |
 | [Terraform Reference](TERRAFORM.md)                                               | Auto-generated inputs, outputs, and resources        |
 
 ## ➡️ Next Step
 
-Deploy [VPN Gateway](vpn/) or proceed to [Cluster Setup](../setup/).
+Deploy [VPN Gateway](vpn/) or [Azure Bastion](bastion/), or proceed to [Cluster Setup](../setup/).
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

@@ -21,7 +21,7 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
         $script:TestTerraformDir = Join-Path $TestDrive 'infrastructure/terraform'
 
         # Create all deployment directories so Push-Location works
-        foreach ($sub in @('.', 'vpn', 'dns', 'automation')) {
+        foreach ($sub in @('.', 'vpn', 'dns', 'automation', 'bastion')) {
             $dirPath = if ($sub -eq '.') { $script:TestTerraformDir } else { Join-Path $script:TestTerraformDir $sub }
             New-Item -ItemType Directory -Force -Path $dirPath | Out-Null
         }
@@ -247,7 +247,7 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
 
             $result | Should -Be $ExitCode
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json -AsHashtable
-            $json.validation | Should -HaveCount 4
+            $json.validation | Should -HaveCount 5
             foreach ($directory in $json.validation) {
                 $directory.passed | Should -Be ($ExitCode -eq 0)
                 $directory.skipped | Should -BeFalse
@@ -272,16 +272,16 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
                 $otherBucket = if ($Bucket -eq 'errors') { 'warnings' } else { 'errors' }
                 $directory[$otherBucket] | Should -HaveCount 0
             }
-            Should -Invoke Write-CIAnnotation -Times 4 -Exactly -ParameterFilter {
+            Should -Invoke Write-CIAnnotation -Times 5 -Exactly -ParameterFilter {
                 $Level -eq $AnnotationLevel -and $Message -eq 'Diagnostic summary' -and $Line -eq $expectedAnnotationLine
             }
             if (-not $HasFile) {
                 Should -Invoke Write-CIAnnotation -Times 0 -Exactly -ParameterFilter { $File }
             }
-            $detailCalls = if ($HasDetail) { 4 } else { 0 }
+            $detailCalls = if ($HasDetail) { 5 } else { 0 }
             Should -Invoke Write-Host -Times $detailCalls -Exactly -ParameterFilter { $Object -eq 'Diagnostic detail' }
-            $json.summary.directories_checked | Should -Be 4
-            $json.summary.directories_passed | Should -Be $(if ($ExitCode -eq 0) { 4 } else { 0 })
+            $json.summary.directories_checked | Should -Be 5
+            $json.summary.directories_passed | Should -Be $(if ($ExitCode -eq 0) { 5 } else { 0 })
             $json.summary.overall_passed | Should -Be ($ExitCode -eq 0)
             Should -Invoke Write-CIStepSummary -Times 1 -Exactly
         }
@@ -290,7 +290,7 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
     Context 'initialization failures' {
         It 'Completes reporting when initialization fails in <FailureMode>' -ForEach @(
             @{ FailureMode = 'all directories'; FailAll = $true; ExpectedPassed = 0 }
-            @{ FailureMode = 'only vpn'; FailAll = $false; ExpectedPassed = 3 }
+            @{ FailureMode = 'only vpn'; FailAll = $false; ExpectedPassed = 4 }
         ) {
             $ErrorActionPreference = 'Stop'
             $originalLocation = (Get-Location).Path
@@ -317,7 +317,7 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
             $result | Should -Be 1
             (Get-Location).Path | Should -Be $originalLocation
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
-            $json.validation | Should -HaveCount 4
+            $json.validation | Should -HaveCount 5
             foreach ($directory in $json.validation) {
                 $shouldFail = $FailAll -or $directory.directory -like '*/vpn'
                 $directory.passed | Should -Be (-not $shouldFail)
@@ -338,13 +338,13 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
                 }
             }
             $script:ValidatedDirectories | Should -Not -Contain (Join-Path $script:TestTerraformDir 'vpn')
-            $json.summary.directories_checked | Should -Be 4
+            $json.summary.directories_checked | Should -Be 5
             $json.summary.directories_passed | Should -Be $ExpectedPassed
             $json.summary.directories_skipped | Should -Be 0
             $json.summary.overall_passed | Should -BeFalse
-            Should -Invoke terraform -Times 4 -Exactly -ParameterFilter { $args[0] -eq 'init' }
+            Should -Invoke terraform -Times 5 -Exactly -ParameterFilter { $args[0] -eq 'init' }
             Should -Invoke terraform -Times $ExpectedPassed -Exactly -ParameterFilter { $args[0] -eq 'validate' }
-            $expectedFailures = 4 - $ExpectedPassed
+            $expectedFailures = 5 - $ExpectedPassed
             Should -Invoke Write-CIAnnotation -Times $expectedFailures -Exactly -ParameterFilter {
                 $Level -eq 'Error' -and $Message -like 'Terraform initialization failed:*' -and $null -eq $File -and $null -eq $Line
             }
@@ -381,7 +381,7 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
             $result | Should -Be 1
             (Get-Location).Path | Should -Be $originalLocation
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
-            $json.validation | Should -HaveCount 4
+            $json.validation | Should -HaveCount 5
             $failed = @($json.validation | Where-Object { -not $_.passed })
             $failed | Should -HaveCount 1
             $failed[0].directory | Should -Be "$script:TestTerraformDir/vpn"
@@ -397,10 +397,10 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
                 $directory.warnings | Should -HaveCount 0
                 if ($directory.passed) { $directory.errors | Should -HaveCount 0 }
             }
-            $json.summary.directories_checked | Should -Be 4
-            $json.summary.directories_passed | Should -Be 3
+            $json.summary.directories_checked | Should -Be 5
+            $json.summary.directories_passed | Should -Be 4
             $json.summary.overall_passed | Should -BeFalse
-            Should -Invoke terraform -Times 4 -Exactly -ParameterFilter { $args[0] -eq 'validate' }
+            Should -Invoke terraform -Times 5 -Exactly -ParameterFilter { $args[0] -eq 'validate' }
             Should -Invoke Write-CIAnnotation -Times 1 -Exactly -ParameterFilter {
                 $Level -eq 'Error' -and $Message -eq "Invalid Terraform validation output: $script:TestTerraformDir/vpn" -and
                 $null -eq $File -and $null -eq $Line
@@ -424,12 +424,12 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
                 -TerraformDir $script:TestTerraformDir
 
             $result | Should -Be 1
-            $script:ObservedNativePreferences | Should -HaveCount 4
+            $script:ObservedNativePreferences | Should -HaveCount 5
             $script:ObservedNativePreferences | ForEach-Object { $_ | Should -BeFalse }
             $PSNativeCommandUseErrorActionPreference | Should -BeTrue
             $ErrorActionPreference | Should -Be 'Stop'
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
-            $json.summary.directories_checked | Should -Be 4
+            $json.summary.directories_checked | Should -Be 5
             $json.summary.overall_passed | Should -BeFalse
             Should -Invoke Write-CIStepSummary -Times 1 -Exactly
         }
@@ -457,7 +457,7 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
             $failed[0].exit_code | Should -Be 23
             $failed[0].errors[0].detail | Should -Be 'Provider registry unavailable'
             Should -Invoke Write-Host -Times 1 -ParameterFilter { $Object -eq 'Provider registry unavailable' }
-            Should -Invoke terraform -Times 3 -Exactly -ParameterFilter { $args[0] -eq 'validate' }
+            Should -Invoke terraform -Times 4 -Exactly -ParameterFilter { $args[0] -eq 'validate' }
         }
 
         It 'Reports failed validation with valid JSON but no diagnostics and preserves its exit code' {
@@ -571,6 +571,15 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
             $autoResult.skipped | Should -BeFalse
         }
 
+        It 'Maps bastion files to bastion directory' {
+            Mock Get-ChangedFilesFromGit { return @('infrastructure/terraform/bastion/main.tf') }
+            Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir -ChangedFilesOnly
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $bastionResult = $json.validation | Where-Object { $_.directory -like '*/bastion' }
+            $bastionResult.skipped | Should -BeFalse
+        }
+
         It 'Maps modules/ files to root directory' {
             Mock Get-ChangedFilesFromGit { return @('infrastructure/terraform/modules/foo/main.tf') }
             Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
@@ -611,9 +620,9 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
             Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
                 -TerraformDir $script:TestTerraformDir | Should -Be 1
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
-            $json.summary.directories_expected | Should -Be 4
+            $json.summary.directories_expected | Should -Be 5
             $json.summary.overall_passed | Should -BeFalse
-            Should -Invoke terraform -Times 3 -Exactly -ParameterFilter { $args[0] -eq 'validate' }
+            Should -Invoke terraform -Times 4 -Exactly -ParameterFilter { $args[0] -eq 'validate' }
         }
 
         It 'Fails when a zero-exit validation report declares invalid configuration' {
@@ -625,11 +634,11 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
                 -TerraformDir $script:TestTerraformDir | Should -Be 1
         }
 
-        It 'Validates all 4 directories by default' {
+        It 'Validates all 5 directories by default' {
             Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
                 -TerraformDir $script:TestTerraformDir
-            Should -Invoke terraform -Times 4 -ParameterFilter { $args[0] -eq 'init' }
-            Should -Invoke terraform -Times 4 -ParameterFilter { $args[0] -eq 'validate' }
+            Should -Invoke terraform -Times 5 -ParameterFilter { $args[0] -eq 'init' }
+            Should -Invoke terraform -Times 5 -ParameterFilter { $args[0] -eq 'validate' }
         }
 
         It 'Runs init with -backend=false' {

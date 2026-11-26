@@ -1,0 +1,51 @@
+// =============================================================================
+// Azure Bastion Terraform Variables Example
+// =============================================================================
+// Copy to terraform.tfvars and customize:  cp terraform.tfvars.example terraform.tfvars
+// Full variable reference: variables.tf
+// =============================================================================
+
+// Core Configuration (must match root infrastructure/terraform deployment)
+environment     = "dev"
+location        = "westus3"
+resource_prefix = "robotics"
+instance        = "001"
+
+// [Optional] Override existing resource names if they differ from defaults
+// resource_group_name  = "rg-robotics-dev-001"
+// virtual_network_name = "vnet-robotics-dev-001"
+// jumpbox_subnet_name  = "snet-robotics-dev-001"
+
+// [Optional] AzureBastionSubnet prefix (minimum /26, non-overlapping with platform subnets)
+bastion_subnet_address_prefix = "10.0.10.0/26"
+
+// [Optional] Bastion Standard SKU with native client tunneling
+bastion_config = {
+  sku               = "Standard"
+  scale_units       = 2
+  tunneling_enabled = true
+  zones             = ["1", "2", "3"]
+}
+
+// Private Linux Jumpbox Configuration
+// Set should_deploy_jumpbox = false to deploy Azure Bastion without a jumpbox VM.
+should_deploy_jumpbox = true
+
+jumpbox_config = {
+  vm_size              = "Standard_B2s"
+  admin_username       = "azureuser"
+  admin_ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIReplaceWithYourPublicKeyData operator@example"
+}
+
+// [Optional] Grant the deploying user Virtual Machine Administrator Login for Entra ID SSH
+should_assign_current_user_admin_login = true
+
+// [Optional] Additional Entra ID object IDs for VM SSH access
+// jumpbox_admin_principal_ids = ["00000000-0000-0000-0000-000000000000"]
+// jumpbox_user_principal_ids  = ["00000000-0000-0000-0000-000000000000"]
+
+// [Optional] Least-privilege RBAC targets for the jumpbox managed identity
+// aks_cluster_id        = "/subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.ContainerService/managedClusters/<aks>"
+// container_registry_id = "/subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.ContainerRegistry/registries/<acr>"
+// key_vault_id          = "/subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.KeyVault/vaults/<kv>"
+// storage_account_id    = "/subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.Storage/storageAccounts/<st>"

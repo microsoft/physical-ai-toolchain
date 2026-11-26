@@ -18,15 +18,18 @@ infrastructure/
 │   │   ├── platform/                  # Shared Azure services (VNet, Key Vault, identities)
 │   │   ├── sil/                       # AKS cluster and ML extension
 │   │   ├── vpn/                       # VPN Gateway module
+│   │   ├── bastion/                   # Azure Bastion and private jumpbox module
 │   │   ├── automation/                # Azure Automation module
 │   │   └── dataviewer/                # Dataviewer container resources
 │   ├── vpn/                           # Standalone VPN deployment
+│   ├── bastion/                       # Standalone Azure Bastion deployment
 │   ├── automation/                    # Standalone automation deployment
 │   └── dns/                           # Standalone DNS deployment
 ├── setup/                             # Post-deploy configuration scripts
 │   ├── 01-deploy-robotics-charts.sh   # GPU Operator, KAI Scheduler
 │   ├── 02-deploy-azureml-extension.sh # AzureML K8s extension
-│   ├── 03-deploy-osmo.sh           # OSMO service + backend operator
+│   ├── 03-deploy-osmo.sh              # OSMO service + backend operator
+│   ├── connect-bastion.sh             # Azure Bastion SSH, tunnel, and proxy helper
 │   ├── defaults.conf                  # Central version and namespace config
 │   ├── README.md                      # Setup quick start
 │   ├── lib/                           # Shared shell libraries
@@ -73,7 +76,7 @@ az aks get-credentials --resource-group <rg> --name <aks>
 ```
 
 > [!IMPORTANT]
-> Private AKS clusters require VPN connectivity before any `kubectl` commands. Deploy VPN first: `cd infrastructure/terraform/vpn && terraform apply`.
+> Private AKS clusters require VPN Gateway or Azure Bastion connectivity before running `kubectl` commands. Deploy VPN (`cd infrastructure/terraform/vpn && terraform apply`) or Azure Bastion (`cd infrastructure/terraform/bastion && terraform apply`) first.
 
 ### 4. Run setup scripts
 
@@ -88,18 +91,19 @@ cd infrastructure/setup
 
 ## 🌐 Network Modes
 
-| Mode         | Private Endpoints | Private AKS | VPN Required | Use Case                               |
-|--------------|-------------------|-------------|--------------|----------------------------------------|
-| Full Private | `true`            | `true`      | Yes          | Production deployments                 |
-| Hybrid       | `true`            | `false`     | No           | Development with private data services |
-| Full Public  | `false`           | `false`     | No           | Evaluation only                        |
+| Mode         | Private Endpoints | Private AKS | Private Access Required | Use Case                               |
+|--------------|-------------------|-------------|-------------------------|----------------------------------------|
+| Full Private | `true`            | `true`      | VPN or Bastion          | Production deployments                 |
+| Hybrid       | `true`            | `false`     | No                      | Development with private data services |
+| Full Public  | `false`           | `false`     | No                      | Evaluation only                        |
 
 ## 📖 Documentation
 
-| Guide                                                                          | Description                                          |
-|--------------------------------------------------------------------------------|------------------------------------------------------|
-| [Infrastructure Deployment](../docs/infrastructure/infrastructure.md)          | Configuration, variables, and deployment walkthrough |
-| [Infrastructure Reference](../docs/infrastructure/infrastructure-reference.md) | Architecture, module structure, and troubleshooting  |
-| [Cluster Setup](../docs/infrastructure/cluster-setup.md)                       | AKS setup walkthrough and deployment scenarios       |
-| [VPN Configuration](../docs/infrastructure/vpn.md)                             | Point-to-site VPN for private cluster access         |
-| [Prerequisites](../docs/infrastructure/prerequisites.md)                       | Required tools and versions                          |
+| Guide                                                                          | Description                                           |
+|--------------------------------------------------------------------------------|-------------------------------------------------------|
+| [Infrastructure Deployment](../docs/infrastructure/infrastructure.md)          | Configuration, variables, and deployment walkthrough  |
+| [Infrastructure Reference](../docs/infrastructure/infrastructure-reference.md) | Architecture, module structure, and troubleshooting   |
+| [Cluster Setup](../docs/infrastructure/cluster-setup.md)                       | AKS setup walkthrough and deployment scenarios        |
+| [VPN Configuration](../docs/infrastructure/vpn.md)                             | Point-to-site VPN for private cluster access          |
+| [Azure Bastion Access](../docs/infrastructure/bastion.md)                      | Azure Bastion Standard and jumpbox for private access |
+| [Prerequisites](../docs/infrastructure/prerequisites.md)                       | Required tools and versions                           |

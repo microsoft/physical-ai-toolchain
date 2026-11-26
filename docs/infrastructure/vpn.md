@@ -3,7 +3,7 @@ sidebar_position: 7
 title: VPN Gateway Configuration
 description: Point-to-site and site-to-site VPN setup for private AKS cluster access
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-31
+ms.date: 2026-11-25
 ms.topic: how-to
 keywords:
   - vpn
@@ -20,9 +20,9 @@ Point-to-Site and Site-to-Site VPN connectivity for secure remote access to the 
 <!-- markdownlint-disable-next-line MD028 -->
 
 > [!IMPORTANT]
-> **Required for default configuration.** With `should_enable_private_aks_cluster = true` (the default), you must deploy this VPN Gateway and connect before running `kubectl` commands or [cluster setup](cluster-setup.md) scripts. Without VPN, the private cluster endpoint is not accessible.
+> **Required for default configuration (unless using Azure Bastion).** With `should_enable_private_aks_cluster = true` (the default), deploy either this VPN Gateway or [Azure Bastion Access](bastion.md) and connect before running `kubectl` commands or [cluster setup](cluster-setup.md) scripts. Without private network connectivity, the private cluster endpoint is not accessible.
 >
-> To skip VPN, set `should_enable_private_aks_cluster = false` in your `terraform.tfvars` for a public AKS control plane.
+> To skip private access, set `should_enable_private_aks_cluster = false` in your `terraform.tfvars` for a public AKS control plane.
 
 ## 📋 Prerequisites
 
@@ -155,7 +155,8 @@ vpn_site_shared_keys = {
 ## 🔗 Related
 
 * [Infrastructure Deployment](infrastructure.md) — Main infrastructure documentation
-* [Private DNS](dns.md) — Private DNS for OSMO UI (requires VPN)
+* [Azure Bastion Access](bastion.md) — SSH and tunneling alternative without a VPN client for private cluster access
+* [Private DNS](dns.md) — Private DNS for OSMO UI (requires private network access)
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

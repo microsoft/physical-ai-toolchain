@@ -1,0 +1,113 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Zero-NGC OSMO 6.x workflow for Stage 2 (Before) or Stage 4 (After) ODD gap analysis
+# using a 2-task group: vLLM serving nvidia/Cosmos-Reason2-2B + AVOPS/ODD analysis client.
+workflow:
+  name: "{{ workflow_name }}"
+  timeout:
+    exec_timeout: 2h
+  resources:
+    cpu_stage:
+      cpu: 2
+      memory: 4Gi
+      storage: 20Gi
+      platform: "{{ cpu_platform }}"
+    a10_stage:
+      cpu: 6
+      gpu: 1
+      memory: 24Gi
+      storage: 40Gi
+      platform: "{{ a10_platform }}"
+  groups:
+    - name: odd-analysis-group
+      tasks:
+        - name: vlm-server
+          resource: a10_stage
+          image: "{{ vlm_image }}"
+          command: ["bash", "-euo", "pipefail", "-c"]
+          args:
+            - |
+              echo "=== Starting VLM server ({{ phase }}) with {{ vlm_model }} ==="
+              nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
+              extra_args=()
+              if [[ -n "{{ vlm_extra_args }}" ]]; then
+                read -r -a extra_args <<< "{{ vlm_extra_args }}"
+              fi
+              exec vllm serve "{{ vlm_model }}" \
+                --revision "{{ vlm_revision }}" \
+                --host 0.0.0.0 \
+                --port 8010 \
+                --max-model-len "{{ vlm_max_model_len }}" \
+                ${extra_args[@]+"${extra_args[@]}"}
+          environment:
+            NVIDIA_DRIVER_CAPABILITIES: "all"
+            HF_HOME: /tmp/hf_cache
+{% if use_huggingface_credential == "true" %}
+          credentials:
+            huggingface:
+              HF_TOKEN: hf_token
+{% endif %}
+
+        - name: odd-analysis
+          lead: true
+          resource: cpu_stage
+          image: "{{ odd_image }}"
+          command: ["bash", "-euo", "pipefail", "-c"]
+          args:
+            - |
+              echo "=== AVOps ODD Analysis ({{ phase }}) with {{ vlm_model }} ==="
+              mkdir -p "{{output}}/odd"
+              ready=false
+              for _ in $(seq 1 120); do
+                if python3 - "http://{{host:vlm-server}}:8010/v1/models" <<'PY'
+              import sys
+              import urllib.request
+
+              try:
+                  with urllib.request.urlopen(sys.argv[1], timeout=5) as resp:
+                      sys.exit(0 if 200 <= resp.status < 300 else 1)
+              except Exception:
+                  sys.exit(1)
+              PY
+                then
+                  ready=true
+                  break
+                fi
+                sleep 5
+              done
+              if [[ "$ready" != "true" ]]; then
+                echo "ERROR: Timed out waiting for vlm-server readiness" >&2
+                exit 1
+              fi
+              python3 /app/run_odd_pipeline.py \
+                --input-dir "{{input:0}}" \
+                --output-dir "{{output}}/odd" \
+                --vlm-url "http://{{host:vlm-server}}:8010/v1" \
+                --vlm-model "{{ vlm_model }}" \
+                --vlm-input "{{ vlm_input }}" \
+                --threshold "{{ odd_threshold }}"
+          inputs:
+            - dataset:
+                name: "{{ input_dataset }}"
+          outputs:
+            - dataset:
+                name: "{{ output_dataset }}"
+                path: odd
+
+default-values:
+  workflow_name: avops-odd-analysis
+  phase: before
+  # Matches infrastructure/setup/values/osmo-platforms.yaml; override for a dedicated A10 pool.
+  cpu_platform: default
+  a10_platform: gpu_platform
+  odd_image: odd-component:latest # pinning-ignore: locally built from AVOPS/ODD/Dockerfile
+  vlm_image: vllm/vllm-omni:cosmos3@sha256:86fb713bf73e118e537a55fa013dcdbdf2468ed61b98f4f2e7934a9482181dc1
+  vlm_model: nvidia/Cosmos-Reason2-2B
+  vlm_revision: 9ce19a195e423419c349abfc86fd07178b230561
+  vlm_max_model_len: "8192"
+  vlm_extra_args: ""
+  vlm_input: video
+  odd_threshold: "0.8"
+  use_huggingface_credential: "true"
+  input_dataset: avops-driving-clips:latest
+  output_dataset: avops-odd-before

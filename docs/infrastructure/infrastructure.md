@@ -4,7 +4,7 @@ title: Infrastructure Deployment
 slug: infrastructure-deployment
 description: Terraform configuration and deployment for AKS, Azure ML, storage, and OSMO backend services
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-03
+ms.date: 2026-11-25
 ms.topic: how-to
 keywords:
   - terraform
@@ -50,7 +50,7 @@ terraform init && terraform apply -var-file=terraform.tfvars
 ```
 
 > [!IMPORTANT]
-> The default configuration creates a **private AKS cluster** (`should_enable_private_aks_cluster = true`). After deploying infrastructure, you must deploy the [VPN Gateway](vpn.md) and connect before running `kubectl` commands or [cluster setup](cluster-setup.md) scripts.
+> The default configuration creates a **private AKS cluster** (`should_enable_private_aks_cluster = true`). After deploying infrastructure, deploy either [VPN Gateway](vpn.md) or [Azure Bastion Access](bastion.md) and connect before running `kubectl` commands or [cluster setup](cluster-setup.md) scripts.
 
 ## ⚙️ Configuration
 
@@ -81,7 +81,7 @@ terraform init && terraform apply -var-file=terraform.tfvars
 |---------------------------------------|-----------------------------------------------------------|---------|
 | `should_enable_nat_gateway`           | Deploy NAT Gateway for outbound connectivity              | `true`  |
 | `should_enable_private_endpoint`      | Deploy private endpoints and DNS zones for Azure services | `true`  |
-| `should_enable_private_aks_cluster`   | Make AKS API endpoint private (requires VPN for kubectl)  | `true`  |
+| `should_enable_private_aks_cluster`   | Make AKS API endpoint private (requires VPN or Bastion)   | `true`  |
 | `should_enable_public_network_access` | Allow public access to resources                          | `true`  |
 | `should_deploy_postgresql`            | Deploy PostgreSQL Flexible Server for OSMO                | `true`  |
 | `should_deploy_redis`                 | Deploy Azure Managed Redis for OSMO                       | `true`  |
@@ -98,7 +98,7 @@ Three deployment modes are supported based on security requirements:
 
 #### Full Private (Default)
 
-All Azure services use private endpoints and AKS has a private control plane. Requires VPN for all access.
+All Azure services use private endpoints and AKS has a private control plane. Requires VPN Gateway or Azure Bastion for access.
 
 ```hcl
 # terraform.tfvars (default values)
@@ -106,7 +106,7 @@ should_enable_private_endpoint    = true
 should_enable_private_aks_cluster = true
 ```
 
-Deploy VPN Gateway after infrastructure: `cd vpn && terraform apply`
+Deploy VPN Gateway (`cd vpn && terraform apply`) or Azure Bastion (`cd bastion && terraform apply`) after infrastructure.
 
 #### Hybrid: Private Services, Public AKS
 
@@ -158,6 +158,7 @@ See [variables.tf](https://github.com/microsoft/physical-ai-toolchain/blob/main/
 
 - [Infrastructure Reference](infrastructure-reference.md): architecture, modules, outputs, troubleshooting
 - [VPN Gateway](vpn.md): point-to-site VPN for private cluster access
+- [Azure Bastion Access](bastion.md): Azure Bastion Standard and private jumpbox for private cluster access
 - [Cleanup and Destroy](cleanup.md): resource teardown procedures
 
 <!-- markdownlint-disable MD036 -->

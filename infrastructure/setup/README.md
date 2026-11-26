@@ -2,7 +2,7 @@
 title: Cluster Setup
 description: AKS cluster configuration with NVIDIA GPU operator, KAI Scheduler, and AzureML extension
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-03
+ms.date: 2026-11-25
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -113,11 +113,12 @@ The Ubuntu consumer validates catalog structure, artifact digests, token metadat
 
 ## 📖 Documentation
 
-| Guide                                                                                      | Description                                                        |
-|--------------------------------------------------------------------------------------------|--------------------------------------------------------------------|
-| [Cluster Setup](../../docs/infrastructure/cluster-setup.md)                                | Full setup walkthrough and deployment scenarios                    |
-| [Cluster Operations](../../docs/infrastructure/cluster-setup-advanced.md)                  | Advanced operations, scaling, and troubleshooting                  |
-| [Ubuntu HiL OSMO Backend](../../docs/recipes/tier-3-production/ubuntu-hil-osmo-backend.md) | Progressive T3 host, optional VPN, backend, and validation journey |
+| Guide                                                                                      | Description                                                           |
+|--------------------------------------------------------------------------------------------|-----------------------------------------------------------------------|
+| [Cluster Setup](../../docs/infrastructure/cluster-setup.md)                                | Full setup walkthrough and deployment scenarios                       |
+| [Cluster Operations](../../docs/infrastructure/cluster-setup-advanced.md)                  | Advanced operations, scaling, and troubleshooting                     |
+| [Azure Bastion Access](../../docs/infrastructure/bastion.md)                               | Entra ID SSH, tunneling, and port forwarding via `connect-bastion.sh` |
+| [Ubuntu HiL OSMO Backend](../../docs/recipes/tier-3-production/ubuntu-hil-osmo-backend.md) | Progressive T3 host, optional VPN, backend, and validation journey    |
 
 ## ☁️ Azure ML Mirror (Optional)
 
