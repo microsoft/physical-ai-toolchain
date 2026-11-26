@@ -44,15 +44,18 @@ The first run downloads the following images, assets, source files, or model wei
 | Cosmos-Transfer2.5-2B                           | [Hugging Face model](https://huggingface.co/nvidia/Cosmos-Transfer2.5-2B)                                              |            About 4.8 GB | Accept the model's Hugging Face terms. Cached in the persistent `hf-cache` Docker volume used by the CARLA pipeline.                                                   |
 | Cosmos-Predict2.5-2B                            | [Hugging Face model](https://huggingface.co/nvidia/Cosmos-Predict2.5-2B)                                               |            About 4.8 GB | Accept the model's Hugging Face terms. Cached in the same `hf-cache` volume.                                                                                           |
 | Cosmos-Guardrail1 (when guardrails are enabled) | [Hugging Face model](https://huggingface.co/nvidia/Cosmos-Guardrail1)                                                  |                  Varies | Accept the model's Hugging Face terms. Not included in the current default download estimate; size depends on the selected model revision and guardrail configuration. |
+| Cosmos3-Nano-FP8 (OSMO closed-loop workflow)    | [Hugging Face model](https://huggingface.co/nvidia/Cosmos3-Nano-FP8)                                                   |                  Varies | Accept the model's Hugging Face terms. Pinned to revision `9d45b0910219989a76c56aae82a08007bc1b597e`; served by `vllm/vllm-omni:cosmos3` during Stage 3 synthesis.     |
+| `vllm/vllm-omni:cosmos3` (OSMO closed-loop)     | [`vllm/vllm-omni` on Docker Hub](https://hub.docker.com/r/vllm/vllm-omni)                                              |                  Varies | Public Docker Hub image pinned by `@sha256:86fb713bf73e118e537a55fa013dcdbdf2468ed61b98f4f2e7934a9482181dc1`; no `NGC_API_KEY` required.                               |
 
 The listed, quantified downloads total about **30.8 GB**. Treat this as a lower
 bound, not a disk requirement: it excludes the Cosmos source/LFS checkout,
-extracted CARLA maps, Docker image layers and build cache, and generated
-outputs. Reserve at least **50 GB free** before building, and more if Docker
-data, source checkouts, and generated videos share a disk. The `hf-cache` volume
-persists CARLA model weights across runs; the VLM's cache is on the host or
-container running the VLM service. Pre-fetch models into those caches or mirror
-the linked sources when preparing an offline environment.
+extracted CARLA maps, optional Cosmos3-Nano-FP8 and `vllm/vllm-omni` closed-loop
+artifacts, Docker image layers and build cache, and generated outputs. Reserve
+at least **50 GB free** before building, and more if Docker data, source
+checkouts, and generated videos share a disk. The `hf-cache` volume persists
+CARLA model weights across runs; the VLM's cache is on the host or container
+running the VLM service. Pre-fetch models into those caches or mirror the linked
+sources when preparing an offline environment.
 
 ### Configure and Install
 
@@ -263,6 +266,17 @@ Cosmos Data Factory
 
 The external repository owns the Airflow DAGs, Kubernetes deployment, curation and generation stages, and payload definitions. CDF supplies the checkout path and deployment configuration; it does not copy or patch the external repository.
 
+## 🔄 Zero-NGC OSMO Closed-Loop Workflow
+
+For clusters without Airflow or an `NGC_API_KEY`, run the OSMO-native closed-loop workflow in [OSMO Closed-Loop AVOps Workflows](./workflows/osmo/README.md) using `AVOPS/scripts/avops-closed-loop.sh` and `AVOPS/scripts/cosmos3_closed_loop.py`:
+
+| Stage | Component                             | Platform Default | Purpose                                                                          |
+|-------|---------------------------------------|------------------|----------------------------------------------------------------------------------|
+| 1     | `cosmos3_closed_loop.py probe-clips`  | `default`        | Probe input driving clips into `clip_manifest.json`                              |
+| 2     | `AVOPS/ODD` + `Cosmos-Reason2-2B`     | `gpu_platform`   | Score baseline ODD coverage, detect gaps, and author variation prompts           |
+| 3     | `vllm/vllm-omni` + `Cosmos3-Nano-FP8` | `gpu_platform`   | Synthesize missing weather and time-of-day driving clips                         |
+| 4     | `AVOPS/ODD` + `Cosmos-Reason2-2B`     | `gpu_platform`   | Re-evaluate augmented clips and measure Before-to-After ODD coverage improvement |
+
 ## 🔐 Security
 
-Keep `sdg.env`, kubeconfig files, API keys, and storage credentials out of source control. Use environment variables or the Git-ignored local configuration file for deployment-specific values. Protect credentials with the access controls required by the target environment.
+Keep `sdg.env`, `AVOPS/configs/closed-loop.env`, kubeconfig files, API keys, and storage credentials out of source control. Use environment variables or the Git-ignored local configuration file for deployment-specific values. Protect credentials with the access controls required by the target environment.

@@ -1,0 +1,114 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Zero-NGC OSMO 6.x workflow for Stage 3 synthetic driving video generation
+# using public vllm/vllm-omni:cosmos3 serving nvidia/Cosmos3-Nano-FP8.
+workflow:
+  name: "{{ workflow_name }}"
+  timeout:
+    exec_timeout: 4h
+  resources:
+    default:
+      cpu: 12
+      gpu: 1
+      memory: 96Gi
+      storage: 100Gi
+      platform: "{{ h100_platform }}"
+  tasks:
+    - name: cosmos3-generate
+      image: "{{ cosmos3_image }}"
+      command: ["bash", "-euo", "pipefail", "-c"]
+      args:
+        - |
+          echo "=== AVOps Stage 3: Cosmos3-Nano-FP8 Synthesis ==="
+          nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
+          export VLLM_OMNI_USE_QUACK_FP8=0
+          vllm serve "{{ cosmos3_model }}" \
+            --revision "{{ cosmos3_revision }}" \
+            --omni \
+            --no-guardrails \
+            --host 127.0.0.1 \
+            --port 8000 \
+            --init-timeout 1800 &
+          SRV_PID=$!
+          trap 'kill "$SRV_PID" 2>/dev/null || true' EXIT
+          ready=false
+          for _ in $(seq 1 180); do
+            if ! kill -0 "$SRV_PID" 2>/dev/null; then
+              echo "ERROR: vLLM-Omni Cosmos 3 server exited unexpectedly" >&2
+              exit 1
+            fi
+            if python3 - "http://127.0.0.1:8000/health" <<'PY'
+          import sys
+          import urllib.request
+
+          try:
+              with urllib.request.urlopen(sys.argv[1], timeout=5) as resp:
+                  sys.exit(0 if 200 <= resp.status < 300 else 1)
+          except Exception:
+              sys.exit(1)
+          PY
+            then
+              ready=true
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$ready" != "true" ]]; then
+            echo "ERROR: Timed out waiting for vLLM-Omni Cosmos 3 server readiness" >&2
+            exit 1
+          fi
+          mkdir -p "{{output}}/synthetic-clips"
+          python3 "{{input:1}}/cosmos3_closed_loop.py" build-jobs \
+            --odd-output "{{input:0}}" \
+            --out /tmp/cosmos3_jobs.json \
+            --max-clips "{{ max_clips }}" \
+            --mode "{{ generation_mode }}" \
+            --video-dir "{{input:2}}"
+          python3 "{{input:1}}/cosmos3_closed_loop.py" synthesize \
+            --jobs /tmp/cosmos3_jobs.json \
+            --endpoint-url http://127.0.0.1:8000 \
+            --out-dir "{{output}}/synthetic-clips" \
+            --size "{{ video_size }}" \
+            --num-frames "{{ num_frames }}" \
+            --fps "{{ fps }}" \
+            --steps "{{ steps }}" \
+            --mode "{{ generation_mode }}"
+      environment:
+        NVIDIA_DRIVER_CAPABILITIES: "all"
+        HF_HOME: /dev/shm/hf_cache
+        VLLM_OMNI_USE_QUACK_FP8: "0"
+{% if use_huggingface_credential == "true" %}
+      credentials:
+        huggingface:
+          HF_TOKEN: hf_token
+{% endif %}
+      inputs:
+        - dataset:
+            name: "{{ odd_before_dataset }}"
+        - dataset:
+            name: "{{ scripts_dataset }}"
+        - dataset:
+            name: "{{ clips_dataset }}"
+      outputs:
+        - dataset:
+            name: "{{ output_dataset }}"
+            path: synthetic-clips
+
+default-values:
+  workflow_name: avops-cosmos3-generate
+  # Matches infrastructure/setup/values/osmo-platforms.yaml; override for a dedicated H100 pool.
+  h100_platform: gpu_platform
+  cosmos3_image: vllm/vllm-omni:cosmos3@sha256:86fb713bf73e118e537a55fa013dcdbdf2468ed61b98f4f2e7934a9482181dc1
+  cosmos3_model: nvidia/Cosmos3-Nano-FP8
+  cosmos3_revision: 9d45b0910219989a76c56aae82a08007bc1b597e
+  max_clips: "6"
+  video_size: 854x480
+  num_frames: "97"
+  fps: "24"
+  steps: "35"
+  generation_mode: auto
+  use_huggingface_credential: "true"
+  odd_before_dataset: avops-odd-before:latest
+  scripts_dataset: avops-scripts:latest
+  clips_dataset: avops-driving-clips:latest
+  output_dataset: avops-cosmos3-synthetic

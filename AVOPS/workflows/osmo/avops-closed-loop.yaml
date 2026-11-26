@@ -1,0 +1,337 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Unified zero-NGC, Airflow-free OSMO 6.x closed-loop AVOps workflow:
+#   Stage 1: Ingest & clip manifest probe (CPU)
+#   Stage 2: ODD gap analysis (Before) via 2-task group (vLLM Cosmos-Reason2-2B + AVOPS/ODD)
+#   Stage 3: Targeted video synthesis via vllm/vllm-omni:cosmos3 + nvidia/Cosmos3-Nano-FP8
+#   Stage 4: Closed-loop verification & ODD re-evaluation (After) via 2-task group + compare-odd
+workflow:
+  name: "{{ workflow_name }}"
+  timeout:
+    exec_timeout: 8h
+  resources:
+    cpu_stage:
+      cpu: 2
+      memory: 4Gi
+      storage: 20Gi
+      platform: "{{ cpu_platform }}"
+    a10_stage:
+      cpu: 6
+      gpu: 1
+      memory: 24Gi
+      storage: 40Gi
+      platform: "{{ a10_platform }}"
+    h100_stage:
+      cpu: 12
+      gpu: 1
+      memory: 96Gi
+      storage: 100Gi
+      platform: "{{ h100_platform }}"
+  groups:
+    - name: stage1-ingest
+      tasks:
+        - name: probe-clips
+          lead: true
+          resource: cpu_stage
+          image: "{{ odd_image }}"
+          command: ["bash", "-euo", "pipefail", "-c"]
+          args:
+            - |
+              mkdir -p "{{output}}/stage1"
+              python3 "{{input:1}}/cosmos3_closed_loop.py" probe-clips \
+                --input-dir "{{input:0}}" \
+                --out "{{output}}/stage1/clip_manifest.json"
+          inputs:
+            - dataset:
+                name: "{{ input_dataset }}"
+            - dataset:
+                name: "{{ scripts_dataset }}"
+          outputs:
+            - dataset:
+                name: "{{ stage1_dataset }}"
+                path: stage1
+
+    - name: stage2-odd-before
+      tasks:
+        - name: vlm-server-before
+          resource: a10_stage
+          image: "{{ vlm_image }}"
+          command: ["bash", "-euo", "pipefail", "-c"]
+          args:
+            - |
+              extra_args=()
+              if [[ -n "{{ vlm_extra_args }}" ]]; then
+                read -r -a extra_args <<< "{{ vlm_extra_args }}"
+              fi
+              exec vllm serve "{{ vlm_model }}" \
+                --revision "{{ vlm_revision }}" \
+                --host 0.0.0.0 \
+                --port 8010 \
+                --max-model-len "{{ vlm_max_model_len }}" \
+                ${extra_args[@]+"${extra_args[@]}"}
+          environment:
+            NVIDIA_DRIVER_CAPABILITIES: "all"
+            HF_HOME: /tmp/hf_cache
+{% if use_huggingface_credential == "true" %}
+          credentials:
+            huggingface:
+              HF_TOKEN: hf_token
+{% endif %}
+          inputs:
+            - task: probe-clips
+
+        - name: odd-analysis-before
+          lead: true
+          resource: cpu_stage
+          image: "{{ odd_image }}"
+          command: ["bash", "-euo", "pipefail", "-c"]
+          args:
+            - |
+              mkdir -p "{{output}}/odd-before"
+              ready=false
+              for _ in $(seq 1 120); do
+                if python3 - "http://{{host:vlm-server-before}}:8010/v1/models" <<'PY'
+              import sys
+              import urllib.request
+
+              try:
+                  with urllib.request.urlopen(sys.argv[1], timeout=5) as resp:
+                      sys.exit(0 if 200 <= resp.status < 300 else 1)
+              except Exception:
+                  sys.exit(1)
+              PY
+                then
+                  ready=true
+                  break
+                fi
+                sleep 5
+              done
+              if [[ "$ready" != "true" ]]; then
+                echo "ERROR: Timed out waiting for vlm-server-before readiness" >&2
+                exit 1
+              fi
+              python3 /app/run_odd_pipeline.py \
+                --input-dir "{{input:0}}" \
+                --output-dir "{{output}}/odd-before" \
+                --vlm-url "http://{{host:vlm-server-before}}:8010/v1" \
+                --vlm-model "{{ vlm_model }}" \
+                --vlm-input "{{ vlm_input }}" \
+                --threshold "{{ odd_threshold }}"
+          inputs:
+            - dataset:
+                name: "{{ input_dataset }}"
+            - task: probe-clips
+          outputs:
+            - dataset:
+                name: "{{ odd_before_dataset }}"
+                path: odd-before
+
+    - name: stage3-cosmos3-generate
+      tasks:
+        - name: cosmos3-synthesize
+          lead: true
+          resource: h100_stage
+          image: "{{ cosmos3_image }}"
+          command: ["bash", "-euo", "pipefail", "-c"]
+          args:
+            - |
+              export VLLM_OMNI_USE_QUACK_FP8=0
+              vllm serve "{{ cosmos3_model }}" \
+                --revision "{{ cosmos3_revision }}" \
+                --omni \
+                --no-guardrails \
+                --host 127.0.0.1 \
+                --port 8000 \
+                --init-timeout 1800 &
+              SRV_PID=$!
+              trap 'kill "$SRV_PID" 2>/dev/null || true' EXIT
+              ready=false
+              for _ in $(seq 1 180); do
+                if ! kill -0 "$SRV_PID" 2>/dev/null; then
+                  echo "ERROR: vLLM-Omni Cosmos 3 server exited unexpectedly" >&2
+                  exit 1
+                fi
+                if python3 - "http://127.0.0.1:8000/health" <<'PY'
+              import sys
+              import urllib.request
+
+              try:
+                  with urllib.request.urlopen(sys.argv[1], timeout=5) as resp:
+                      sys.exit(0 if 200 <= resp.status < 300 else 1)
+              except Exception:
+                  sys.exit(1)
+              PY
+                then
+                  ready=true
+                  break
+                fi
+                sleep 5
+              done
+              if [[ "$ready" != "true" ]]; then
+                echo "ERROR: Timed out waiting for vLLM-Omni Cosmos 3 server readiness" >&2
+                exit 1
+              fi
+              mkdir -p "{{output}}/synthetic-clips"
+              python3 "{{input:1}}/cosmos3_closed_loop.py" build-jobs \
+                --odd-output "{{input:2}}/odd-before" \
+                --out /tmp/cosmos3_jobs.json \
+                --max-clips "{{ max_clips }}" \
+                --mode "{{ generation_mode }}" \
+                --video-dir "{{input:0}}"
+              python3 "{{input:1}}/cosmos3_closed_loop.py" synthesize \
+                --jobs /tmp/cosmos3_jobs.json \
+                --endpoint-url http://127.0.0.1:8000 \
+                --out-dir "{{output}}/synthetic-clips" \
+                --size "{{ video_size }}" \
+                --num-frames "{{ num_frames }}" \
+                --fps "{{ fps }}" \
+                --steps "{{ steps }}" \
+                --mode "{{ generation_mode }}"
+          environment:
+            NVIDIA_DRIVER_CAPABILITIES: "all"
+            HF_HOME: /dev/shm/hf_cache
+            VLLM_OMNI_USE_QUACK_FP8: "0"
+{% if use_huggingface_credential == "true" %}
+          credentials:
+            huggingface:
+              HF_TOKEN: hf_token
+{% endif %}
+          inputs:
+            - dataset:
+                name: "{{ input_dataset }}"
+            - dataset:
+                name: "{{ scripts_dataset }}"
+            - task: odd-analysis-before
+          outputs:
+            - dataset:
+                name: "{{ synthetic_dataset }}"
+                path: synthetic-clips
+
+    - name: stage4-closed-loop-verify
+      tasks:
+        - name: vlm-server-after
+          resource: a10_stage
+          image: "{{ vlm_image }}"
+          command: ["bash", "-euo", "pipefail", "-c"]
+          args:
+            - |
+              extra_args=()
+              if [[ -n "{{ vlm_extra_args }}" ]]; then
+                read -r -a extra_args <<< "{{ vlm_extra_args }}"
+              fi
+              exec vllm serve "{{ vlm_model }}" \
+                --revision "{{ vlm_revision }}" \
+                --host 0.0.0.0 \
+                --port 8010 \
+                --max-model-len "{{ vlm_max_model_len }}" \
+                ${extra_args[@]+"${extra_args[@]}"}
+          environment:
+            NVIDIA_DRIVER_CAPABILITIES: "all"
+            HF_HOME: /tmp/hf_cache
+{% if use_huggingface_credential == "true" %}
+          credentials:
+            huggingface:
+              HF_TOKEN: hf_token
+{% endif %}
+          inputs:
+            - task: cosmos3-synthesize
+
+        - name: odd-analysis-after
+          lead: true
+          resource: cpu_stage
+          image: "{{ odd_image }}"
+          command: ["bash", "-euo", "pipefail", "-c"]
+          args:
+            - |
+              mkdir -p /tmp/augmented "{{output}}/odd-after" "{{output}}/report"
+              stage_videos() {
+                local src="$1" count=0 clip=""
+                while IFS= read -r -d '' clip; do
+                  cp -- "$clip" /tmp/augmented/
+                  count=$((count + 1))
+                done < <(find "$src" -maxdepth 1 -type f \
+                  \( -iname '*.mp4' -o -iname '*.mov' -o -iname '*.avi' -o -iname '*.mkv' -o -iname '*.webm' \) \
+                  -print0)
+                if [[ "$count" -eq 0 ]]; then
+                  echo "ERROR: No supported video clips found in $src" >&2
+                  exit 1
+                fi
+              }
+              stage_videos "{{input:0}}"
+              stage_videos "{{input:3}}/synthetic-clips"
+              ready=false
+              for _ in $(seq 1 120); do
+                if python3 - "http://{{host:vlm-server-after}}:8010/v1/models" <<'PY'
+              import sys
+              import urllib.request
+
+              try:
+                  with urllib.request.urlopen(sys.argv[1], timeout=5) as resp:
+                      sys.exit(0 if 200 <= resp.status < 300 else 1)
+              except Exception:
+                  sys.exit(1)
+              PY
+                then
+                  ready=true
+                  break
+                fi
+                sleep 5
+              done
+              if [[ "$ready" != "true" ]]; then
+                echo "ERROR: Timed out waiting for vlm-server-after readiness" >&2
+                exit 1
+              fi
+              python3 /app/run_odd_pipeline.py \
+                --input-dir /tmp/augmented \
+                --output-dir "{{output}}/odd-after" \
+                --vlm-url "http://{{host:vlm-server-after}}:8010/v1" \
+                --vlm-model "{{ vlm_model }}" \
+                --vlm-input "{{ vlm_input }}" \
+                --threshold "{{ odd_threshold }}"
+              python3 "{{input:1}}/cosmos3_closed_loop.py" compare-odd \
+                --before-dir "{{input:2}}/odd-before" \
+                --after-dir "{{output}}/odd-after" \
+                --synthesis-manifest "{{input:3}}/synthetic-clips/synthesis_manifest.json" \
+                --out-dir "{{output}}/report"
+          inputs:
+            - dataset:
+                name: "{{ input_dataset }}"
+            - dataset:
+                name: "{{ scripts_dataset }}"
+            - task: odd-analysis-before
+            - task: cosmos3-synthesize
+          outputs:
+            - dataset:
+                name: "{{ report_dataset }}"
+                path: report
+
+default-values:
+  workflow_name: avops-closed-loop-cosmos3
+  # Matches infrastructure/setup/values/osmo-platforms.yaml; override for dedicated A10/H100 pools.
+  cpu_platform: default
+  a10_platform: gpu_platform
+  h100_platform: gpu_platform
+  odd_image: odd-component:latest # pinning-ignore: locally built from AVOPS/ODD/Dockerfile
+  vlm_image: vllm/vllm-omni:cosmos3@sha256:86fb713bf73e118e537a55fa013dcdbdf2468ed61b98f4f2e7934a9482181dc1
+  cosmos3_image: vllm/vllm-omni:cosmos3@sha256:86fb713bf73e118e537a55fa013dcdbdf2468ed61b98f4f2e7934a9482181dc1
+  vlm_model: nvidia/Cosmos-Reason2-2B
+  vlm_revision: 9ce19a195e423419c349abfc86fd07178b230561
+  vlm_max_model_len: "8192"
+  vlm_extra_args: ""
+  vlm_input: video
+  odd_threshold: "0.8"
+  cosmos3_model: nvidia/Cosmos3-Nano-FP8
+  cosmos3_revision: 9d45b0910219989a76c56aae82a08007bc1b597e
+  max_clips: "6"
+  video_size: 854x480
+  num_frames: "97"
+  fps: "24"
+  steps: "35"
+  generation_mode: auto
+  use_huggingface_credential: "true"
+  input_dataset: avops-driving-clips:latest
+  scripts_dataset: avops-scripts:latest
+  stage1_dataset: avops-stage1-manifest
+  odd_before_dataset: avops-odd-before
+  synthetic_dataset: avops-cosmos3-synthetic
+  report_dataset: avops-closed-loop-report

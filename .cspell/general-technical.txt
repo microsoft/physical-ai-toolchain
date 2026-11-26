@@ -1668,6 +1668,7 @@ incluster
 instancetype
 instancetypes
 jtzh
+jumpbox
 libdav
 libgl
 libglib
@@ -1681,6 +1682,7 @@ nvidiadrivers
 oldsha
 omniverse
 opset
+osdisk
 osmorobo
 peermem
 pentry
@@ -1708,6 +1710,7 @@ testuser
 ueks
 unnormalization
 updt
+vtpm
 zstd
 acrdev
 eeuo
@@ -1723,16 +1726,22 @@ torchcodec
 
 # AVOPS: CARLA, Cosmos, ffmpeg, and ODD gap analysis terms
 acceleratingdecelerating
+avdg
 AVOPS
 BYOM
 carlasim
 clipgt
 coeffs
+cosmos3
+dashcam
 egomotion
 extrinsics
 ffprobe
 frombuffer
 ftheta
+guardrails
+hdrs
+i2v
 imaginaire
 imencode
 inclinedecline
@@ -1745,16 +1754,19 @@ NOENTRY
 nofile
 noprint
 nosound
+nostdin
 nounits
 PAIDF
 pixeldistance
 polyfit
 pythonapi
+quack
 RDSHQ
 SOLIDSOLID
 srunner
 straightish
 stype
+t2v
 tele
 timebase
 trackline
@@ -1763,6 +1775,8 @@ underrep
 underrepresentation
 vcodec
 vframes
+vllm
+wfm
 xstack
 
 # Matplotlib / plotting API terms
