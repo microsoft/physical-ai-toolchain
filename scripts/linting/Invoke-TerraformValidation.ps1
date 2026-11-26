@@ -70,7 +70,7 @@ function Invoke-TerraformValidationCore {
     }
     $versionString = if ($versionExit -eq 0) { $terraformVersion['terraform_version'] } else { 'unknown' }
 
-    $deployDirs = @('.', 'vpn', 'dns', 'automation')
+    $deployDirs = @('.', 'vpn', 'dns', 'automation', 'bastion')
 
     # Determine which directories to validate
     $dirsToValidate = if ($ChangedFilesOnly) {
@@ -82,7 +82,7 @@ function Invoke-TerraformValidationCore {
         else {
             $changedFiles | ForEach-Object {
                 $relPath = $_ -replace '^infrastructure/terraform/', ''
-                if ($relPath -match '^(vpn|dns|automation)/') {
+                if ($relPath -match '^(vpn|dns|automation|bastion)/') {
                     $Matches[1]
                 }
                 else {

@@ -19,6 +19,7 @@ Microsoft.App
 Microsoft.Authorization
 Microsoft.Automation
 Microsoft.Cache
+Microsoft.Compute
 Microsoft.ContainerRegistry
 Microsoft.ContainerService
 Microsoft.DBforPostgreSQL

@@ -1,0 +1,18 @@
+#cloud-config
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+#
+# Deterministic cloud-init for the private Linux jumpbox VM (${resource_prefix}-${environment}-${instance}).
+# Installs only standard Ubuntu APT utilities without unverified remote shell scripts.
+
+package_update: true
+package_upgrade: false
+
+packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - git
+  - gnupg
+  - jq
+  - python3
